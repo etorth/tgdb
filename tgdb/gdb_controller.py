@@ -68,6 +68,7 @@ class MIParser:
                      "results": {}, "raw": line}
         if not line or line == "(gdb)":
             out["type"] = "prompt"
+            out["results"]["text"] = "(gdb)"
             return out
 
         i = 0
@@ -89,8 +90,12 @@ class MIParser:
             out["type"] = "console"
             out["results"]["text"] = MIParser._unescape(line[i:])
             return out
-        elif ch in "@&":
-            out["type"] = "stream"
+        elif ch == "@":
+            out["type"] = "target"
+            out["results"]["text"] = MIParser._unescape(line[i:])
+            return out
+        elif ch == "&":
+            out["type"] = "log"
             out["results"]["text"] = MIParser._unescape(line[i:])
             return out
         else:
@@ -221,6 +226,7 @@ class GDBController:
 
     Callbacks (set as attributes, all optional):
         on_console(text: str)              — GDB console output (stream ~)
+        on_prompt(text: str)               — GDB prompt
         on_target(text: str)               — debuggee stdout (@)
         on_log(text: str)                  — GDB log (&)
         on_stopped(frame: Frame)           — execution stopped
@@ -247,6 +253,8 @@ class GDBController:
         self.current_frame: Optional[Frame] = None
         # Callbacks
         self.on_console: Callable[[str], None] = lambda t: None
+        self.on_prompt: Callable[[str], None] = lambda t: None
+        self.on_partial: Callable[[str], None] = lambda t: None
         self.on_target: Callable[[str], None] = lambda t: None
         self.on_log: Callable[[str], None] = lambda t: None
         self.on_stopped: Callable[[Frame], None] = lambda f: None
@@ -325,6 +333,10 @@ class GDBController:
             line, self._buf = self._buf.split("\n", 1)
             line = line.rstrip("\r")
             self._dispatch(line)
+        # Forward whatever's left as the current partial line (readline echo
+        # from user typing comes back as raw PTY bytes without a terminating \n).
+        if self._buf:
+            self.on_partial(self._buf)
 
     def _dispatch(self, line: str) -> None:
         """Parse and dispatch one MI line."""
@@ -335,13 +347,17 @@ class GDBController:
 
         if t == "console":
             self.on_console(rec["results"].get("text", ""))
-        elif t == "stream":
+        elif t == "prompt":
+            self.on_prompt(rec["results"].get("text", "(gdb)"))
+        elif t == "target":
+            self.on_target(rec["results"].get("text", ""))
+        elif t == "log":
             self.on_log(rec["results"].get("text", ""))
         elif t == "^":
             self._handle_result(rec)
         elif t in ("*", "="):
             self._handle_async(rec)
-        # 'prompt' and unknown ignored
+        # unknown ignored
 
     def _handle_result(self, rec: dict) -> None:
         cls = rec.get("class_", "")
@@ -357,6 +373,9 @@ class GDBController:
             bkpt = results.get("bkpt")
             if bkpt:
                 self._update_breakpoint_from_mi(bkpt)
+            # Handle -break-list
+            if "BreakpointTable" in results:
+                self.handle_breaklist_result(results)
             # Handle -file-list-exec-source-files
             files = results.get("files")
             if files:
