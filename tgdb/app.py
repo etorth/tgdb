@@ -48,17 +48,24 @@ class VSeparator(Widget):
 
     DEFAULT_CSS = """
     VSeparator {
-        background: $panel;
+        background: $primary-darken-2;
     }
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(**kwargs)
+        self.hl = hl
         self._dragging = False
 
     def render(self) -> Text:
         h = self.size.height
-        return Text("│\n" * h, no_wrap=True, overflow="crop")
+        st = self.hl.style("StatusLine")
+        t = Text(no_wrap=True, overflow="crop")
+        for i in range(h):
+            t.append("│", style=st)
+            if i < h - 1:
+                t.append("\n")
+        return t
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:
@@ -165,7 +172,7 @@ class TGDBApp(App):
             with Widget(id="src-col"):
                 yield SourceView(self.hl, id="src-pane")
                 yield StatusBar(self.hl, id="status")
-            yield VSeparator(id="vsep")
+            yield VSeparator(self.hl, id="vsep")
             yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
                             id="gdb-pane")
         yield FileDialog(self.hl, id="file-dlg")
