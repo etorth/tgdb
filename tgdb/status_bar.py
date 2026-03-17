@@ -1,6 +1,7 @@
 """
 Status bar widget — single row showing mode, filename, line number.
 Also handles ':' command input and search prompts.
+Mouse press+drag resizes the src/gdb panes.
 """
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ from .highlight_groups import HighlightGroups
 
 
 class StatusBar(Widget):
-    """One-row status bar. Renders a single Rich Text line."""
+    """One-row status bar between source and GDB panes.
+    Drag vertically to resize the split."""
 
     DEFAULT_CSS = """
     StatusBar {
@@ -37,6 +39,8 @@ class StatusBar(Widget):
         self._search_buf: str = ""
         self._search_forward: bool = True
         self.can_focus = True
+        # Resize drag state
+        self._dragging: bool = False
 
     # ------------------------------------------------------------------
     # State setters (called by app)
@@ -148,6 +152,28 @@ class StatusBar(Widget):
         event.stop()
 
 
+    # ------------------------------------------------------------------
+    # Mouse drag — resize src/gdb panes by dragging the status bar
+    # ------------------------------------------------------------------
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 1:          # left button only
+            self._dragging = True
+            self.capture_mouse()
+            event.stop()
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if self._dragging:
+            self.post_message(DragResize(int(event.screen_y)))
+            event.stop()
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if self._dragging and event.button == 1:
+            self._dragging = False
+            self.release_mouse()
+            event.stop()
+
+
 class CommandSubmit(Message):
     def __init__(self, command: str) -> None:
         super().__init__()
@@ -155,3 +181,9 @@ class CommandSubmit(Message):
 
 class CommandCancel(Message):
     pass
+
+class DragResize(Message):
+    """Posted while the user drags the status bar; screen_y is the target row."""
+    def __init__(self, screen_y: int) -> None:
+        super().__init__()
+        self.screen_y = screen_y
