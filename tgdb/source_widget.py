@@ -584,7 +584,7 @@ class SourceView(Widget):
         elif char == "m":                   self.post_message(AwaitMarkSet())
         elif key == "ctrl+l":               self.refresh()
         elif key == "minus":                self.post_message(ResizeSource(-1, rows=True))
-        elif key in ("equal",):             self.post_message(ResizeSource(1,  rows=True))
+        elif key in ("equal",) or char == "=": self.post_message(ResizeSource(1,  rows=True))
         elif key == "underscore":           self.post_message(ResizeSource(-1, jump=True))
         elif key == "plus":                 self.post_message(ResizeSource(1,  jump=True))
         elif key == "ctrl+w":               self.post_message(ToggleOrientation())
