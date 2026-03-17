@@ -177,6 +177,13 @@ class TGDBApp(App):
             self._update_status_file_info()
         except NoMatches:
             pass
+        # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — hide GDB cursor when not focused
+        try:
+            gdb_w = self.query_one("#gdb-pane", GDBWidget)
+            gdb_w.gdb_focused = (mode in ("GDB", "SCROLL"))
+            gdb_w.refresh()
+        except NoMatches:
+            pass
 
     def _switch_to_cgdb(self) -> None:
         self._set_mode("CGDB")
