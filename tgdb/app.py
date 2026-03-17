@@ -579,9 +579,8 @@ class TGDBApp(App):
         is_vertical = (self.cfg.winsplitorientation == "vertical")
         # cgdb WSO_VERTICAL: panes side-by-side; WSO_HORIZONTAL: panes top/bottom
         try:
-            screen = self.query_one("Screen")
-            screen.styles.layout = "horizontal" if is_vertical else "vertical"
-        except NoMatches:
+            self.screen.styles.layout = "horizontal" if is_vertical else "vertical"
+        except Exception:
             pass
         try:
             src = self.query_one("#src-pane")
