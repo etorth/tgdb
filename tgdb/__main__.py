@@ -72,7 +72,7 @@ Examples:
         gdb_args=gdb_args,
         rc_file=args.rcfile,
     )
-    app.run(mouse=False)
+    app.run(mouse=True)
 
 
 if __name__ == "__main__":

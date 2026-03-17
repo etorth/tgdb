@@ -38,7 +38,7 @@ from .gdb_widget import (
     GDBWidget, ScrollModeChange,
     ScrollSearchStart, ScrollSearchUpdate, ScrollSearchCommit, ScrollSearchCancel,
 )
-from .status_bar import StatusBar, CommandSubmit, CommandCancel
+from .status_bar import StatusBar, CommandSubmit, CommandCancel, DragResize
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 
 
@@ -543,6 +543,22 @@ class TGDBApp(App):
         h = max(4, self.size.height - 1)
         src_h = max(self.cfg.winminheight + 1, int(h * ratio))
         gdb_h = max(self.cfg.winminheight + 1, h - src_h)
+        try:
+            self.query_one("#src-pane").styles.height = src_h
+            self.query_one("#gdb-pane").styles.height = gdb_h
+        except NoMatches:
+            pass
+
+    def on_drag_resize(self, msg: DragResize) -> None:
+        """Mouse drag on status bar — resize panes to screen_y position."""
+        total = self.size.height          # includes the 1-row status bar
+        avail = max(4, total - 1)         # rows available for src+gdb
+        # screen_y is the row the separator is being dragged to;
+        # src takes rows 0..screen_y-1, gdb takes the rest.
+        min_h = self.cfg.winminheight + 1
+        src_h = max(min_h, min(avail - min_h, msg.screen_y))
+        gdb_h = avail - src_h
+        self._split_ratio = src_h / avail
         try:
             self.query_one("#src-pane").styles.height = src_h
             self.query_one("#gdb-pane").styles.height = gdb_h
