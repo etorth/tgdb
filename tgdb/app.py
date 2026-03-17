@@ -98,6 +98,7 @@ class TGDBApp(App):
         self._await_mark_jump: bool = False
         self._await_mark_set: bool = False
         self._split_ratio: float = 0.5
+        self._file_dialog_pending: bool = False
 
     # ------------------------------------------------------------------
     # Compose
@@ -272,14 +273,11 @@ class TGDBApp(App):
                                     temporary=msg.temporary)
 
     def on_open_file_dialog(self, msg: OpenFileDialog) -> None:
-        if not self.gdb.source_files:
-            self._show_status("No source files available yet")
-            self.gdb.request_source_files()
-            return
-        fd = self.query_one("#file-dlg", FileDialog)
-        fd.files = self.gdb.source_files
-        fd.open()
-        self._set_mode("FILEDLG")
+        # Mirror cgdb interface.cpp: always request fresh source files,
+        # then open the dialog when the MI response arrives (_ui_set_source_files).
+        # cgdb never shows an error here — it just fires the request and waits.
+        self._file_dialog_pending = True
+        self.gdb.request_source_files()
 
     def on_await_mark_jump(self, msg: AwaitMarkJump) -> None:
         self._await_mark_jump = True
@@ -416,7 +414,17 @@ class TGDBApp(App):
 
     def _ui_set_source_files(self, files: list[str]) -> None:
         try:
-            self.query_one("#file-dlg", FileDialog).files = files
+            fd = self.query_one("#file-dlg", FileDialog)
+            fd.files = files
+            # Mirror cgdb update_source_files(): if 'o' was pressed, open
+            # the dialog now that the file list has arrived from GDB.
+            if self._file_dialog_pending:
+                self._file_dialog_pending = False
+                if files:
+                    fd.open()
+                    self._set_mode("FILEDLG")
+                else:
+                    self._show_status("No sources available! Was the program compiled with debug?")
         except NoMatches:
             pass
 
