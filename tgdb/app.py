@@ -60,12 +60,7 @@ class VSeparator(Widget):
     def render(self) -> Text:
         h = self.size.height
         st = self.hl.style("StatusLine")
-        t = Text(no_wrap=True, overflow="crop")
-        for i in range(h):
-            t.append("│", style=st)
-            if i < h - 1:
-                t.append("\n")
-        return t
+        return Text(" \n" * h, style=st, no_wrap=True, overflow="crop")
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:
