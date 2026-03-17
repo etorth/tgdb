@@ -314,14 +314,45 @@ class TGDBApp(App):
     def on_status_message(self, msg: StatusMessage) -> None:
         self._show_status(msg.text)
 
+    # Quarter-mark split ratios, in increasing src size order.
+    # Mirrors cgdb: WIN_SPLIT_GDB_FULL(-2)…WIN_SPLIT_SRC_FULL(2)
+    _QUARTER_MARKS = [0.1, 0.25, 0.5, 0.75, 0.9]
+
     def on_resize_source(self, msg: ResizeSource) -> None:
-        if msg.percent:
+        avail = max(4, self.size.height - 1)   # rows available for src+gdb
+        min_h = self.cfg.winminheight + 1
+
+        if msg.rows:
+            # cgdb '=' / '-': change src height by exactly 1 row
+            try:
+                cur_src_h = self.query_one("#src-pane").size.height
+            except NoMatches:
+                return
+            new_src_h = max(min_h, min(avail - min_h, cur_src_h + msg.delta))
+            self._split_ratio = new_src_h / avail
+            self.cfg.winsplit = "free"   # like cgdb WIN_SPLIT_FREE
+            self._apply_split()
+
+        elif msg.jump:
+            # cgdb '+' / '_': snap to next/previous quarter mark
+            # (increase_win_height(1) / decrease_win_height(1))
+            marks = self._QUARTER_MARKS
+            cur   = self._split_ratio
+            if msg.delta > 0:
+                # find first mark strictly above current ratio
+                nxt = next((m for m in marks if m > cur + 0.01), marks[-1])
+            else:
+                # find last mark strictly below current ratio
+                nxt = next((m for m in reversed(marks) if m < cur - 0.01), marks[0])
+            self._split_ratio = nxt
+            self.cfg.winsplit = "free"   # like cgdb WIN_SPLIT_FREE
+            self._apply_split()
+
+        else:
+            # legacy percent mode
             self._split_ratio = max(0.1, min(0.9,
                 self._split_ratio + msg.delta / 100))
-        else:
-            self._split_ratio = max(0.1, min(0.9,
-                self._split_ratio + msg.delta * 0.05))
-        self._apply_split()
+            self._apply_split()
 
     def on_toggle_orientation(self, _: ToggleOrientation) -> None:
         self.cfg.winsplitorientation = (
