@@ -261,6 +261,7 @@ class GDBController:
         self.on_running: Callable[[], None] = lambda: None
         self.on_breakpoints: Callable[[list[Breakpoint]], None] = lambda b: None
         self.on_source_files: Callable[[list[str]], None] = lambda f: None
+        self.on_source_file: Callable[[str], None] = lambda f: None
         self.on_exit: Callable[[], None] = lambda: None
         self.on_error: Callable[[str], None] = lambda m: None
 
@@ -376,7 +377,11 @@ class GDBController:
             # Handle -break-list
             if "BreakpointTable" in results:
                 self.handle_breaklist_result(results)
-            # Handle -file-list-exec-source-files
+            # Handle -file-list-exec-source-file (singular)
+            fullname = results.get("fullname")
+            if fullname and isinstance(fullname, str):
+                self.on_source_file(fullname)
+            # Handle -file-list-exec-source-files (plural)
             files = results.get("files")
             if files:
                 self._handle_source_files(files)
@@ -442,6 +447,10 @@ class GDBController:
 
     def request_source_files(self) -> None:
         self.mi_command("-file-list-exec-source-files")
+
+    def request_source_file(self) -> None:
+        """Query the current source file (used at startup to pre-load it)."""
+        self.mi_command("-file-list-exec-source-file")
 
     def set_breakpoint(self, location: str, temporary: bool = False) -> None:
         flag = "-t " if temporary else ""

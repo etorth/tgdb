@@ -362,20 +362,36 @@ class SourceView(Widget):
                 result.append("\n")
         return result
 
-    def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
-        """Build one visible line as Rich Text."""
-        if sf is None:
-            # Show logo
-            logo_lines = _LOGO_LINES
-            if line_idx >= len(logo_lines):
-                return Text("")
-            line_no = line_idx + 1
-            is_sel = (line_no == self.sel_line)
-            style = self.hl.style("Logo") if not is_sel else self.hl.style("SelectedLineHighlight")
-            return Text(logo_lines[line_idx], style=style, no_wrap=True, overflow="crop")
+    # Width of the line-number field (minimum 2, grows with file size)
+    def _nr_width(self) -> int:
+        n = len(self.source_file.lines) if self.source_file else 0
+        return max(2, len(str(max(n, 1))))
 
+    def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
+        """Build one visible line as Rich Text, matching cgdb's layout."""
+        nr_w = self._nr_width()
+
+        if sf is None:
+            # Logo / no-file screen
+            logo_lines = _LOGO_LINES
+            if line_idx < len(logo_lines):
+                is_sel = (line_idx + 1 == self.sel_line)
+                style  = (self.hl.style("SelectedLineHighlight") if is_sel
+                          else self.hl.style("Logo"))
+                return Text(logo_lines[line_idx], style=style,
+                            no_wrap=True, overflow="crop")
+            # Filler: " ~│"
+            filler = Text(no_wrap=True, overflow="crop")
+            filler.append(" " * nr_w, style=self.hl.style("LineNumber"))
+            filler.append(" ~│", style=self.hl.style("LineNumber"))
+            return filler
+
+        # Beyond end of file → vim-style " ~│"
         if line_idx >= len(sf.lines):
-            return Text("")
+            filler = Text(no_wrap=True, overflow="crop")
+            filler.append(" " * nr_w, style=self.hl.style("LineNumber"))
+            filler.append(" ~│", style=self.hl.style("LineNumber"))
+            return filler
 
         line_no   = line_idx + 1
         is_exe    = (line_no == self.exe_line)
@@ -389,7 +405,7 @@ class SourceView(Widget):
         elif is_sel: nr_style = self.hl.style("SelectedLineNr")
         else:        nr_style = self.hl.style("LineNumber")
 
-        # ── Breakpoint / mark gutter ──
+        # ── Breakpoint / mark gutter (1 char) ──
         if bp_flag == BP_ENABLED:
             gutter_ch = "B"; gutter_st = self.hl.style("Breakpoint")
         elif bp_flag == BP_DISABLED:
@@ -405,23 +421,23 @@ class SourceView(Widget):
                         if mp == sf.path and ml == line_no:
                             gutter_ch = mk; gutter_st = self.hl.style("Mark"); break
 
-        # ── Arrow ──
-        if is_exe:
-            arrow = ">" if exe_disp in ("shortarrow", "longarrow") else " "
-            arrow_st = self.hl.style("ExecutingLineArrow")
-        elif is_sel:
-            arrow = ">" if sel_disp in ("shortarrow", "longarrow") else " "
-            arrow_st = self.hl.style("SelectedLineArrow")
+        # ── Arrow (used by longarrow/shortarrow display modes) ──
+        if is_exe and exe_disp in ("shortarrow", "longarrow"):
+            arrow = ">"; arrow_st = self.hl.style("ExecutingLineArrow")
+        elif is_sel and sel_disp in ("shortarrow", "longarrow"):
+            arrow = ">"; arrow_st = self.hl.style("SelectedLineArrow")
         else:
             arrow = " "; arrow_st = ""
 
         out = Text(no_wrap=True, overflow="crop")
-        out.append(f"{line_no:4d}", style=nr_style)
+        # Right-aligned line number
+        out.append(f"{line_no:{nr_w}d}", style=nr_style)
         out.append(gutter_ch, style=gutter_st)
         out.append(arrow, style=arrow_st)
-        out.append("|")
+        # Unicode box-drawing separator (matches cgdb's │)
+        out.append("│")
 
-        # Long arrow fill
+        # Long arrow continuation
         if is_exe and exe_disp == "longarrow":
             out.append("-->", style=arrow_st)
         elif is_sel and sel_disp == "longarrow":
@@ -467,6 +483,7 @@ class SourceView(Widget):
 
         out.append_text(src_t)
         return out
+
 
     def on_resize(self, event: events.Resize) -> None:
         self._ensure_visible(self.sel_line)

@@ -150,6 +150,7 @@ class TGDBApp(App):
         self.gdb.on_running      = lambda:   self.call_later(self._ui_on_running)
         self.gdb.on_breakpoints  = lambda b: self.call_later(self._ui_set_breakpoints, b)
         self.gdb.on_source_files = lambda f: self.call_later(self._ui_set_source_files, f)
+        self.gdb.on_source_file  = lambda f: self.call_later(self._ui_load_source_file, f)
         self.gdb.on_exit         = lambda:   self.call_later(self._ui_gdb_exit)
         self.gdb.on_error        = lambda m: self.call_later(self._show_status, f"Error: {m}")
 
@@ -162,6 +163,10 @@ class TGDBApp(App):
 
         # Start async read loop
         self._gdb_task = asyncio.create_task(self.gdb.run_async())
+        # Ask GDB for the initial source file so the source pane shows it
+        # straight away (mirrors cgdb's behaviour).
+        self._gdb_task.add_done_callback(lambda _: None)
+        asyncio.ensure_future(self._request_initial_source())
 
         # Initial mode: GDB focused
         self._set_mode("GDB")
@@ -434,6 +439,24 @@ class TGDBApp(App):
             self.query_one("#file-dlg", FileDialog).files = files
         except NoMatches:
             pass
+
+    def _ui_load_source_file(self, path: str) -> None:
+        """Load a specific source file (from -file-list-exec-source-file)."""
+        if not os.path.isfile(path):
+            return
+        try:
+            src = self.query_one("#src-pane", SourceView)
+            # Only load if no file is shown yet (don't override a user selection)
+            if not src.source_file:
+                src.load_file(path)
+                self._update_status_file_info()
+        except NoMatches:
+            pass
+
+    async def _request_initial_source(self) -> None:
+        """Wait for GDB's first prompt then query the initial source file."""
+        await asyncio.sleep(0.5)
+        self.gdb.request_source_file()
 
     def _ui_gdb_exit(self) -> None:
         self._show_status("GDB exited — :quit to close tgdb")
