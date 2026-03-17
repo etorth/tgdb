@@ -74,7 +74,6 @@ class TGDBApp(App):
         min-height: 2;
     }
     #status {
-        layer: base;
         height: 1;
         width: 1fr;
     }
