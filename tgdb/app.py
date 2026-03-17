@@ -43,10 +43,39 @@ from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 
 
 class VSeparator(Widget):
-    """1-char wide vertical separator (cgdb vseparator_win, swin_wvline SWIN_SYM_VLINE)."""
+    """1-char wide vertical separator (cgdb vseparator_win, swin_wvline SWIN_SYM_VLINE).
+    Drag it horizontally to resize the left/right panes in vertical split mode."""
+
+    DEFAULT_CSS = """
+    VSeparator {
+        background: $panel;
+    }
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._dragging = False
+
     def render(self) -> Text:
         h = self.size.height
         return Text("│\n" * h, no_wrap=True, overflow="crop")
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 1:
+            self._dragging = True
+            self.capture_mouse()
+            event.stop()
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if self._dragging:
+            self.post_message(DragResize(screen_x=int(event.screen_x)))
+            event.stop()
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if self._dragging and event.button == 1:
+            self._dragging = False
+            self.release_mouse()
+            event.stop()
 
 
 class TGDBApp(App):
@@ -632,6 +661,7 @@ class TGDBApp(App):
                 status.styles.width = "1fr"
                 gdb.styles.width  = gdb_w
                 gdb.styles.height = "1fr"
+                status.drag_enabled = False  # vertical split: drag vsep instead
             else:
                 # cgdb WSO_HORIZONTAL: src on top, status bar below src, gdb below status
                 vsep.remove_class("visible")
@@ -646,18 +676,21 @@ class TGDBApp(App):
                 status.styles.width = "1fr"
                 gdb.styles.width  = "1fr"
                 gdb.styles.height = gdb_h
+                status.drag_enabled = True   # horizontal split: drag status bar to resize
         except NoMatches:
             pass
 
     def on_drag_resize(self, msg: DragResize) -> None:
-        """Mouse drag on status bar — resize panes."""
+        """Mouse drag on status bar (horizontal) or vsep (vertical) — resize panes."""
         is_vertical = (self.cfg.winsplitorientation == "vertical")
         min_h = self.cfg.winminheight + 1
         if is_vertical:
-            total = self.size.width
-            avail = max(4, total)
-            src_sz = max(min_h, min(avail - min_h, msg.screen_x if hasattr(msg, 'screen_x') else msg.screen_y))
+            # Drag vsep: screen_x is the column the separator is at
+            # src-col takes columns 0..screen_x-1
+            avail = max(4, self.size.width - 1)  # minus 1 for vsep
+            src_sz = max(min_h, min(avail - min_h, msg.screen_x))
         else:
+            # Drag status bar: screen_y is the row the status bar is at
             avail = max(4, self.size.height - 1)
             src_sz = max(min_h, min(avail - min_h, msg.screen_y))
         self._split_ratio = src_sz / avail
