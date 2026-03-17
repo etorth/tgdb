@@ -319,18 +319,23 @@ class TGDBApp(App):
     _QUARTER_MARKS = [0.1, 0.25, 0.5, 0.75, 0.9]
 
     def on_resize_source(self, msg: ResizeSource) -> None:
-        avail = max(4, self.size.height - 1)   # rows available for src+gdb
+        is_vertical = (self.cfg.winsplitorientation == "vertical")
+        if is_vertical:
+            avail = max(4, self.size.width)
+        else:
+            avail = max(4, self.size.height - 1)
         min_h = self.cfg.winminheight + 1
 
         if msg.rows:
-            # cgdb '=' / '-': change src height by exactly 1 row
+            # cgdb '=' / '-': change src size by exactly 1 unit
             try:
-                cur_src_h = self.query_one("#src-pane").size.height
+                src = self.query_one("#src-pane")
+                cur_sz = src.size.width if is_vertical else src.size.height
             except NoMatches:
                 return
-            new_src_h = max(min_h, min(avail - min_h, cur_src_h + msg.delta))
-            self._split_ratio = new_src_h / avail
-            self.cfg.winsplit = "free"   # like cgdb WIN_SPLIT_FREE
+            new_sz = max(min_h, min(avail - min_h, cur_sz + msg.delta))
+            self._split_ratio = new_sz / avail
+            self.cfg.winsplit = "free"
             self._apply_split()
 
         elif msg.jump:
@@ -571,30 +576,57 @@ class TGDBApp(App):
         ratio = {"src_full": 0.9, "src_big": 0.7, "even": 0.5,
                  "gdb_big": 0.3, "gdb_full": 0.1}.get(split, self._split_ratio)
         self._split_ratio = ratio
-        h = max(4, self.size.height - 1)
-        src_h = max(self.cfg.winminheight + 1, int(h * ratio))
-        gdb_h = max(self.cfg.winminheight + 1, h - src_h)
+        is_vertical = (self.cfg.winsplitorientation == "vertical")
+        # cgdb WSO_VERTICAL: panes side-by-side; WSO_HORIZONTAL: panes top/bottom
         try:
-            self.query_one("#src-pane").styles.height = src_h
-            self.query_one("#gdb-pane").styles.height = gdb_h
+            screen = self.query_one("Screen")
+            screen.styles.layout = "horizontal" if is_vertical else "vertical"
+        except NoMatches:
+            pass
+        try:
+            src = self.query_one("#src-pane")
+            gdb = self.query_one("#gdb-pane")
+            status = self.query_one("#status")
+            min_h = self.cfg.winminheight + 1
+            if is_vertical:
+                # Side-by-side: split on width; status bar spans full width at bottom
+                total_w = max(4, self.size.width)
+                src_w = max(min_h, min(total_w - min_h, int(total_w * ratio)))
+                gdb_w = max(min_h, total_w - src_w)
+                src.styles.height    = "1fr"
+                src.styles.width     = src_w
+                gdb.styles.height    = "1fr"
+                gdb.styles.width     = gdb_w
+                status.styles.width  = "1fr"
+                status.styles.height = 1
+            else:
+                # Top/bottom: split on height; status bar is a horizontal stripe
+                total_h = max(4, self.size.height - 1)
+                src_h = max(min_h, min(total_h - min_h, int(total_h * ratio)))
+                gdb_h = max(min_h, total_h - src_h)
+                src.styles.width     = "1fr"
+                src.styles.height    = src_h
+                gdb.styles.width     = "1fr"
+                gdb.styles.height    = gdb_h
+                status.styles.width  = "1fr"
+                status.styles.height = 1
         except NoMatches:
             pass
 
     def on_drag_resize(self, msg: DragResize) -> None:
-        """Mouse drag on status bar — resize panes to screen_y position."""
-        total = self.size.height          # includes the 1-row status bar
-        avail = max(4, total - 1)         # rows available for src+gdb
-        # screen_y is the row the separator is being dragged to;
-        # src takes rows 0..screen_y-1, gdb takes the rest.
+        """Mouse drag on status bar — resize panes."""
+        is_vertical = (self.cfg.winsplitorientation == "vertical")
         min_h = self.cfg.winminheight + 1
-        src_h = max(min_h, min(avail - min_h, msg.screen_y))
-        gdb_h = avail - src_h
-        self._split_ratio = src_h / avail
-        try:
-            self.query_one("#src-pane").styles.height = src_h
-            self.query_one("#gdb-pane").styles.height = gdb_h
-        except NoMatches:
-            pass
+        if is_vertical:
+            total = self.size.width
+            avail = max(4, total)
+            src_sz = max(min_h, min(avail - min_h, msg.screen_x if hasattr(msg, 'screen_x') else msg.screen_y))
+        else:
+            avail = max(4, self.size.height - 1)
+            src_sz = max(min_h, min(avail - min_h, msg.screen_y))
+        self._split_ratio = src_sz / avail
+        self.cfg.winsplit = "free"
+        self._apply_split()
 
     def on_resize(self, event: events.Resize) -> None:
         self._apply_split()
