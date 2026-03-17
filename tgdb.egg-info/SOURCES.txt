@@ -1,6 +1,17 @@
 LICENSE
 README.md
 pyproject.toml
+tgdb/__init__.py
+tgdb/__main__.py
+tgdb/app.py
+tgdb/config.py
+tgdb/file_dialog.py
+tgdb/gdb_controller.py
+tgdb/gdb_widget.py
+tgdb/highlight_groups.py
+tgdb/key_mapper.py
+tgdb/source_widget.py
+tgdb/status_bar.py
 tgdb.egg-info/PKG-INFO
 tgdb.egg-info/SOURCES.txt
 tgdb.egg-info/dependency_links.txt
