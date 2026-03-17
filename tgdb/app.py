@@ -127,9 +127,10 @@ class TGDBApp(App):
 
         # Configure GDB widget
         gdb_w = self.query_one("#gdb-pane", GDBWidget)
-        gdb_w.ignorecase       = self.cfg.ignorecase
-        gdb_w.wrapscan         = self.cfg.wrapscan
-        gdb_w.send_to_gdb      = self.gdb.send_input
+        gdb_w.ignorecase        = self.cfg.ignorecase
+        gdb_w.wrapscan          = self.cfg.wrapscan
+        gdb_w.send_to_gdb       = self.gdb.send_input        # bytes → primary PTY
+        gdb_w.resize_gdb        = self.gdb.resize             # keep pyte in sync
         gdb_w.on_switch_to_cgdb = self._switch_to_cgdb
 
         # Configure file dialog
@@ -137,22 +138,16 @@ class TGDBApp(App):
         fd.ignorecase = self.cfg.ignorecase
         fd.wrapscan   = self.cfg.wrapscan
 
-        # GDB callbacks — all fire inside the asyncio event loop,
-        # so we use call_later (schedules on next iteration of the loop).
-        self.gdb.on_console      = lambda t: self.call_later(self._ui_append_gdb, t)
-        self.gdb.on_prompt       = lambda t: self.call_later(self._ui_append_gdb, t + " ")
-        self.gdb.on_partial      = lambda t: self.call_later(self._ui_set_gdb_partial, t)
-        self.gdb.on_log          = lambda t: (
-            self.call_later(self._ui_append_gdb, t) if self.cfg.showdebugcommands else None
-        )
-        self.gdb.on_target       = lambda t: self.call_later(self._ui_append_gdb, t)
-        self.gdb.on_stopped      = lambda f: self.call_later(self._ui_on_stopped, f)
-        self.gdb.on_running      = lambda:   self.call_later(self._ui_on_running)
-        self.gdb.on_breakpoints  = lambda b: self.call_later(self._ui_set_breakpoints, b)
-        self.gdb.on_source_files = lambda f: self.call_later(self._ui_set_source_files, f)
-        self.gdb.on_source_file  = lambda f: self.call_later(self._ui_load_source_file, f)
-        self.gdb.on_exit         = lambda:   self.call_later(self._ui_gdb_exit)
-        self.gdb.on_error        = lambda m: self.call_later(self._show_status, f"Error: {m}")
+        # GDB callbacks — on_console now delivers raw bytes from GDB's PTY,
+        # fed directly into the pyte VT100 emulator (matching cgdb's libvterm).
+        self.gdb.on_console     = lambda data: self.call_later(gdb_w.feed_bytes, data)
+        self.gdb.on_stopped     = lambda f: self.call_later(self._ui_on_stopped, f)
+        self.gdb.on_running     = lambda:   self.call_later(self._ui_on_running)
+        self.gdb.on_breakpoints = lambda b: self.call_later(self._ui_set_breakpoints, b)
+        self.gdb.on_source_files= lambda f: self.call_later(self._ui_set_source_files, f)
+        self.gdb.on_source_file = lambda f: self.call_later(self._ui_load_source_file, f)
+        self.gdb.on_exit        = lambda:   self.call_later(self._ui_gdb_exit)
+        self.gdb.on_error       = lambda m: self.call_later(self._show_status, f"Error: {m}")
 
         # Start GDB process
         try:
@@ -163,9 +158,6 @@ class TGDBApp(App):
 
         # Start async read loop
         self._gdb_task = asyncio.create_task(self.gdb.run_async())
-        # Ask GDB for the initial source file so the source pane shows it
-        # straight away (mirrors cgdb's behaviour).
-        self._gdb_task.add_done_callback(lambda _: None)
         asyncio.ensure_future(self._request_initial_source())
 
         # Initial mode: GDB focused
@@ -389,18 +381,6 @@ class TGDBApp(App):
     # GDB UI callbacks (scheduled via call_later — runs on main event loop)
     # ------------------------------------------------------------------
 
-    def _ui_append_gdb(self, text: str) -> None:
-        try:
-            self.query_one("#gdb-pane", GDBWidget).append_output(text)
-        except NoMatches:
-            pass
-
-    def _ui_set_gdb_partial(self, text: str) -> None:
-        try:
-            self.query_one("#gdb-pane", GDBWidget).set_partial(text)
-        except NoMatches:
-            pass
-
     def _ui_on_stopped(self, frame: Frame) -> None:
         """GDB stopped — update source view to executing location."""
         path = frame.fullname or frame.file
@@ -554,8 +534,7 @@ class TGDBApp(App):
 
     def on_resize(self, event: events.Resize) -> None:
         self._apply_split()
-        if self.gdb.is_alive():
-            self.gdb.resize(event.size.height, event.size.width)
+        # GDBWidget.on_resize handles pyte + PTY resize itself via resize_gdb callback
 
     # ------------------------------------------------------------------
     # Helpers
