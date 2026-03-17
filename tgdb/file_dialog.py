@@ -52,6 +52,7 @@ class FileDialog(Widget):
         self._search_buf: str      = ""
         self._search_forward: bool = True
         self._search_pattern: str  = ""
+        self._search_origin: int   = 0   # cgdb sel_rline: fixed start while typing
         self.ignorecase: bool = False
         self.wrapscan:   bool = True
         self._num_buf:   str  = ""
@@ -139,7 +140,14 @@ class FileDialog(Widget):
     # Search
     # ------------------------------------------------------------------
 
-    def _search(self, pattern: str, forward: bool) -> bool:
+    def _search(self, pattern: str, forward: bool, origin: int | None = None) -> bool:
+        """Search for *pattern* starting one step past *origin* (cgdb sel_rline).
+
+        If *origin* is None, start from the current selection (used for n/N).
+        During incremental search, *origin* is fixed at the line where / was
+        pressed so that each keystroke always finds the first match from that
+        position — matching filedlg_search_regex() behaviour exactly.
+        """
         n = len(self._files)
         if n == 0 or not pattern:
             return False
@@ -148,7 +156,7 @@ class FileDialog(Widget):
             rx = re.compile(pattern, flags)
         except re.error:
             return False
-        start = self._sel
+        start = self._sel if origin is None else origin
         order = (
             list(range(start + 1, n)) + (list(range(0, start + 1)) if self.wrapscan else [])
             if forward else
@@ -282,11 +290,13 @@ class FileDialog(Widget):
             self._search_active  = True
             self._search_forward = True
             self._search_buf     = ""
+            self._search_origin  = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
             self.refresh()
         elif key == "question_mark":
             self._search_active  = True
             self._search_forward = False
             self._search_buf     = ""
+            self._search_origin  = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
             self.refresh()
         elif char == "n":
             self._search(self._search_pattern, self._search_forward)
@@ -299,19 +309,25 @@ class FileDialog(Widget):
 
     def _handle_search_key(self, key: str, char: str) -> None:
         if key == "escape":
+            # Abort: restore selection to where search started (cgdb: sel_line = sel_rline)
+            self._sel = self._search_origin
             self._search_active = False
             self.refresh()
         elif key in ("enter", "return"):
+            # Confirm: update origin to current match (cgdb: sel_rline = sel_line, opt==2)
             self._search_active  = False
             self._search_pattern = self._search_buf
-            self._search(self._search_pattern, self._search_forward)
+            self._search(self._search_pattern, self._search_forward, origin=self._search_origin)
+            self._search_origin  = self._sel   # update for subsequent n/N
         elif key in ("backspace", "ctrl+h"):
             self._search_buf = self._search_buf[:-1]
+            # Re-search from origin so shorter pattern finds first match again
+            self._search(self._search_buf, self._search_forward, origin=self._search_origin)
             self.refresh()
         elif char and char.isprintable():
             self._search_buf += char
-            # Incremental search while typing (cgdb regex_search mode)
-            self._search(self._search_buf, self._search_forward)
+            # Incremental: always search from fixed origin (cgdb sel_rline), not current match
+            self._search(self._search_buf, self._search_forward, origin=self._search_origin)
             self.refresh()
 
 
