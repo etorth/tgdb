@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tgdb"
+version = "0.1.0"
+description = "A Python reimplementation of cgdb — a curses front-end to GDB"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=2.0",
+    "pygments>=2.18",
+    "pyte>=0.8",
+    "ptyprocess>=0.7",
+]
+
+[project.scripts]
+tgdb = "tgdb.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tgdb*"]

@@ -1,0 +1,2 @@
+[console_scripts]
+tgdb = tgdb.__main__:main
