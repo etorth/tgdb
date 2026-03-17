@@ -352,8 +352,28 @@ class SourceView(Widget):
 
     def render(self) -> Text:
         h = self._visible_height()
+        w = max(10, self.size.width or 80)
         sf = self.source_file
         result = Text(no_wrap=True, overflow="crop")
+
+        # ── Logo: centered vertically and horizontally when no file loaded ──
+        if sf is None:
+            logo  = _LOGO_LINES
+            v_pad = max(0, (h - len(logo)) // 2)  # rows above logo
+            style = self.hl.style("Logo")
+            for y in range(h):
+                if y > 0:
+                    result.append("\n")
+                logo_idx = y - v_pad
+                if 0 <= logo_idx < len(logo):
+                    line = logo[logo_idx]
+                    # horizontal center: pad left with spaces
+                    # Use visual width (logo uses wide box chars — count as 1 col each)
+                    lw = len(line)
+                    left = max(0, (w - lw) // 2)
+                    result.append(" " * left + line, style=style)
+                # else: empty row (blank padding above/below logo)
+            return result
 
         for y in range(h):
             line_idx = self._scroll_top + y   # 0-based
@@ -368,23 +388,9 @@ class SourceView(Widget):
         return max(2, len(str(max(n, 1))))
 
     def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
-        """Build one visible line as Rich Text, matching cgdb's layout."""
+        """Build one visible line as Rich Text, matching cgdb's layout.
+        Called only when sf is not None (logo is handled in render())."""
         nr_w = self._nr_width()
-
-        if sf is None:
-            # Logo / no-file screen
-            logo_lines = _LOGO_LINES
-            if line_idx < len(logo_lines):
-                is_sel = (line_idx + 1 == self.sel_line)
-                style  = (self.hl.style("SelectedLineHighlight") if is_sel
-                          else self.hl.style("Logo"))
-                return Text(logo_lines[line_idx], style=style,
-                            no_wrap=True, overflow="crop")
-            # Filler: " ~│"
-            filler = Text(no_wrap=True, overflow="crop")
-            filler.append(" " * nr_w, style=self.hl.style("LineNumber"))
-            filler.append(" ~│", style=self.hl.style("LineNumber"))
-            return filler
 
         # Beyond end of file → vim-style " ~│"
         if line_idx >= len(sf.lines):
