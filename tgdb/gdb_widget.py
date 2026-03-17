@@ -173,10 +173,18 @@ class GDBWidget(Widget):
     # ------------------------------------------------------------------
 
     def _init_pyte(self, rows: int, cols: int) -> None:
-        self._pyte_rows = rows
-        self._pyte_cols = cols
-        self._screen = _GDBScreen(cols, rows, self._scrollback)
-        self._stream = pyte.ByteStream(self._screen)
+        """Create or resize the pyte terminal, preserving existing content."""
+        if self._screen is None:
+            # First init — create fresh screen
+            self._pyte_rows = rows
+            self._pyte_cols = cols
+            self._screen = _GDBScreen(cols, rows, self._scrollback)
+            self._stream = pyte.ByteStream(self._screen)
+        else:
+            # Resize — pyte.Screen.resize() preserves buffer content
+            self._pyte_rows = rows
+            self._pyte_cols = cols
+            self._screen.resize(rows, cols)
 
     # ------------------------------------------------------------------
     # Feed raw GDB console bytes into the pyte emulator

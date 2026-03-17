@@ -42,6 +42,13 @@ from .status_bar import StatusBar, CommandSubmit, CommandCancel, DragResize
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 
 
+class VSeparator(Widget):
+    """1-char wide vertical separator (cgdb vseparator_win, swin_wvline SWIN_SYM_VLINE)."""
+    def render(self) -> Text:
+        h = self.size.height
+        return Text("│\n" * h, no_wrap=True, overflow="crop")
+
+
 class TGDBApp(App):
     """tgdb — Python front-end for GDB, compatible with cgdb."""
 
@@ -70,6 +77,15 @@ class TGDBApp(App):
         layer: base;
         height: 1;
         width: 1fr;
+    }
+    /* Vertical separator (cgdb vseparator_win) — shown in vertical split only */
+    #vsep {
+        width: 1;
+        height: 1fr;
+        display: none;
+    }
+    #vsep.visible {
+        display: block;
     }
     #gdb-pane {
         height: 1fr;
@@ -121,6 +137,7 @@ class TGDBApp(App):
             with Widget(id="src-col"):
                 yield SourceView(self.hl, id="src-pane")
                 yield StatusBar(self.hl, id="status")
+            yield VSeparator(id="vsep")
             yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
                             id="gdb-pane")
         yield FileDialog(self.hl, id="file-dlg")
@@ -597,28 +614,28 @@ class TGDBApp(App):
             src       = self.query_one("#src-pane")
             gdb       = self.query_one("#gdb-pane")
             status    = self.query_one("#status")
+            vsep      = self.query_one("#vsep")
             min_h     = self.cfg.winminheight + 1
             if is_vertical:
                 # cgdb WSO_VERTICAL: src+status on left, │ separator, gdb on right
-                # src height = screen_rows - 1 (status takes last row of src col)
-                # gdb height = screen_rows (full height, no status bar)
+                # Separator is 1 col wide, full height
+                vsep.add_class("visible")
                 container.styles.layout = "horizontal"
-                total_w = max(4, self.size.width)
-                src_w   = max(min_h, min(total_w - min_h, int(total_w * ratio)))
-                gdb_w   = max(min_h, total_w - src_w)
-                # src-col: fixed width, full height (status bar inside it)
+                total_w = max(6, self.size.width)
+                # Reserve 1 col for separator
+                avail_w = total_w - 1
+                src_w   = max(min_h, min(avail_w - min_h, int(avail_w * ratio)))
+                gdb_w   = max(min_h, avail_w - src_w)
                 src_col.styles.width  = src_w
                 src_col.styles.height = "1fr"
-                # src-pane fills src-col minus 1 row for status
                 src.styles.width  = "1fr"
                 src.styles.height = "1fr"
-                # status stays at bottom of src-col (height=1 from CSS)
                 status.styles.width = "1fr"
-                # gdb: fixed width, full height (no status bar beside it)
                 gdb.styles.width  = gdb_w
                 gdb.styles.height = "1fr"
             else:
                 # cgdb WSO_HORIZONTAL: src on top, status bar below src, gdb below status
+                vsep.remove_class("visible")
                 container.styles.layout = "vertical"
                 total_h = max(4, self.size.height - 1)
                 src_h   = max(min_h, min(total_h - min_h, int(total_h * ratio)))
