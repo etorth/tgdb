@@ -439,7 +439,9 @@ class TGDBApp(App):
         self.gdb.request_source_file()
 
     def _ui_gdb_exit(self) -> None:
-        self._show_status("GDB exited — :quit to close tgdb")
+        # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
+        # cgdb calls cgdb_cleanup_and_exit(0) in tgdb_process() on size<=0.
+        self.exit(0)
 
     # ------------------------------------------------------------------
     # Registered commands
