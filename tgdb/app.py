@@ -50,19 +50,26 @@ class TGDBApp(App):
         layers: base dialog;
         layout: vertical;
     }
-    #src-pane {
+    #split-container {
         layer: base;
+        layout: vertical;
+        height: 1fr;
+        width: 1fr;
+    }
+    #src-pane {
         height: 1fr;
         min-height: 2;
+        min-width: 4;
     }
     #status {
         layer: base;
         height: 1;
+        width: 1fr;
     }
     #gdb-pane {
-        layer: base;
         height: 1fr;
         min-height: 2;
+        min-width: 4;
     }
     #file-dlg {
         layer: dialog;
@@ -105,10 +112,11 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield SourceView(self.hl, id="src-pane")
+        with Widget(id="split-container"):
+            yield SourceView(self.hl, id="src-pane")
+            yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
+                            id="gdb-pane")
         yield StatusBar(self.hl, id="status")
-        yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
-                        id="gdb-pane")
         yield FileDialog(self.hl, id="file-dlg")
 
     # ------------------------------------------------------------------
@@ -578,38 +586,30 @@ class TGDBApp(App):
         self._split_ratio = ratio
         is_vertical = (self.cfg.winsplitorientation == "vertical")
         # cgdb WSO_VERTICAL: panes side-by-side; WSO_HORIZONTAL: panes top/bottom
+        # Screen stays layout:vertical always; #split-container switches direction.
         try:
-            screen = self.query_one("Screen")
-            screen.styles.layout = "horizontal" if is_vertical else "vertical"
-        except NoMatches:
-            pass
-        try:
+            container = self.query_one("#split-container")
             src = self.query_one("#src-pane")
             gdb = self.query_one("#gdb-pane")
-            status = self.query_one("#status")
             min_h = self.cfg.winminheight + 1
             if is_vertical:
-                # Side-by-side: split on width; status bar spans full width at bottom
+                container.styles.layout = "horizontal"
                 total_w = max(4, self.size.width)
                 src_w = max(min_h, min(total_w - min_h, int(total_w * ratio)))
                 gdb_w = max(min_h, total_w - src_w)
-                src.styles.height    = "1fr"
-                src.styles.width     = src_w
-                gdb.styles.height    = "1fr"
-                gdb.styles.width     = gdb_w
-                status.styles.width  = "1fr"
-                status.styles.height = 1
+                src.styles.height = "1fr"
+                src.styles.width  = src_w
+                gdb.styles.height = "1fr"
+                gdb.styles.width  = gdb_w
             else:
-                # Top/bottom: split on height; status bar is a horizontal stripe
+                container.styles.layout = "vertical"
                 total_h = max(4, self.size.height - 1)
                 src_h = max(min_h, min(total_h - min_h, int(total_h * ratio)))
                 gdb_h = max(min_h, total_h - src_h)
-                src.styles.width     = "1fr"
-                src.styles.height    = src_h
-                gdb.styles.width     = "1fr"
-                gdb.styles.height    = gdb_h
-                status.styles.width  = "1fr"
-                status.styles.height = 1
+                src.styles.width  = "1fr"
+                src.styles.height = src_h
+                gdb.styles.width  = "1fr"
+                gdb.styles.height = gdb_h
         except NoMatches:
             pass
 
