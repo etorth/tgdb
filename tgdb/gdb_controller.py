@@ -14,7 +14,6 @@ Secondary PTY: GDB machine-interface channel opened via "new-ui mi <device>".
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import os
 import re
 import signal
@@ -249,10 +248,6 @@ class GDBController:
         # immediately returns EIO (no slave reader). GDB opens its own copy.
         self._mi_slave_fd = mi_slave_fd
 
-        # Make MI master non-blocking for async polling
-        fl = fcntl.fcntl(self._mi_master_fd, fcntl.F_GETFL)
-        fcntl.fcntl(self._mi_master_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-
         # Spawn GDB:
         #   --nw              : no TUI (cgdb draws its own UI)
         #   -ex "new-ui mi X" : open MI channel on secondary PTY
@@ -297,53 +292,66 @@ class GDBController:
     # Async read loops (two concurrent tasks, mirrors cgdb's select loop)
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Async read loops — event-driven via loop.add_reader(), no polling
+    # ------------------------------------------------------------------
+
     async def run_async(self) -> None:
         loop = asyncio.get_event_loop()
-        console_task = asyncio.create_task(self._console_loop(loop))
-        mi_task      = asyncio.create_task(self._mi_loop())
-        done, pending = await asyncio.wait(
-            [console_task, mi_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for t in pending:
-            t.cancel()
-            try:
-                await t
-            except asyncio.CancelledError:
-                pass
-        self.on_exit()
+        self._loop = loop
 
-    async def _console_loop(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Read raw bytes from primary PTY and emit on_console."""
-        while self._proc and self._proc.isalive():
-            try:
-                data = await loop.run_in_executor(None, self._read_console)
-                if data:
-                    self.on_console(data)
-            except (EOFError, OSError):
-                break
+        # Use a Future to signal when GDB's primary PTY closes (EOF/error).
+        # add_reader on the console fd wakes instantly when data is available,
+        # matching cgdb's select()-based approach with no timeout.
+        self._console_done: asyncio.Future = loop.create_future()
+        self._mi_done:      asyncio.Future = loop.create_future()
 
-    def _read_console(self) -> bytes:
+        # Register readable callbacks — fires as soon as the fd has data,
+        # with zero polling delay (unlike asyncio.sleep(0.02)).
+        loop.add_reader(self._proc.fd,     self._on_console_readable, loop)
+        loop.add_reader(self._mi_master_fd, self._on_mi_readable)
+
+        # Wait for GDB's console PTY to close (GDB exited)
         try:
-            return self._proc.read(4096)
-        except EOFError:
-            raise
-        except Exception:
-            return b""
-
-    async def _mi_loop(self) -> None:
-        """Poll MI channel (non-blocking) and parse MI records."""
-        while self._mi_master_fd >= 0:
+            await self._console_done
+        finally:
+            # Clean up both readers
             try:
-                data = os.read(self._mi_master_fd, 4096)
-                if not data:
-                    break
-                self._mi_buf += data.decode("utf-8", errors="replace")
-                self._process_mi_buffer()
-            except BlockingIOError:
-                await asyncio.sleep(0.02)
-            except OSError:
-                break
+                loop.remove_reader(self._proc.fd)
+            except Exception:
+                pass
+            try:
+                loop.remove_reader(self._mi_master_fd)
+            except Exception:
+                pass
+            self.on_exit()
+
+    def _on_console_readable(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Called by event loop the instant the primary PTY fd is readable."""
+        try:
+            data = self._proc.read(4096)
+            if data:
+                self.on_console(data)
+        except EOFError:
+            # GDB process closed — signal run_async to finish
+            loop.remove_reader(self._proc.fd)
+            if not self._console_done.done():
+                self._console_done.set_result(None)
+        except Exception:
+            loop.remove_reader(self._proc.fd)
+            if not self._console_done.done():
+                self._console_done.set_result(None)
+
+    def _on_mi_readable(self) -> None:
+        """Called by event loop the instant the MI fd is readable."""
+        try:
+            data = os.read(self._mi_master_fd, 4096)
+            if not data:
+                return
+            self._mi_buf += data.decode("utf-8", errors="replace")
+            self._process_mi_buffer()
+        except (BlockingIOError, OSError):
+            pass
 
     def _process_mi_buffer(self) -> None:
         while "\n" in self._mi_buf:
