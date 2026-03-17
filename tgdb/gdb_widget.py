@@ -137,6 +137,8 @@ class GDBWidget(Widget):
         self.hl = hl
         self.max_scrollback = max_scrollback
         self.can_focus = True
+        # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — cursor only shown when GDB focused
+        self.gdb_focused: bool = True
 
         # Scrollback: lines captured as they scroll off the pyte screen
         self._scrollback: deque[Text] = deque(maxlen=max_scrollback)
@@ -204,7 +206,7 @@ class GDBWidget(Widget):
             cx = self._screen.cursor.x
             cy = self._screen.cursor.y
             for r in range(self._pyte_rows):
-                cursor_col = cx if (r == cy and not self._scroll_mode) else -1
+                cursor_col = cx if (r == cy and not self._scroll_mode and self.gdb_focused) else -1
                 lines.append(_row_to_text(self._screen.buffer[r],
                                           self._pyte_cols, cursor_col))
         return lines
@@ -225,7 +227,7 @@ class GDBWidget(Widget):
         for r in range(min(h, self._pyte_rows)):
             if r > 0:
                 result.append("\n")
-            cursor_col = cx if r == cy else -1
+            cursor_col = cx if (r == cy and self.gdb_focused) else -1
             result.append_text(
                 _row_to_text(self._screen.buffer[r], self._pyte_cols, cursor_col)
             )
