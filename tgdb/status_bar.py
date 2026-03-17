@@ -41,6 +41,7 @@ class StatusBar(Widget):
         self.can_focus = True
         # Resize drag state
         self._dragging: bool = False
+        self.drag_enabled: bool = True   # disabled in vertical split
 
     # ------------------------------------------------------------------
     # State setters (called by app)
@@ -157,7 +158,7 @@ class StatusBar(Widget):
     # ------------------------------------------------------------------
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
-        if event.button == 1:          # left button only
+        if event.button == 1 and self.drag_enabled:
             self._dragging = True
             self.capture_mouse()
             event.stop()
@@ -183,7 +184,11 @@ class CommandCancel(Message):
     pass
 
 class DragResize(Message):
-    """Posted while the user drags the status bar; screen_y is the target row."""
-    def __init__(self, screen_y: int) -> None:
+    """Posted while the user drags a splitter bar.
+    screen_y: used when dragging status bar (horizontal split)
+    screen_x: used when dragging vsep (vertical split)
+    """
+    def __init__(self, screen_y: int = 0, screen_x: int = 0) -> None:
         super().__init__()
         self.screen_y = screen_y
+        self.screen_x = screen_x
