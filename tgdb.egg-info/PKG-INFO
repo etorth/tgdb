@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: tgdb
+Version: 0.1.0
+Summary: A Python reimplementation of cgdb — a curses front-end to GDB
+Requires-Python: >=3.11
+License-File: LICENSE
+Requires-Dist: textual>=2.0
+Requires-Dist: pygments>=2.18
+Requires-Dist: pyte>=0.8
+Requires-Dist: ptyprocess>=0.7
+Dynamic: license-file

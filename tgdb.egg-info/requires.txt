@@ -1,0 +1,4 @@
+textual>=2.0
+pygments>=2.18
+pyte>=0.8
+ptyprocess>=0.7

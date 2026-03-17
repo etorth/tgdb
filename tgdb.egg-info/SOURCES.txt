@@ -1,0 +1,9 @@
+LICENSE
+README.md
+pyproject.toml
+tgdb.egg-info/PKG-INFO
+tgdb.egg-info/SOURCES.txt
+tgdb.egg-info/dependency_links.txt
+tgdb.egg-info/entry_points.txt
+tgdb.egg-info/requires.txt
+tgdb.egg-info/top_level.txt
