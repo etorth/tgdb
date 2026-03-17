@@ -87,8 +87,8 @@ def _row_to_text(row: dict, width: int, cursor_col: int = -1) -> Text:
             underline=char.underscore,
             blink=char.blink,
         )
-        if col == cursor_col:     # show GDB readline cursor
-            st = st + Style(reverse=True)
+        if col == cursor_col:     # show GDB readline cursor (blinking block)
+            st = st + Style(reverse=True, blink=True)
         result.append(data, style=st)
     return result
 
