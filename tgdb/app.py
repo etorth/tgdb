@@ -56,10 +56,15 @@ class TGDBApp(App):
         height: 1fr;
         width: 1fr;
     }
+    /* #src-col wraps source pane + status bar in vertical split */
+    #src-col {
+        layout: vertical;
+        height: 1fr;
+        min-width: 4;
+    }
     #src-pane {
         height: 1fr;
         min-height: 2;
-        min-width: 4;
     }
     #status {
         layer: base;
@@ -113,10 +118,11 @@ class TGDBApp(App):
 
     def compose(self) -> ComposeResult:
         with Widget(id="split-container"):
-            yield SourceView(self.hl, id="src-pane")
+            with Widget(id="src-col"):
+                yield SourceView(self.hl, id="src-pane")
+                yield StatusBar(self.hl, id="status")
             yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
                             id="gdb-pane")
-        yield StatusBar(self.hl, id="status")
         yield FileDialog(self.hl, id="file-dlg")
 
     # ------------------------------------------------------------------
@@ -337,8 +343,8 @@ class TGDBApp(App):
         if msg.rows:
             # cgdb '=' / '-': change src size by exactly 1 unit
             try:
-                src = self.query_one("#src-pane")
-                cur_sz = src.size.width if is_vertical else src.size.height
+                src_col = self.query_one("#src-col")
+                cur_sz = src_col.size.width if is_vertical else src_col.size.height
             except NoMatches:
                 return
             new_sz = max(min_h, min(avail - min_h, cur_sz + msg.delta))
@@ -585,29 +591,43 @@ class TGDBApp(App):
                  "gdb_big": 0.3, "gdb_full": 0.1}.get(split, self._split_ratio)
         self._split_ratio = ratio
         is_vertical = (self.cfg.winsplitorientation == "vertical")
-        # cgdb WSO_VERTICAL: panes side-by-side; WSO_HORIZONTAL: panes top/bottom
-        # Screen stays layout:vertical always; #split-container switches direction.
         try:
             container = self.query_one("#split-container")
-            src = self.query_one("#src-pane")
-            gdb = self.query_one("#gdb-pane")
-            min_h = self.cfg.winminheight + 1
+            src_col   = self.query_one("#src-col")
+            src       = self.query_one("#src-pane")
+            gdb       = self.query_one("#gdb-pane")
+            status    = self.query_one("#status")
+            min_h     = self.cfg.winminheight + 1
             if is_vertical:
+                # cgdb WSO_VERTICAL: src+status on left, │ separator, gdb on right
+                # src height = screen_rows - 1 (status takes last row of src col)
+                # gdb height = screen_rows (full height, no status bar)
                 container.styles.layout = "horizontal"
                 total_w = max(4, self.size.width)
-                src_w = max(min_h, min(total_w - min_h, int(total_w * ratio)))
-                gdb_w = max(min_h, total_w - src_w)
+                src_w   = max(min_h, min(total_w - min_h, int(total_w * ratio)))
+                gdb_w   = max(min_h, total_w - src_w)
+                # src-col: fixed width, full height (status bar inside it)
+                src_col.styles.width  = src_w
+                src_col.styles.height = "1fr"
+                # src-pane fills src-col minus 1 row for status
+                src.styles.width  = "1fr"
                 src.styles.height = "1fr"
-                src.styles.width  = src_w
-                gdb.styles.height = "1fr"
+                # status stays at bottom of src-col (height=1 from CSS)
+                status.styles.width = "1fr"
+                # gdb: fixed width, full height (no status bar beside it)
                 gdb.styles.width  = gdb_w
+                gdb.styles.height = "1fr"
             else:
+                # cgdb WSO_HORIZONTAL: src on top, status bar below src, gdb below status
                 container.styles.layout = "vertical"
                 total_h = max(4, self.size.height - 1)
-                src_h = max(min_h, min(total_h - min_h, int(total_h * ratio)))
-                gdb_h = max(min_h, total_h - src_h)
+                src_h   = max(min_h, min(total_h - min_h, int(total_h * ratio)))
+                gdb_h   = max(min_h, total_h - src_h)
+                src_col.styles.width  = "1fr"
+                src_col.styles.height = src_h + 1   # src rows + 1 status row
                 src.styles.width  = "1fr"
                 src.styles.height = src_h
+                status.styles.width = "1fr"
                 gdb.styles.width  = "1fr"
                 gdb.styles.height = gdb_h
         except NoMatches:
