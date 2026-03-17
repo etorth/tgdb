@@ -106,26 +106,16 @@ class StatusBar(Widget):
                      no_wrap=True, overflow="crop")
             return t
 
-        # Normal: MODE  filename  line/total [*]
-        mode_label = {
-            "GDB":     "GDB",
-            "CGDB":    "SRC",
-            "SCROLL":  "SCROLL",
-            "STATUS":  "CMD",
-            "FILEDLG": "FILES",
-        }.get(self._mode, self._mode)
-
-        right = f" {self._lineno}/{self._total} "
-        if self._mode == "GDB":
-            right += "*"
-
-        left   = f" {mode_label} "
-        mid_w  = max(0, w - len(left) - len(right))
-        fname  = self._filename
-        if len(fname) > mid_w:
-            fname = "…" + fname[-(mid_w - 1):]
-        line = (left + fname.ljust(mid_w) + right)[:w].ljust(w)
-        return Text(line, style=style, no_wrap=True, overflow="crop")
+        # Normal: filename left-aligned, '*' at right edge when GDB focused
+        # Matches cgdb update_status_win(): if_display_message("", filename)
+        # with '*' appended at WIDTH-1 when focus==GDB.
+        fname = self._filename
+        star  = "*" if self._mode == "GDB" else " "
+        avail = max(0, w - 1)  # leave last column for star
+        if len(fname) > avail:
+            fname = "…" + fname[-(avail - 1):]
+        line = fname.ljust(avail) + star
+        return Text(line[:w], style=style, no_wrap=True, overflow="crop")
 
     # ------------------------------------------------------------------
     # Key handling — only active during command input

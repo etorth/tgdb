@@ -555,7 +555,7 @@ class TGDBApp(App):
             src = self.query_one("#src-pane", SourceView)
             if src.source_file:
                 self.query_one("#status", StatusBar).set_file_info(
-                    os.path.basename(src.source_file.path),
+                    src.source_file.path,          # full path, like cgdb source_current_file()
                     src.sel_line,
                     len(src.source_file.lines),
                 )
