@@ -421,27 +421,47 @@ class SourceView(Widget):
                         if mp == sf.path and ml == line_no:
                             gutter_ch = mk; gutter_st = self.hl.style("Mark"); break
 
-        # ── Arrow (used by longarrow/shortarrow display modes) ──
+        # ── Separator and arrow — matches cgdb sources.cpp ──
+        # cgdb: vert_bar = SWIN_SYM_LTEE (├) for arrow lines, SWIN_SYM_VLINE (│) otherwise
+        # After vert_bar: space for normal; '>' for short arrow;
+        #   '─'×col_off + '>' for long arrow, then source from col_off.
+        is_arrow_line = (
+            (is_exe and exe_disp in ("shortarrow", "longarrow")) or
+            (is_sel and sel_disp in ("shortarrow", "longarrow"))
+        )
         if is_exe and exe_disp in ("shortarrow", "longarrow"):
-            arrow = ">"; arrow_st = self.hl.style("ExecutingLineArrow")
+            arrow_st = self.hl.style("ExecutingLineArrow")
+            disp = exe_disp
         elif is_sel and sel_disp in ("shortarrow", "longarrow"):
-            arrow = ">"; arrow_st = self.hl.style("SelectedLineArrow")
+            arrow_st = self.hl.style("SelectedLineArrow")
+            disp = sel_disp
         else:
-            arrow = " "; arrow_st = ""
+            arrow_st = ""
+            disp = ""
+
+        # Compute long-arrow column_offset (cgdb: leading_ws - (sel_col+1))
+        col_off = 0
+        if disp == "longarrow":
+            src_line = sf.lines[line_idx] if line_idx < len(sf.lines) else ""
+            leading_ws = len(src_line) - len(src_line.lstrip())
+            col_off = max(0, leading_ws - 1)  # sel_col == 0
 
         out = Text(no_wrap=True, overflow="crop")
         # Right-aligned line number
         out.append(f"{line_no:{nr_w}d}", style=nr_style)
         out.append(gutter_ch, style=gutter_st)
-        out.append(arrow, style=arrow_st)
-        # Unicode box-drawing separator (matches cgdb's │)
-        out.append("│")
-
-        # Long arrow continuation
-        if is_exe and exe_disp == "longarrow":
-            out.append("-->", style=arrow_st)
-        elif is_sel and sel_disp == "longarrow":
-            out.append("-->", style=arrow_st)
+        # vert_bar: ├ for arrow lines, │ otherwise
+        if is_arrow_line:
+            out.append("├", style=arrow_st)
+        else:
+            out.append("│")
+        # Arrow body (after vert_bar)
+        if disp == "shortarrow":
+            out.append(">", style=arrow_st)
+        elif disp == "longarrow":
+            out.append("─" * col_off + ">", style=arrow_st)
+        else:
+            out.append(" ")  # normal line: space after │ (cgdb behaviour)
 
         # ── Source text ──
         if is_exe:
@@ -465,6 +485,20 @@ class SourceView(Widget):
         spans  = tokens[line_idx] if line_idx < len(tokens) else []
         if not spans:
             spans = [(sf.lines[line_idx], "Normal")]
+
+        # For long arrow: skip col_off leading whitespace chars (cgdb: sel_col + column_offset)
+        if col_off > 0:
+            trimmed = []
+            skip = col_off
+            for tok_text, group in spans:
+                if skip <= 0:
+                    trimmed.append((tok_text, group))
+                elif skip >= len(tok_text):
+                    skip -= len(tok_text)
+                else:
+                    trimmed.append((tok_text[skip:], group))
+                    skip = 0
+            spans = trimmed
 
         src_t = Text(no_wrap=True, overflow="crop")
         for tok_text, group in spans:
