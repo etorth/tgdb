@@ -583,10 +583,10 @@ class SourceView(Widget):
         elif key == "apostrophe":           self.post_message(AwaitMarkJump())
         elif char == "m":                   self.post_message(AwaitMarkSet())
         elif key == "ctrl+l":               self.refresh()
-        elif key == "minus":                self.post_message(ResizeSource(-1))
-        elif key in ("equal",):             self.post_message(ResizeSource(1))
-        elif key == "underscore":           self.post_message(ResizeSource(-25, percent=True))
-        elif key == "plus":                 self.post_message(ResizeSource(25, percent=True))
+        elif key == "minus":                self.post_message(ResizeSource(-1, rows=True))
+        elif key in ("equal",):             self.post_message(ResizeSource(1,  rows=True))
+        elif key == "underscore":           self.post_message(ResizeSource(-1, jump=True))
+        elif key == "plus":                 self.post_message(ResizeSource(1,  jump=True))
         elif key == "ctrl+w":               self.post_message(ToggleOrientation())
         elif key == "ctrl+t":               self.post_message(OpenTTY())
         elif key == "f5":                   self.post_message(GDBCommand("run"))
@@ -652,8 +652,18 @@ class StatusMessage(Message):
         super().__init__(); self.text = text
 
 class ResizeSource(Message):
-    def __init__(self, delta: int, percent: bool = False) -> None:
-        super().__init__(); self.delta = delta; self.percent = percent
+    """Request to resize the source/gdb split.
+
+    rows=True : delta is ±1 row (cgdb '=' / '-')
+    jump=True : delta is ±1 quarter-mark step (cgdb '+' / '_')
+    """
+    def __init__(self, delta: int, rows: bool = False, jump: bool = False,
+                 percent: bool = False) -> None:
+        super().__init__()
+        self.delta   = delta
+        self.rows    = rows
+        self.jump    = jump
+        self.percent = percent   # legacy, kept for compatibility
 
 class ToggleOrientation(Message): pass
 class OpenTTY(Message):           pass
