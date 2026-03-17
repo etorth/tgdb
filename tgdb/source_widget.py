@@ -4,7 +4,7 @@ Source view widget — mirrors cgdb's sources.cpp / interface.cpp source pane.
 Features:
   • Syntax highlighting via Pygments
   • Vi-like navigation (j/k, G/gg, Ctrl-b/f/u/d, H/M/L)
-  • Breakpoint markers (B=enabled, b=disabled), set with Space
+  • Breakpoint: line number shown in bold red (enabled) / bold yellow (disabled), set with Space
   • Executing line indicator (shortarrow/longarrow/highlight/block)
   • Selected line indicator (same styles)
   • Regex search (/ ? n N) with optional hlsearch
@@ -383,11 +383,11 @@ class SourceView(Widget):
         Called only when sf is not None (logo is handled in render())."""
         nr_w = self._nr_width()
 
-        # Beyond end of file → vim-style " ~│"
+        # Beyond end of file → vim-style "~│" matching cgdb: (lwidth-1 spaces)(~)(│)
         if line_idx >= len(sf.lines):
             filler = Text(no_wrap=True, overflow="crop")
-            filler.append(" " * nr_w, style=self.hl.style("LineNumber"))
-            filler.append(" ~│", style=self.hl.style("LineNumber"))
+            filler.append(" " * (nr_w - 1), style=self.hl.style("LineNumber"))
+            filler.append("~│", style=self.hl.style("LineNumber"))
             return filler
 
         line_no   = line_idx + 1
@@ -397,26 +397,29 @@ class SourceView(Widget):
         exe_disp  = self.executing_line_display
         sel_disp  = self.selected_line_display
 
-        # ── Line number ──
-        if is_exe:   nr_style = self.hl.style("ExecutingLineNr")
-        elif is_sel: nr_style = self.hl.style("SelectedLineNr")
-        else:        nr_style = self.hl.style("LineNumber")
-
-        # ── Breakpoint / mark gutter (1 char) ──
+        # ── Line number style (cgdb priority: breakpoint > exe > sel > normal) ──
         if bp_flag == BP_ENABLED:
-            gutter_ch = "B"; gutter_st = self.hl.style("Breakpoint")
+            nr_style = self.hl.style("Breakpoint")
         elif bp_flag == BP_DISABLED:
-            gutter_ch = "b"; gutter_st = self.hl.style("DisabledBreakpoint")
+            nr_style = self.hl.style("DisabledBreakpoint")
+        elif is_exe:
+            nr_style = self.hl.style("ExecutingLineNr")
+        elif is_sel:
+            nr_style = self.hl.style("SelectedLineNr")
         else:
-            gutter_ch = " "; gutter_st = ""
-            if self.showmarks:
-                for mk, ml in sf.marks_local.items():
-                    if ml == line_no:
-                        gutter_ch = mk; gutter_st = self.hl.style("Mark"); break
-                if gutter_ch == " ":
-                    for mk, (mp, ml) in self._global_marks.items():
-                        if mp == sf.path and ml == line_no:
-                            gutter_ch = mk; gutter_st = self.hl.style("Mark"); break
+            nr_style = self.hl.style("LineNumber")
+
+        # ── Mark: replaces │ with mark char (cgdb: vert_bar_char = mark char) ──
+        mark_ch = None
+        mark_st = ""
+        if self.showmarks:
+            for mk, ml in sf.marks_local.items():
+                if ml == line_no:
+                    mark_ch = mk; mark_st = self.hl.style("Mark"); break
+            if mark_ch is None:
+                for mk, (mp, ml) in self._global_marks.items():
+                    if mp == sf.path and ml == line_no:
+                        mark_ch = mk; mark_st = self.hl.style("Mark"); break
 
         # ── Separator and arrow — matches cgdb sources.cpp ──
         # cgdb: vert_bar = SWIN_SYM_LTEE (├) for arrow lines, SWIN_SYM_VLINE (│) otherwise
@@ -444,12 +447,13 @@ class SourceView(Widget):
             col_off = max(0, leading_ws - 1)  # sel_col == 0
 
         out = Text(no_wrap=True, overflow="crop")
-        # Right-aligned line number
+        # Right-aligned line number — no separate gutter column (matches cgdb)
         out.append(f"{line_no:{nr_w}d}", style=nr_style)
-        out.append(gutter_ch, style=gutter_st)
-        # vert_bar: ├ for arrow lines, │ otherwise
+        # vert_bar: ├ for arrow lines, mark char if set, │ otherwise
         if is_arrow_line:
             out.append("├", style=arrow_st)
+        elif mark_ch:
+            out.append(mark_ch, style=mark_st)
         else:
             out.append("│")
         # Arrow body (after vert_bar)
