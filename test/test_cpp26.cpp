@@ -7,13 +7,14 @@
 #include <tuple>
 #include <variant>
 #include <coroutine>
+#include <ranges> // Added for C++20 Ranges
 
 // 1. Stressing the preprocessor and attributes
 #define STRANGE_MACRO(x) #x
-[[nodiscard("Reason")]] 
+[[nodiscard("Reason")]]
 auto test_attributes() { return 42; }
 
-// 2. Type aliases and expected (moved for visibility)
+// 2. Type aliases and expected
 using StringMap = std::map<std::string, std::vector<std::string>, std::less<>>;
 
 std::expected<int, std::string> get_value(bool fail) {
@@ -30,7 +31,7 @@ namespace Testing::Sub {
 
     template <typename... Args>
     struct VariadicPack : Args... {
-        using Args::operator()...; 
+        using Args::operator()...;
     };
 
     struct Deducer {
@@ -74,7 +75,7 @@ Task async_func() {
 }
 
 int main() {
-    // --- BEGIN EXECUTABLE BLOCK (50+ lines) ---
+    // --- BEGIN EXECUTABLE BLOCK (60+ lines) ---
     auto result = test_attributes();
     literals_test();
 
@@ -86,9 +87,9 @@ int main() {
 
     std::string normal = "Standard String";
     std::u8string utf8 = u8"UTF-8: \u2713";
-    
+
     // Testing string concatenation and weird spacing
-    std::string long_literal = "This string" 
+    std::string long_literal = "This string"
                                " is concatenated"
                                " by the preprocessor";
 
@@ -102,6 +103,28 @@ int main() {
         int val = *res;
         std::cout << "Value: " << val << "\n";
     }
+
+    // --- NEW: C++20/23 RANGES STRESS TEST ---
+    std::vector<int> source_data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+    // Testing the pipe operator and view composition
+    auto view = source_data
+        | std::views::filter([](int n) { return n % 2 == 0; })
+        | std::views::transform([](int n) { return n * n; })
+        | std::views::take(3);
+
+    std::cout << "Ranges output: ";
+    for (int n : view) {
+        std::cout << n << " ";
+    }
+    std::cout << "\n";
+
+    // Testing std::ranges algorithms with projections
+    struct Item { int id; std::string name; };
+    std::vector<Item> items = {{3, "C++"}, {1, "Python"}, {2, "Vim"}};
+
+    std::ranges::sort(items, {}, &Item::id); // Testing member pointers
+    // ----------------------------------------
 
     // Deducing this with explicit return type for recursion
     auto processor = []<typename T>(this auto self, T value) -> int {
@@ -139,8 +162,8 @@ int main() {
     }
 
     // Testing comments and formatting inside expressions
-    std::vector<int> nums = { 1, 
-                              2 /* mid-list comment */, 
+    std::vector<int> nums = { 1,
+                              2 /* mid-list comment */,
                               3 };
 
     auto count = std::count_if(nums.begin(), nums.end(), [](int n) {
