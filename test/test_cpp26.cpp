@@ -18,7 +18,7 @@ auto test_attributes() { return 42; }
 using StringMap = std::map<std::string, std::vector<std::string>, std::less<>>;
 
 std::expected<int, std::string> get_value(bool fail) {
-    if (fail) return std::unexpected("error: _ is not a number");
+    if (fail) return std::unexpected("错误: _ 不是数字"); // Chinese in std::expected
     return 42;
 }
 
@@ -42,7 +42,7 @@ namespace Testing::Sub {
     };
 }
 
-// 3. Literals and Raw Strings
+// 3. ENHANCED: Literals, Raw Strings, and CJK
 void literals_test() {
     auto hex_bytes = 0xDE'AD'BE'EF;
     auto binary    = 0b1010'0101;
@@ -54,6 +54,20 @@ void literals_test() {
     )delimiter";
 
     const char8_t* u8_str = u8"UTF-8 string";
+
+    // CJK and Unicode prefixes
+    const char8_t* u8_cjk = u8"UTF-8: 汉字, 日本語, 한국어"; // Testing multi-byte widths
+    const char16_t* u16_val = u"Unicode: \u4F60\u597D";       // "Hello" in Chinese
+    const char32_t* u32_val = U"Emoji: \U0001F343";           // Leaf emoji
+
+    // Raw String with CJK delimiters and content
+    const char* raw_cjk = R"中文(
+        Multiline CJK test:
+        - 程序员 (Programmer)
+        - 调试 (Debug)
+    )中文";
+
+    const char8_t* raw_u8 = u8R"---(Mixed "Raw" and 漢字)---";
 }
 
 // 4. Coroutines
@@ -75,9 +89,13 @@ Task async_func() {
 }
 
 int main() {
-    // --- BEGIN EXECUTABLE BLOCK (60+ lines) ---
+    // --- BEGIN EXECUTABLE BLOCK (80+ lines) ---
     auto result = test_attributes();
     literals_test();
+
+    /* * 这是一个多行注释测试 (Multi-line CJK comment)
+     * * * /  <-- sneaky comment end
+     */
 
     /* * * /  <-- sneaky comment end */
 
@@ -85,13 +103,19 @@ int main() {
     registry["cpp26"] = {"placeholder", "pack_indexing", "structured_bindings"};
     registry["legacy"] = {"macros", "void*", "goto"};
 
+
+    registry["cjk_test"] = {"开发", "テスト", "코드"}; // CN, JP, KR
+                                                       //
+
     std::string normal = "Standard String";
     std::u8string utf8 = u8"UTF-8: \u2713";
 
-    // Testing string concatenation and weird spacing
+    std::string emoji_test = "Emoji test: \U0001F680";
+    std::string escape_hell = "Tab\tNewline\nHex\x0AOctal\012";
+
     std::string long_literal = "This string"
                                " is concatenated"
-                               " by the preprocessor";
+                               " with \x41\x42\x43";
 
     // C++26 Placeholder _ in structured bindings
     for (const auto& [key, _] : registry) {
@@ -104,29 +128,23 @@ int main() {
         std::cout << "Value: " << val << "\n";
     }
 
-    // --- NEW: C++20/23 RANGES STRESS TEST ---
+    // C++20/23 RANGES STRESS TEST
     std::vector<int> source_data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-
-    // Testing the pipe operator and view composition
     auto view = source_data
         | std::views::filter([](int n) { return n % 2 == 0; })
         | std::views::transform([](int n) { return n * n; })
         | std::views::take(3);
 
-    std::cout << "Ranges output: ";
-    for (int n : view) {
-        std::cout << n << " ";
-    }
+    std::cout << "Ranges: ";
+    for (int n : view) { std::cout << n << " "; }
     std::cout << "\n";
 
-    // Testing std::ranges algorithms with projections
+    // Testing member pointers and projections
     struct Item { int id; std::string name; };
     std::vector<Item> items = {{3, "C++"}, {1, "Python"}, {2, "Vim"}};
+    std::ranges::sort(items, {}, &Item::id);
 
-    std::ranges::sort(items, {}, &Item::id); // Testing member pointers
-    // ----------------------------------------
-
-    // Deducing this with explicit return type for recursion
+    // Deducing this recursion
     auto processor = []<typename T>(this auto self, T value) -> int {
         if (value > 0) return value + self(value - 1);
         return 0;
@@ -141,13 +159,13 @@ int main() {
         else if constexpr (std::is_same_v<T, std::string>) std::cout << "str\n";
     }, var);
 
-    // Indentation stress: Dangling else and Labels
+    // Indentation stress: Dangling else
     int x = 10, y = 20;
     if (x > 5)
         if (y > 10)
-            std::cout << "Inner if\n";
+            std::cout << "Deep if\n";
     else
-        std::cout << "Belongs to inner if\n";
+        std::cout << "Dangling else\n";
 
     // Label and Goto
     goto skip_label;
@@ -163,7 +181,7 @@ int main() {
 
     // Testing comments and formatting inside expressions
     std::vector<int> nums = { 1,
-                              2 /* mid-list comment */,
+                              2 /* 注释 */,
                               3 };
 
     auto count = std::count_if(nums.begin(), nums.end(), [](int n) {
