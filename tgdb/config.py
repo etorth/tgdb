@@ -57,6 +57,8 @@ class Config:
 # Abbreviation → canonical name
 _ALIASES: dict[str, str] = {
     "asr": "autosourcereload",
+    "arrowstyle": "executinglinedisplay",  # deprecated alias (cgdb cgdbrc.cpp)
+    "as":  "executinglinedisplay",         # short form of arrowstyle
     "dwc": "debugwincolor",
     "dis": "disasm",
     "eld": "executinglinedisplay",

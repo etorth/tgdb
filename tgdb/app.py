@@ -32,7 +32,7 @@ from .source_widget import (
     SourceView, SourceFile,
     ToggleBreakpoint, OpenFileDialog, AwaitMarkJump, AwaitMarkSet,
     JumpGlobalMark, SearchStart, SearchUpdate, SearchCommit, SearchCancel,
-    StatusMessage, ResizeSource, ToggleOrientation, OpenTTY, GDBCommand,
+    StatusMessage, ResizeSource, ToggleOrientation, OpenTTY, GDBCommand, ShowHelp,
 )
 from .gdb_widget import (
     GDBWidget, ScrollModeChange,
@@ -450,6 +450,9 @@ class TGDBApp(App):
     def on_gdb_command(self, msg: GDBCommand) -> None:
         self._send_gdb_cli(msg.cmd)
 
+    def on_show_help(self, _: ShowHelp) -> None:
+        self._show_help_in_source()
+
     # ------------------------------------------------------------------
     # GDB widget messages
     # ------------------------------------------------------------------
@@ -651,6 +654,13 @@ class TGDBApp(App):
                 self._show_status(str(e))
 
     def _send_gdb_cli(self, cmd: str) -> None:
+        if self.cfg.showdebugcommands:
+            # Mirror cgdb showdebugcommands: echo the command into the GDB window
+            try:
+                gdb_w = self.query_one("#gdb-pane", GDBWidget)
+                gdb_w.inject_text(f"(gdb) {cmd}\n")
+            except NoMatches:
+                pass
         self.gdb.send_input(cmd + "\n")
         self._switch_to_gdb()
 

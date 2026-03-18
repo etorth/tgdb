@@ -152,6 +152,7 @@ class GDBWidget(Widget):
         # Scroll mode
         self._scroll_mode:   bool = False
         self._scroll_offset: int  = 0   # lines above live bottom (0 = live)
+        self._h_offset:      int  = 0   # horizontal scroll (cgdb scroll_cursor_col)
 
         # Search (scroll mode only)
         self._search_pattern: str  = ""
@@ -199,6 +200,12 @@ class GDBWidget(Widget):
         """
         if self._stream:
             self._stream.feed(data)
+        if not self._scroll_mode:
+            self.refresh()
+
+    def inject_text(self, text: str) -> None:
+        """Inject plain text directly into the scrollback (showdebugcommands)."""
+        self._scrollback.append(Text(text.rstrip("\n")))
         if not self._scroll_mode:
             self.refresh()
 
@@ -251,6 +258,7 @@ class GDBWidget(Widget):
         lines = self._all_lines()
         total = len(lines)
         start = max(0, total - h - self._scroll_offset)
+        w = self.size.width or 80
 
         result = Text(no_wrap=True, overflow="crop")
         for y in range(h):
@@ -268,6 +276,14 @@ class GDBWidget(Widget):
                                          m.start(), m.end())
                     except re.error:
                         pass
+                # Apply horizontal offset (cgdb scroll_cursor_col)
+                if self._h_offset > 0:
+                    # Trim _h_offset chars from the left
+                    plain = line.plain
+                    if self._h_offset < len(plain):
+                        line = line[self._h_offset:]
+                    else:
+                        line = Text()
                 result.append_text(line)
 
         # Replace last line with scroll status bar
@@ -311,6 +327,7 @@ class GDBWidget(Widget):
     def exit_scroll_mode(self) -> None:
         self._scroll_mode   = False
         self._scroll_offset = 0
+        self._h_offset      = 0
         self.post_message(ScrollModeChange(False))
         self.refresh()
 
@@ -321,6 +338,34 @@ class GDBWidget(Widget):
 
     def _scroll_down(self, n: int = 1) -> None:
         self._scroll_offset = max(0, self._scroll_offset - n)
+        self.refresh()
+
+    def _scroll_left(self) -> None:
+        """Horizontal scroll left (cgdb scr_left)."""
+        if self._h_offset > 0:
+            self._h_offset -= 1
+            self.refresh()
+
+    def _scroll_right(self) -> None:
+        """Horizontal scroll right (cgdb scr_right)."""
+        self._h_offset += 1
+        self.refresh()
+
+    def _beginning_of_row(self) -> None:
+        """Jump to start of row (cgdb scr_beginning_of_row, key '0')."""
+        self._h_offset = 0
+        self.refresh()
+
+    def _end_of_row(self) -> None:
+        """Jump to end of row (cgdb scr_end_of_row, key '$')."""
+        # Measure longest visible line
+        lines = self._all_lines()
+        total = len(lines)
+        h = self._visible_height()
+        start = max(0, total - h - self._scroll_offset)
+        w = max(80, self.size.width or 80)
+        max_w = max((len(lines[i].plain) for i in range(start, min(start + h, total))), default=w)
+        self._h_offset = max(0, max_w - w)
         self.refresh()
 
     def _do_search(self, pattern: str, forward: bool) -> bool:
@@ -442,6 +487,14 @@ class GDBWidget(Widget):
             self._await_g = False; self._scroll_down(count)
         elif key in ("k", "up", "ctrl+p"):
             self._await_g = False; self._scroll_up(count)
+        elif key in ("h", "left"):
+            self._await_g = False; self._scroll_left()
+        elif key in ("l", "right"):
+            self._await_g = False; self._scroll_right()
+        elif char == "0":
+            self._await_g = False; self._beginning_of_row()
+        elif char == "$":
+            self._await_g = False; self._end_of_row()
         elif key in ("pageup", "ctrl+b"):
             self._await_g = False; self._scroll_up(self._visible_height() * count)
         elif key in ("pagedown", "ctrl+f"):
