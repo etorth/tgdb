@@ -167,6 +167,8 @@ class GDBWidget(Widget):
         self.ignorecase: bool = False
         self.wrapscan:   bool = True
         self._num_buf:   str  = ""
+        self._await_g:   bool = False   # true after first 'g' (for 'gg')
+        self._dot_pending: bool = False  # true after apostrophe (for `'.`)
 
     # ------------------------------------------------------------------
     # pyte initialisation / resize
@@ -437,35 +439,57 @@ class GDBWidget(Widget):
         elif key in ("q", "i", "enter", "return"):
             self.exit_scroll_mode()
         elif key in ("j", "down", "ctrl+n"):
-            self._scroll_down(count)
+            self._await_g = False; self._scroll_down(count)
         elif key in ("k", "up", "ctrl+p"):
-            self._scroll_up(count)
+            self._await_g = False; self._scroll_up(count)
         elif key in ("pageup", "ctrl+b"):
-            self._scroll_up(self._visible_height() * count)
+            self._await_g = False; self._scroll_up(self._visible_height() * count)
         elif key in ("pagedown", "ctrl+f"):
-            self._scroll_down(self._visible_height() * count)
+            self._await_g = False; self._scroll_down(self._visible_height() * count)
         elif key == "ctrl+u":
-            self._scroll_up(self._visible_height() // 2)
+            self._await_g = False; self._scroll_up(self._visible_height() // 2)
         elif key == "ctrl+d":
-            self._scroll_down(self._visible_height() // 2)
-        elif char == "G":
-            self._scroll_offset = 0; self.refresh()
-        elif char == "g":
+            self._await_g = False; self._scroll_down(self._visible_height() // 2)
+        elif char == "G" or key in ("f12", "end"):
+            # G / F12 / End → go to end (most recent output)
+            self._await_g = False; self._scroll_offset = 0; self.refresh()
+        elif key in ("f11", "home"):
+            # F11 / Home → go to beginning (same as gg)
+            self._await_g = False
             self._scroll_offset = len(self._scrollback); self.refresh()
+        elif char == "g":
+            if self._await_g:
+                # gg → go to beginning
+                self._await_g = False
+                self._scroll_offset = len(self._scrollback); self.refresh()
+            else:
+                self._await_g = True
+        elif key == "apostrophe":
+            # '' prefix handled at app level; '.' → jump to last line (bottom)
+            self._await_g = False
+            self._dot_pending = True
+        elif self._dot_pending:
+            self._dot_pending = False
+            if char == ".":
+                self._scroll_offset = 0; self.refresh()
         elif key == "slash":
+            self._await_g = False
             self._search_active  = True
             self._search_forward = True
             self._search_buf     = ""
             self.post_message(ScrollSearchStart(True))
         elif key == "question_mark":
+            self._await_g = False
             self._search_active  = True
             self._search_forward = False
             self._search_buf     = ""
             self.post_message(ScrollSearchStart(False))
         elif char == "n":
-            self._do_search(self._search_pattern, self._search_forward)
+            self._await_g = False; self._do_search(self._search_pattern, self._search_forward)
         elif char == "N":
-            self._do_search(self._search_pattern, not self._search_forward)
+            self._await_g = False; self._do_search(self._search_pattern, not self._search_forward)
+        else:
+            self._await_g = False
 
     def _handle_search_key(self, key: str, char: str) -> None:
         if key == "escape":

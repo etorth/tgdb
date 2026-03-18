@@ -157,6 +157,7 @@ class TGDBApp(App):
         self._await_mark_set: bool = False
         self._split_ratio: float = 0.5
         self._file_dialog_pending: bool = False
+        self._inf_tty_fd: Optional[int] = None
 
     # ------------------------------------------------------------------
     # Compose
@@ -346,6 +347,25 @@ class TGDBApp(App):
         # cgdb never shows an error here — it just fires the request and waits.
         self._file_dialog_pending = True
         self.gdb.request_source_files()
+
+    def on_open_tty(self, _: OpenTTY) -> None:
+        """Ctrl-T: allocate a new PTY for the inferior's stdio.
+        Mirrors cgdb: open a PTY pair and tell GDB 'set inferior-tty <slave>'."""
+        try:
+            master_fd, slave_fd = os.openpty()
+            slave_path = os.ttyname(slave_fd)
+            os.close(slave_fd)
+            # Store master_fd so it stays open (inferior can write to slave)
+            if hasattr(self, '_inf_tty_fd') and self._inf_tty_fd is not None:
+                try:
+                    os.close(self._inf_tty_fd)
+                except OSError:
+                    pass
+            self._inf_tty_fd = master_fd
+            self.gdb.send_input(f"set inferior-tty {slave_path}\n")
+            self._show_status(f"Inferior TTY: {slave_path}")
+        except OSError as e:
+            self._show_status(f"TTY error: {e}")
 
     def on_await_mark_jump(self, msg: AwaitMarkJump) -> None:
         self._await_mark_jump = True
@@ -571,7 +591,7 @@ class TGDBApp(App):
             "insert":  lambda a: self._switch_to_gdb() or None,
             "noh":     self._cmd_noh,
             "shell":   self._cmd_shell,   "sh":   self._cmd_shell,
-            "logo":    self._cmd_help,    # show help instead of logo
+            "logo":    self._cmd_logo,
             "continue": gdb_cmd("continue"), "c":   gdb_cmd("continue"),
             "next":     gdb_cmd("next"),     "n":   gdb_cmd("next"),
             "nexti":    gdb_cmd("nexti"),
@@ -594,6 +614,12 @@ class TGDBApp(App):
 
     def _cmd_help(self, _: list) -> None:
         self._show_help_in_source()
+
+    def _cmd_logo(self, _: list) -> None:
+        try:
+            self.query_one("#src-pane", SourceView).show_logo()
+        except NoMatches:
+            pass
 
     def _cmd_edit(self, _: list) -> None:
         src = self.query_one("#src-pane", SourceView)
