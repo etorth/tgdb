@@ -47,6 +47,9 @@ void literals_test() {
     auto hex_bytes = 0xDE'AD'BE'EF;
     auto binary    = 0b1010'0101;
     auto float_val = 1.234'567e-10f;
+    auto 😊 = "emoji";
+    auto 😊😊 = "emoji x 2";
+    auto 😊😊😊 = "emoji x 3";
 
     const char* raw_str = R"delimiter(
         Inside a raw string: " \ '
