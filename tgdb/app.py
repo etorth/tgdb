@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
+from pathlib import Path
 from typing import Optional
 
 from textual.app import App, ComposeResult
@@ -311,6 +313,11 @@ class TGDBApp(App):
                 self._switch_to_cgdb()
                 event.stop(); return
 
+        if self._mode == "STATUS":
+            status = self.query_one("#status", StatusBar)
+            if status.feed_key(key, char):
+                event.stop(); return
+
         # CGDB-mode-only global keys
         if self._mode == "CGDB":
             if key == "i":
@@ -320,7 +327,7 @@ class TGDBApp(App):
                 self._switch_to_gdb()
                 self.query_one("#gdb-pane", GDBWidget).enter_scroll_mode()
                 event.stop(); return
-            if key == "colon":
+            if key == "colon" or char == ":":
                 self.query_one("#status", StatusBar).start_command()
                 self._set_mode("STATUS")
                 self.query_one("#status", StatusBar).focus()
@@ -793,6 +800,8 @@ class TGDBApp(App):
                 # Separator is 1 col wide, full height
                 vsep.add_class("visible")
                 container.styles.layout = "horizontal"
+                src.styles.display = "none" if src_size <= 0 else "block"
+                gdb.styles.display = "none" if gdb_size <= 0 else "block"
                 src_col.styles.width  = src_size
                 src_col.styles.height = "1fr"
                 src.styles.width  = "1fr"
@@ -805,6 +814,8 @@ class TGDBApp(App):
                 # cgdb WSO_HORIZONTAL: src on top, status bar below src, gdb below status
                 vsep.remove_class("visible")
                 container.styles.layout = "vertical"
+                src.styles.display = "none" if src_size <= 0 else "block"
+                gdb.styles.display = "none" if gdb_size <= 0 else "block"
                 src_col.styles.width  = "1fr"
                 src_col.styles.height = src_size + 1   # src rows + 1 status row
                 src.styles.width  = "1fr"
@@ -895,6 +906,20 @@ class TGDBApp(App):
         self._apply_split()
 
     def _show_help_in_source(self) -> None:
+        help_candidates = [
+            Path("/usr/share/cgdb/cgdb.txt"),
+            Path(sys.prefix) / "share" / "cgdb" / "cgdb.txt",
+            Path(__file__).resolve().parents[1] / "doc" / "cgdb.txt",
+        ]
+        src = self.query_one("#src-pane", SourceView)
+        for candidate in help_candidates:
+            if candidate.is_file():
+                if src.load_file(str(candidate)):
+                    src.exe_line = 0
+                    src.move_to(1)
+                    self._switch_to_cgdb()
+                    return
+
         lines = [
             "tgdb — Python reimplementation of cgdb",
             "",
@@ -931,7 +956,6 @@ class TGDBApp(App):
             "  :break :continue :next :step :finish :run :quit",
         ]
         sf = SourceFile("<help>", lines)
-        src = self.query_one("#src-pane", SourceView)
         src.source_file = sf
         src.exe_line = 0
         src.move_to(1)

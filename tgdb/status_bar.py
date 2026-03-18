@@ -85,6 +85,33 @@ class StatusBar(Widget):
         self._message       = ""
         self.refresh()
 
+    def feed_key(self, key: str, char: str) -> bool:
+        """Handle command-bar input even if focus hasn't switched yet."""
+        if not self._input_active:
+            return False
+
+        if key == "escape":
+            self._input_active = False
+            self.post_message(CommandCancel())
+        elif key in ("enter", "return"):
+            cmd = self._input_buf
+            self._input_active = False
+            self._input_buf = ""
+            self.refresh()
+            self.post_message(CommandSubmit(cmd))
+        elif key in ("backspace", "ctrl+h"):
+            self._input_buf = self._input_buf[:-1]
+            if not self._input_buf:
+                self._input_active = False
+                self.post_message(CommandCancel())
+            self.refresh()
+        elif char and char.isprintable():
+            self._input_buf += char
+            self.refresh()
+        else:
+            return False
+        return True
+
     # ------------------------------------------------------------------
     # Rendering — returns a single-line Rich Text
     # ------------------------------------------------------------------
@@ -127,30 +154,8 @@ class StatusBar(Widget):
     # ------------------------------------------------------------------
 
     def on_key(self, event: events.Key) -> None:
-        if not self._input_active:
-            return
-        key  = event.key
-        char = event.character or ""
-
-        if key == "escape":
-            self._input_active = False
-            self.post_message(CommandCancel())
-        elif key in ("enter", "return"):
-            cmd = self._input_buf
-            self._input_active = False
-            self._input_buf    = ""
-            self.refresh()
-            self.post_message(CommandSubmit(cmd))
-        elif key in ("backspace", "ctrl+h"):
-            self._input_buf = self._input_buf[:-1]
-            if not self._input_buf:
-                self._input_active = False
-                self.post_message(CommandCancel())
-            self.refresh()
-        elif char and char.isprintable():
-            self._input_buf += char
-            self.refresh()
-        event.stop()
+        if self.feed_key(event.key, event.character or ""):
+            event.stop()
 
 
     # ------------------------------------------------------------------

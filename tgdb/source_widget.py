@@ -155,6 +155,7 @@ class SourceView(Widget):
         self._await_g: bool = False      # true after first 'g' (for 'gg')
         self._col_offset: int = 0        # horizontal scroll (cgdb sel_col)
         self._show_logo: bool = False    # force logo display (:logo command)
+        self._file_positions: dict[str, int] = {}
         self.can_focus = True
 
     # ------------------------------------------------------------------
@@ -163,21 +164,26 @@ class SourceView(Widget):
 
     def load_file(self, path: str) -> bool:
         try:
+            previous = self.source_file
+            if previous:
+                self._file_positions[previous.path] = self.sel_line
+
             with open(path, errors="replace") as f:
                 content = f.read()
             lines = content.expandtabs(self.tabstop).splitlines()
             if not lines:
                 lines = [""]
             sf = SourceFile(path, lines)
-            if self.source_file and self.source_file.path == path:
-                sf.bp_flags = list(self.source_file.bp_flags[:len(lines)])
+            if previous and previous.path == path:
+                sf.bp_flags = list(previous.bp_flags[:len(lines)])
                 while len(sf.bp_flags) < len(lines):
                     sf.bp_flags.append(BP_NONE)
-                sf.marks_local = dict(self.source_file.marks_local)
+                sf.marks_local = dict(previous.marks_local)
             self.source_file = sf
             self._show_logo = False
             self._col_offset = 0
-            self.sel_line = max(1, min(self.sel_line, len(lines)))
+            target_line = self._file_positions.get(path, 1)
+            self.sel_line = max(1, min(target_line, len(lines)))
             self._ensure_visible(self.sel_line)
             self.refresh()
             return True
@@ -563,6 +569,14 @@ class SourceView(Widget):
         key = event.key
         char = event.character or ""
 
+        if getattr(self.app, "_mode", None) == "STATUS":
+            from .status_bar import StatusBar
+
+            status = self.app.query_one("#status", StatusBar)
+            if status.feed_key(key, char):
+                event.stop()
+                return
+
         if self._search_active:
             self._handle_search_input(key, char)
             event.stop()
@@ -622,6 +636,13 @@ class SourceView(Widget):
             if sf2:
                 self.post_message(GDBCommand(f"until {sf2.path}:{self.sel_line}"))
         elif char == "o":                   self.post_message(OpenFileDialog())
+        elif key == "colon" or char == ":":
+            from .status_bar import StatusBar
+
+            status = self.app.query_one("#status", StatusBar)
+            status.start_command()
+            self.app._set_mode("STATUS")
+            status.focus()
         elif key == "apostrophe":           self.post_message(AwaitMarkJump())
         elif char == "m":                   self.post_message(AwaitMarkSet())
         elif key == "ctrl+l":               self.app.refresh()
