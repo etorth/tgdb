@@ -105,7 +105,7 @@ int main() {
     registry["legacy"] = {"macros", "void*", "goto", "😊"};
 
 
-    registry["cjk_test"] = {"开发", "テスト", "코드", 😊}; // CN, JP, KR, Emoji
+    registry["cjk_test"] = {"开发", "テスト", "코드", "😊"}; // CN, JP, KR, Emoji
                                                        //
 
     std::string normal = "Standard String";
