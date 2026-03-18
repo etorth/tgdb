@@ -599,6 +599,11 @@ class SourceView(Widget):
             if not self.search_prev(): self.post_message(StatusMessage("Pattern not found"))
         elif key == "space":                self.post_message(ToggleBreakpoint(self.sel_line))
         elif char == "t":                   self.post_message(ToggleBreakpoint(self.sel_line, temporary=True))
+        elif char == "u":
+            # cgdb source_input 'u': run until current cursor location
+            sf2 = self.source_file
+            if sf2:
+                self.post_message(GDBCommand(f"until {sf2.path}:{self.sel_line}"))
         elif char == "o":                   self.post_message(OpenFileDialog())
         elif key == "apostrophe":           self.post_message(AwaitMarkJump())
         elif char == "m":                   self.post_message(AwaitMarkSet())
@@ -609,6 +614,7 @@ class SourceView(Widget):
         elif key == "plus":                 self.post_message(ResizeSource(1,  jump=True))
         elif key == "ctrl+w":               self.post_message(ToggleOrientation())
         elif key == "ctrl+t":               self.post_message(OpenTTY())
+        elif key == "f1":                   self.post_message(ShowHelp())  # cgdb: if_display_help
         elif key == "f5":                   self.post_message(GDBCommand("run"))
         elif key == "f6":                   self.post_message(GDBCommand("continue"))
         elif key == "f7":                   self.post_message(GDBCommand("finish"))
@@ -687,6 +693,7 @@ class ResizeSource(Message):
 
 class ToggleOrientation(Message): pass
 class OpenTTY(Message):           pass
+class ShowHelp(Message):          pass
 
 class GDBCommand(Message):
     def __init__(self, cmd: str) -> None:
