@@ -154,6 +154,7 @@ class GDBWidget(Widget):
 
         # Scrollback: lines captured as they scroll off the pyte screen
         self._scrollback: deque[Text] = deque(maxlen=max_scrollback)
+        self.debugwincolor: bool = True  # :set debugwincolor — show ANSI colors
         # pyte terminal (lazily resized to match widget)
         self._screen: Optional[_GDBScreen] = None
         self._stream: Optional[pyte.ByteStream] = None
@@ -179,7 +180,6 @@ class GDBWidget(Widget):
 
         self.ignorecase: bool = False
         self.wrapscan:   bool = True
-        self.debugwincolor: bool = True  # :set debugwincolor — show ANSI colors
         self._num_buf:   str  = ""
         self._await_g:   bool = False   # true after first 'g' (for 'gg')
         self._dot_pending: bool = False  # true after apostrophe (for `'.`)

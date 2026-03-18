@@ -208,7 +208,7 @@ class TGDBApp(App):
         self.gdb.on_running      = lambda     : self.call_later(self._ui_on_running)
         self.gdb.on_breakpoints  = lambda    b: self.call_later(self._ui_set_breakpoints, b)
         self.gdb.on_source_files = lambda    f: self.call_later(self._ui_set_source_files, f)
-        self.gdb.on_source_file  = lambda    f: self.call_later(self._ui_load_source_file, f)
+        self.gdb.on_source_file  = lambda f, l: self.call_later(self._ui_load_source_file, f, l)
         self.gdb.on_exit         = lambda     : self.call_later(self._ui_gdb_exit)
         self.gdb.on_error        = lambda    m: self.call_later(self._show_status, f"Error: {m}")
 
@@ -555,7 +555,7 @@ class TGDBApp(App):
         except NoMatches:
             pass
 
-    def _ui_load_source_file(self, path: str) -> None:
+    def _ui_load_source_file(self, path: str, line: int = 0) -> None:
         """Load a specific source file (from -file-list-exec-source-file)."""
         if not os.path.isfile(path):
             return
@@ -564,6 +564,8 @@ class TGDBApp(App):
             # Only load if no file is shown yet (don't override a user selection)
             if not src.source_file:
                 src.load_file(path)
+                if line > 0:
+                    src.move_to(line)
                 self._update_status_file_info()
         except NoMatches:
             pass
@@ -587,6 +589,7 @@ class TGDBApp(App):
             return lambda a: self._send_gdb_cli(c) or None
 
         cmds = {
+            "bang":    self._cmd_bang,
             "quit":    self._cmd_quit,    "q":    self._cmd_quit,
             "help":    self._cmd_help,
             "edit":    self._cmd_edit,    "e":    self._cmd_edit,
@@ -631,11 +634,20 @@ class TGDBApp(App):
             src.source_file._tokens = None
             src.load_file(src.source_file.path)
 
-    def _cmd_focus(self, args: list) -> None:
-        if args and args[0].lower() in ("gdb", "gdbw"):
+    def _cmd_bang(self, _: list) -> None:
+        # cgdb registers :bang, but command_do_bang() is currently a no-op.
+        return None
+
+    def _cmd_focus(self, args: list) -> Optional[str]:
+        if len(args) != 1:
+            return "focus: requires cgdb or gdb"
+        if args[0].lower() == "gdb":
             self._switch_to_gdb()
-        else:
+            return None
+        if args[0].lower() == "cgdb":
             self._switch_to_cgdb()
+            return None
+        return "focus: requires cgdb or gdb"
 
     def _cmd_noh(self, _: list) -> None:
         self.cfg.hlsearch = False
@@ -654,13 +666,25 @@ class TGDBApp(App):
         # No args: cgdb prints info (TODO); we just refresh
         self._sync_config()
 
-    def _cmd_shell(self, args: list) -> None:
-        import subprocess, shlex
-        if args:
-            try:
-                subprocess.Popen(shlex.join(args), shell=True)
-            except Exception as e:
-                self._show_status(str(e))
+    def _cmd_shell(self, args: list) -> Optional[str]:
+        import os
+        import shlex
+        import subprocess
+
+        try:
+            with self.suspend():
+                if args:
+                    subprocess.call(shlex.join(args), shell=True)
+                else:
+                    subprocess.call([os.environ.get("SHELL", "/bin/sh")])
+                try:
+                    input("Hit ENTER to continue...")
+                except EOFError:
+                    pass
+        except Exception as e:
+            return str(e)
+        self.refresh()
+        return None
 
     def _send_gdb_cli(self, cmd: str) -> None:
         if self.cfg.showdebugcommands:
