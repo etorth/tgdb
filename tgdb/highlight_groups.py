@@ -48,8 +48,8 @@ CGDB_COLORS: dict[str, str] = {
     "darkcyan": "cyan",
     "darkred": "red",
     "darkmagenta": "magenta",
-    "brown": "dark_orange",
-    "darkyellow": "dark_orange",
+    "brown": "yellow",
+    "darkyellow": "yellow",
     "lightgray": "white",
     "lightgrey": "white",
     "gray": "white",
@@ -78,6 +78,9 @@ def resolve_color(name: str) -> str:
     if name in ("-1", "none", ""):
         return ""
     lower = name.lower()
+    if lower.lstrip("-").isdigit():
+        number = int(lower)
+        return "" if number < 0 else f"color({number})"
     return CGDB_COLORS.get(lower, lower)
 
 

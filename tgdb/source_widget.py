@@ -229,15 +229,14 @@ class SourceView(Widget):
         return max(1, self.size.height)
 
     def _ensure_visible(self, line: int) -> None:
+        """Mirror cgdb: keep the selected line centered when possible."""
         h = self._visible_height()
+        n = self._line_count()
         idx = line - 1
-        if idx < self._scroll_top:
-            self._scroll_top = idx
-        elif idx >= self._scroll_top + h:
-            self._scroll_top = idx - h + 1
-        self._scroll_top = max(0, min(
-            self._scroll_top, max(0, self._line_count() - h)
-        ))
+        if n <= 0 or n < h:
+            self._scroll_top = 0
+        else:
+            self._scroll_top = max(0, min(idx - h // 2, n - h))
 
     def move_to(self, line: int) -> None:
         n = self._line_count()
@@ -253,14 +252,14 @@ class SourceView(Widget):
         self.refresh()
     def page_up(self) -> None:
         h = self._visible_height()
-        self._scroll_top = max(0, self._scroll_top - h)
         self.sel_line = max(1, self.sel_line - h)
+        self._ensure_visible(self.sel_line)
         self.refresh()
     def page_down(self) -> None:
         h = self._visible_height()
         n = self._line_count()
-        self._scroll_top = min(max(0, n - h), self._scroll_top + h)
         self.sel_line = min(n if n else 1, self.sel_line + h)
+        self._ensure_visible(self.sel_line)
         self.refresh()
     def half_page_up(self) -> None:    self.scroll_up(self._visible_height() // 2)
     def half_page_down(self) -> None:  self.scroll_down(self._visible_height() // 2)
@@ -379,14 +378,18 @@ class SourceView(Widget):
                 # else: empty row (blank padding above/below logo)
             return result
 
+        render_top = self._scroll_top
+        if len(sf.lines) < h:
+            render_top = (len(sf.lines) - h) // 2
+
         for y in range(h):
-            line_idx = self._scroll_top + y   # 0-based
+            line_idx = render_top + y   # 0-based; may be negative for vertical centering
             result.append_text(self._build_line(line_idx, sf))
             if y < h - 1:
                 result.append("\n")
         return result
 
-    # Width of the line-number field (minimum 2, grows with file size)
+    # Width of the line-number field (minimum 1, grows with file size)
     def _nr_width(self) -> int:
         n = len(self.source_file.lines) if self.source_file else 0
         return max(1, len(str(max(n, 1))))
@@ -397,7 +400,7 @@ class SourceView(Widget):
         nr_w = self._nr_width()
 
         # Beyond end of file → vim-style "~│" matching cgdb: (lwidth-1 spaces)(~)(│)
-        if line_idx >= len(sf.lines):
+        if line_idx < 0 or line_idx >= len(sf.lines):
             filler = Text(no_wrap=True, overflow="crop")
             filler.append(" " * (nr_w - 1), style=self.hl.style("LineNumber"))
             filler.append("~│", style=self.hl.style("LineNumber"))

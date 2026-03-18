@@ -187,7 +187,7 @@ class GDBController:
         on_running()                         — execution resumed
         on_breakpoints(bps: list[Breakpoint])
         on_source_files(files: list[str])
-        on_source_file(path: str)            — single current source file
+        on_source_file(path: str, line: int) — single current source file + line
         on_exit()                            — GDB exited
         on_error(msg: str)                   — ^error
     """
@@ -215,8 +215,8 @@ class GDBController:
         self.on_stopped: Callable[[Frame], None]              = lambda f: None
         self.on_running: Callable[[], None]                   = lambda: None
         self.on_breakpoints: Callable[[list[Breakpoint]], None] = lambda b: None
-        self.on_source_files: Callable[[list[str]], None]     = lambda f: None
-        self.on_source_file: Callable[[str], None]            = lambda f: None
+        self.on_source_files: Callable[[list[str]], None]        = lambda f: None
+        self.on_source_file: Callable[[str, int], None]          = lambda f, l: None
         self.on_exit: Callable[[], None]                      = lambda: None
         self.on_error: Callable[[str], None]                  = lambda m: None
 
@@ -388,7 +388,11 @@ class GDBController:
                 self.handle_breaklist_result(results)
             fullname = results.get("fullname")
             if fullname and isinstance(fullname, str):
-                self.on_source_file(fullname)
+                try:
+                    line = int(results.get("line", 0) or 0)
+                except (TypeError, ValueError):
+                    line = 0
+                self.on_source_file(fullname, line)
             files = results.get("files")
             if files:
                 self._handle_source_files(files)
