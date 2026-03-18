@@ -56,7 +56,7 @@ void literals_test() {
     const char8_t* u8_str = u8"UTF-8 string";
 
     // CJK and Unicode prefixes
-    const char8_t* u8_cjk = u8"UTF-8: 汉字, 日本語, 한국어"; // Testing multi-byte widths
+    const char8_t* u8_cjk = u8"UTF-8: 汉字, 日本語, 한국어, 😊"; // Testing multi-byte widths
     const char16_t* u16_val = u"Unicode: \u4F60\u597D";       // "Hello" in Chinese
     const char32_t* u32_val = U"Emoji: \U0001F343";           // Leaf emoji
 
@@ -65,9 +65,10 @@ void literals_test() {
         Multiline CJK test:
         - 程序员 (Programmer)
         - 调试 (Debug)
+        - 😊
     )zhongwen";
 
-    const char8_t* raw_u8 = u8R"---(Mixed "Raw" and 漢字)---";
+    const char8_t* raw_u8 = u8R"---(Mixed "Raw" and 漢字 and 😊)---";
 }
 
 // 4. Coroutines
@@ -101,14 +102,14 @@ int main() {
 
     StringMap registry;
     registry["cpp26"] = {"placeholder", "pack_indexing", "structured_bindings"};
-    registry["legacy"] = {"macros", "void*", "goto"};
+    registry["legacy"] = {"macros", "void*", "goto", "😊"};
 
 
-    registry["cjk_test"] = {"开发", "テスト", "코드"}; // CN, JP, KR
+    registry["cjk_test"] = {"开发", "テスト", "코드", 😊}; // CN, JP, KR, Emoji
                                                        //
 
     std::string normal = "Standard String";
-    std::u8string utf8 = u8"UTF-8: \u2713";
+    std::u8string utf8 = u8"UTF-8: \u2713, 😊";
 
     std::string emoji_test = "Emoji test: \U0001F680";
     std::string escape_hell = "Tab\tNewline\nHex\x0AOctal\012";
@@ -125,7 +126,7 @@ int main() {
     auto res = get_value(false);
     if (res) {
         int val = *res;
-        std::cout << "Value: " << val << "\n";
+        std::cout << "Value: " << val << " 😊"<< "\n";
     }
 
     // C++20/23 RANGES STRESS TEST
