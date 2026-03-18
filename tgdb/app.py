@@ -202,14 +202,14 @@ class TGDBApp(App):
 
         # GDB callbacks — on_console now delivers raw bytes from GDB's PTY,
         # fed directly into the pyte VT100 emulator (matching cgdb's libvterm).
-        self.gdb.on_console     = lambda data: self.call_later(gdb_w.feed_bytes, data)
-        self.gdb.on_stopped     = lambda f: self.call_later(self._ui_on_stopped, f)
-        self.gdb.on_running     = lambda:   self.call_later(self._ui_on_running)
-        self.gdb.on_breakpoints = lambda b: self.call_later(self._ui_set_breakpoints, b)
-        self.gdb.on_source_files= lambda f: self.call_later(self._ui_set_source_files, f)
-        self.gdb.on_source_file = lambda f: self.call_later(self._ui_load_source_file, f)
-        self.gdb.on_exit        = lambda:   self.call_later(self._ui_gdb_exit)
-        self.gdb.on_error       = lambda m: self.call_later(self._show_status, f"Error: {m}")
+        self.gdb.on_console      = lambda data: self.call_later(gdb_w.feed_bytes, data)
+        self.gdb.on_stopped      = lambda    f: self.call_later(self._ui_on_stopped, f)
+        self.gdb.on_running      = lambda     : self.call_later(self._ui_on_running)
+        self.gdb.on_breakpoints  = lambda    b: self.call_later(self._ui_set_breakpoints, b)
+        self.gdb.on_source_files = lambda    f: self.call_later(self._ui_set_source_files, f)
+        self.gdb.on_source_file  = lambda    f: self.call_later(self._ui_load_source_file, f)
+        self.gdb.on_exit         = lambda     : self.call_later(self._ui_gdb_exit)
+        self.gdb.on_error        = lambda    m: self.call_later(self._show_status, f"Error: {m}")
 
         # Start GDB process
         try:
