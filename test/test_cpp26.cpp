@@ -61,11 +61,11 @@ void literals_test() {
     const char32_t* u32_val = U"Emoji: \U0001F343";           // Leaf emoji
 
     // Raw String with CJK delimiters and content
-    const char* raw_cjk = R"中文(
+    const char* raw_cjk = R"zhongwen(
         Multiline CJK test:
         - 程序员 (Programmer)
         - 调试 (Debug)
-    )中文";
+    )zhongwen";
 
     const char8_t* raw_u8 = u8R"---(Mixed "Raw" and 漢字)---";
 }
