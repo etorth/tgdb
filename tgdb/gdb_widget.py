@@ -275,11 +275,8 @@ class GDBWidget(Widget):
         total = len(lines)
         start = max(0, total - h - self._scroll_offset)
         w = self.size.width or 80
-
-        result = Text(no_wrap=True, overflow="crop")
+        rendered_lines: list[Text] = []
         for y in range(h):
-            if y > 0:
-                result.append("\n")
             idx = start + y
             if idx < total:
                 line = lines[idx].copy()
@@ -300,22 +297,27 @@ class GDBWidget(Widget):
                         line = line[self._h_offset:]
                     else:
                         line = Text()
-                result.append_text(line)
+                rendered_lines.append(line)
+            else:
+                rendered_lines.append(Text())
 
-        # Replace last line with scroll status bar
-        pct  = int((total - self._scroll_offset) * 100 / total) if total else 100
-        stat = (f" --scroll-- {self._scroll_offset} lines above"
-                f" ({pct}%) ── q/i/Enter to return")
-        # Rebuild: re-split and replace last line
-        parts = result.plain.split("\n")
-        out   = Text(no_wrap=True, overflow="crop")
-        for i, p in enumerate(parts):
+        # Mirror cgdb scroller.cpp: overlay "[delta/total]" on the top-right.
+        if rendered_lines:
+            delta = self._scroll_offset
+            sb_total = len(self._scrollback)
+            stat = f"[{delta}/{sb_total}]"
+            first = rendered_lines[0]
+            left_width = max(0, w - len(stat))
+            rendered_lines[0] = Text.assemble(
+                first[:left_width],
+                (stat, self.hl.style("ScrollModeStatus")),
+            )
+
+        out = Text(no_wrap=True, overflow="crop")
+        for i, line in enumerate(rendered_lines):
             if i > 0:
                 out.append("\n")
-            if i == len(parts) - 1:
-                out.append(stat, style=self.hl.style("ScrollModeStatus"))
-            else:
-                out.append(p)
+            out.append_text(line)
         return out
 
     # ------------------------------------------------------------------

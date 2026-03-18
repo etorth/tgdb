@@ -69,7 +69,31 @@ class FileDialog(Widget):
 
     @files.setter
     def files(self, value: list[str]) -> None:
-        self._files = list(value)   # already sorted by controller
+        # Mirror cgdb filedlg_add_file_choice():
+        # - skip empty / duplicate entries
+        # - skip nonexistent files unless they are special '*' entries
+        # - order plain relative paths first, then './' relative paths,
+        #   then absolute paths, with lexicographic ordering inside each group
+        seen: set[str] = set()
+        filtered: list[str] = []
+        for path in value:
+            if not path or path in seen:
+                continue
+            if not path.startswith("*") and not os.path.exists(path):
+                continue
+            seen.add(path)
+            filtered.append(path)
+
+        def sort_key(path: str) -> tuple[int, str]:
+            if path.startswith("/"):
+                group = 2
+            elif path.startswith("."):
+                group = 1
+            else:
+                group = 0
+            return (group, path)
+
+        self._files = sorted(filtered, key=sort_key)
         self._sel   = 0
         self._sel_col = 0
         self.refresh()
