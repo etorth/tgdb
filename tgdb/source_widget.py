@@ -388,7 +388,7 @@ class SourceView(Widget):
     # Width of the line-number field (minimum 2, grows with file size)
     def _nr_width(self) -> int:
         n = len(self.source_file.lines) if self.source_file else 0
-        return max(2, len(str(max(n, 1))))
+        return max(1, len(str(max(n, 1))))
 
     def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
         """Build one visible line as Rich Text, matching cgdb's layout.
@@ -452,11 +452,12 @@ class SourceView(Widget):
             disp = ""
 
         # Compute long-arrow column_offset (cgdb: leading_ws - (sel_col+1))
+        # sel_col is _col_offset (horizontal scroll position)
         col_off = 0
         if disp == "longarrow":
             src_line = sf.lines[line_idx] if line_idx < len(sf.lines) else ""
             leading_ws = len(src_line) - len(src_line.lstrip())
-            col_off = max(0, leading_ws - 1)  # sel_col == 0
+            col_off = max(0, leading_ws - 1 - self._col_offset)
 
         out = Text(no_wrap=True, overflow="crop")
         # Right-aligned line number — no separate gutter column (matches cgdb)
