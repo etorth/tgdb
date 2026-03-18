@@ -1,4 +1,4 @@
-# tgdb — A Python reimplementation of cgdb
+# tgdb — A Python TUI front-end for GDB
 
 `tgdb` is a terminal-based front-end for GDB, reimplemented in Python using
 [Textual](https://textual.textualize.io/) for the TUI and
