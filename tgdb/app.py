@@ -156,6 +156,17 @@ class TGDBApp(App):
         self._await_mark_jump: bool = False
         self._await_mark_set: bool = False
         self._split_ratio: float = 0.5
+        self._cur_win_split: int = {
+            "gdb_full": -2,
+            "gdb_big": -1,
+            "even": 0,
+            "src_big": 1,
+            "src_full": 2,
+        }.get(self.cfg.winsplit.lower(), 0)
+        self._window_shift: int = 0
+        self._last_split_setting: str = ""
+        self._last_orientation: str = ""
+        self._preserve_window_shift_once: bool = False
         self._file_dialog_pending: bool = False
         self._inf_tty_fd: Optional[int] = None
 
@@ -395,49 +406,95 @@ class TGDBApp(App):
     def on_status_message(self, msg: StatusMessage) -> None:
         self._show_status(msg.text)
 
-    # Quarter-mark split ratios, in increasing src size order.
-    # Mirrors cgdb: WIN_SPLIT_GDB_FULL(-2)…WIN_SPLIT_SRC_FULL(2)
-    _QUARTER_MARKS = [0.1, 0.25, 0.5, 0.75, 0.9]
+    _WIN_SPLIT_FREE = -3
+    _SPLIT_MARKS = {
+        "gdb_full": -2,
+        "gdb_big": -1,
+        "even": 0,
+        "src_big": 1,
+        "src_full": 2,
+    }
+    _SPLIT_NAMES = {value: key for key, value in _SPLIT_MARKS.items()}
+
+    def _split_axis(self, is_vertical: bool) -> int:
+        return max(1, self.size.width if is_vertical else self.size.height)
+
+    def _reset_window_shift(self, is_vertical: bool) -> None:
+        half_axis = self._split_axis(is_vertical) // 2
+        self._window_shift = int(half_axis * (self._cur_win_split / 2.0))
+        self._validate_window_shift(is_vertical)
+
+    def _validate_window_shift(self, is_vertical: bool) -> None:
+        axis = self._split_axis(is_vertical)
+        odd_size = (axis + 1) % 2
+        max_shift = (axis // 2) - odd_size
+        min_shift = -(axis // 2)
+
+        if is_vertical:
+            min_shift += self.cfg.winminwidth
+            max_shift -= self.cfg.winminwidth
+        else:
+            min_shift += self.cfg.winminheight
+            max_shift -= self.cfg.winminheight
+
+        if max_shift < min_shift:
+            max_shift = min_shift = 0
+
+        if self._window_shift > max_shift:
+            self._window_shift = max_shift
+        elif self._window_shift < min_shift:
+            self._window_shift = min_shift
+
+    def _compute_split_sizes(self, is_vertical: bool) -> tuple[int, int]:
+        axis = self._split_axis(is_vertical)
+        src_size = (axis // 2) + self._window_shift
+        gdb_size = (axis // 2) - self._window_shift - 1 + (axis % 2)
+        return max(0, src_size), max(0, gdb_size)
 
     def on_resize_source(self, msg: ResizeSource) -> None:
         is_vertical = (self.cfg.winsplitorientation == "vertical")
-        if is_vertical:
-            avail = max(4, self.size.width)
-        else:
-            avail = max(4, self.size.height - 1)
-        min_h = self.cfg.winminheight + 1
+        half_axis = self._split_axis(is_vertical) // 2
 
         if msg.rows:
-            # cgdb '=' / '-': change src size by exactly 1 unit
-            try:
-                src_col = self.query_one("#src-col")
-                cur_sz = src_col.size.width if is_vertical else src_col.size.height
-            except NoMatches:
-                return
-            new_sz = max(min_h, min(avail - min_h, cur_sz + msg.delta))
-            self._split_ratio = new_sz / avail
+            # cgdb '=' / '-': change window_shift by exactly 1 unit
+            self._cur_win_split = self._WIN_SPLIT_FREE
+            self._window_shift += msg.delta
+            self._validate_window_shift(is_vertical)
             self.cfg.winsplit = "free"
             self._apply_split()
 
         elif msg.jump:
-            # cgdb '+' / '_': snap to next/previous quarter mark
-            # (increase_win_height(1) / decrease_win_height(1))
-            marks = self._QUARTER_MARKS
-            cur   = self._split_ratio
+            # cgdb '+' / '_': jump to the next quarter-mark split.
+            split = self._cur_win_split
+            if split == self._WIN_SPLIT_FREE and half_axis > 0:
+                split = int((2 * self._window_shift) / half_axis)
+
             if msg.delta > 0:
-                # find first mark strictly above current ratio
-                nxt = next((m for m in marks if m > cur + 0.01), marks[-1])
+                if self._cur_win_split == self._WIN_SPLIT_FREE and self._window_shift > 0:
+                    split += 1
+                elif self._cur_win_split != self._WIN_SPLIT_FREE:
+                    split += 1
+                split = min(2, split)
             else:
-                # find last mark strictly below current ratio
-                nxt = next((m for m in reversed(marks) if m < cur - 0.01), marks[0])
-            self._split_ratio = nxt
-            self.cfg.winsplit = "free"   # like cgdb WIN_SPLIT_FREE
+                if self._cur_win_split == self._WIN_SPLIT_FREE and self._window_shift < 0:
+                    split -= 1
+                elif self._cur_win_split != self._WIN_SPLIT_FREE:
+                    split -= 1
+                split = max(-2, split)
+
+            self._cur_win_split = split
+            self._window_shift = int(half_axis * (split / 2.0))
+            self._validate_window_shift(is_vertical)
+            self.cfg.winsplit = self._SPLIT_NAMES[split]
             self._apply_split()
 
         else:
             # legacy percent mode
-            self._split_ratio = max(0.1, min(0.9,
-                self._split_ratio + msg.delta / 100))
+            axis = self._split_axis(is_vertical)
+            self._cur_win_split = self._WIN_SPLIT_FREE
+            self._window_shift += int((axis * msg.delta) / 100)
+            self._validate_window_shift(is_vertical)
+            self.cfg.winsplit = "free"
             self._apply_split()
 
     def on_toggle_orientation(self, _: ToggleOrientation) -> None:
@@ -445,6 +502,7 @@ class TGDBApp(App):
             "vertical" if self.cfg.winsplitorientation == "horizontal"
             else "horizontal"
         )
+        self._preserve_window_shift_once = True
         self._apply_split()
 
     def on_gdb_command(self, msg: GDBCommand) -> None:
@@ -703,10 +761,26 @@ class TGDBApp(App):
 
     def _apply_split(self) -> None:
         split = self.cfg.winsplit.lower()
-        ratio = {"src_full": 0.9, "src_big": 0.7, "even": 0.5,
-                 "gdb_big": 0.3, "gdb_full": 0.1}.get(split, self._split_ratio)
-        self._split_ratio = ratio
         is_vertical = (self.cfg.winsplitorientation == "vertical")
+        split_changed = split != self._last_split_setting
+        orientation_changed = (
+            self.cfg.winsplitorientation != self._last_orientation
+        )
+
+        if split in self._SPLIT_MARKS:
+            self._cur_win_split = self._SPLIT_MARKS[split]
+            if split_changed or (
+                orientation_changed
+                and not self._preserve_window_shift_once
+                and self._cur_win_split != self._WIN_SPLIT_FREE
+            ):
+                self._reset_window_shift(is_vertical)
+
+        self._validate_window_shift(is_vertical)
+        src_size, gdb_size = self._compute_split_sizes(is_vertical)
+        axis = max(1, self._split_axis(is_vertical) - 1)
+        self._split_ratio = src_size / axis
+
         try:
             container = self.query_one("#split-container")
             src_col   = self.query_one("#src-col")
@@ -714,57 +788,51 @@ class TGDBApp(App):
             gdb       = self.query_one("#gdb-pane")
             status    = self.query_one("#status")
             vsep      = self.query_one("#vsep")
-            min_h     = self.cfg.winminheight + 1
             if is_vertical:
                 # cgdb WSO_VERTICAL: src+status on left, │ separator, gdb on right
                 # Separator is 1 col wide, full height
                 vsep.add_class("visible")
                 container.styles.layout = "horizontal"
-                total_w = max(6, self.size.width)
-                # Reserve 1 col for separator
-                avail_w = total_w - 1
-                src_w   = max(min_h, min(avail_w - min_h, int(avail_w * ratio)))
-                gdb_w   = max(min_h, avail_w - src_w)
-                src_col.styles.width  = src_w
+                src_col.styles.width  = src_size
                 src_col.styles.height = "1fr"
                 src.styles.width  = "1fr"
                 src.styles.height = "1fr"
                 status.styles.width = "1fr"
-                gdb.styles.width  = gdb_w
+                gdb.styles.width  = gdb_size
                 gdb.styles.height = "1fr"
                 status.drag_enabled = False  # vertical split: drag vsep instead
             else:
                 # cgdb WSO_HORIZONTAL: src on top, status bar below src, gdb below status
                 vsep.remove_class("visible")
                 container.styles.layout = "vertical"
-                total_h = max(4, self.size.height - 1)
-                src_h   = max(min_h, min(total_h - min_h, int(total_h * ratio)))
-                gdb_h   = max(min_h, total_h - src_h)
                 src_col.styles.width  = "1fr"
-                src_col.styles.height = src_h + 1   # src rows + 1 status row
+                src_col.styles.height = src_size + 1   # src rows + 1 status row
                 src.styles.width  = "1fr"
-                src.styles.height = src_h
+                src.styles.height = src_size
                 status.styles.width = "1fr"
                 gdb.styles.width  = "1fr"
-                gdb.styles.height = gdb_h
+                gdb.styles.height = gdb_size
                 status.drag_enabled = True   # horizontal split: drag status bar to resize
         except NoMatches:
             pass
+        finally:
+            self._last_split_setting = split
+            self._last_orientation = self.cfg.winsplitorientation
+            self._preserve_window_shift_once = False
 
     def on_drag_resize(self, msg: DragResize) -> None:
         """Mouse drag on status bar (horizontal) or vsep (vertical) — resize panes."""
         is_vertical = (self.cfg.winsplitorientation == "vertical")
-        min_h = self.cfg.winminheight + 1
+        half_axis = self._split_axis(is_vertical) // 2
+        self._cur_win_split = self._WIN_SPLIT_FREE
         if is_vertical:
             # Drag vsep: screen_x is the column the separator is at
             # src-col takes columns 0..screen_x-1
-            avail = max(4, self.size.width - 1)  # minus 1 for vsep
-            src_sz = max(min_h, min(avail - min_h, msg.screen_x))
+            self._window_shift = msg.screen_x - half_axis
         else:
             # Drag status bar: screen_y is the row the status bar is at
-            avail = max(4, self.size.height - 1)
-            src_sz = max(min_h, min(avail - min_h, msg.screen_y))
-        self._split_ratio = src_sz / avail
+            self._window_shift = msg.screen_y - half_axis
+        self._validate_window_shift(is_vertical)
         self.cfg.winsplit = "free"
         self._apply_split()
 

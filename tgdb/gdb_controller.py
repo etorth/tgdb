@@ -529,13 +529,18 @@ class GDBController:
     def _handle_source_files(self, files) -> None:
         if isinstance(files, list):
             paths: list[str] = []
+            seen: set[str] = set()
             for f in files:
                 if isinstance(f, dict):
                     p = f.get("fullname") or f.get("file", "")
-                    if p: paths.append(p)
+                    if p and p not in seen:
+                        seen.add(p)
+                        paths.append(p)
                 elif isinstance(f, str):
-                    paths.append(f)
-            self.source_files = sorted(set(paths))
+                    if f and f not in seen:
+                        seen.add(f)
+                        paths.append(f)
+            self.source_files = paths
             self.on_source_files(list(self.source_files))
 
     @staticmethod
