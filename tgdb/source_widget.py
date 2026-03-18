@@ -152,6 +152,8 @@ class SourceView(Widget):
         self._last_jump_line: int = 1
         self._num_buf: str = ""
         self._await_g: bool = False      # true after first 'g' (for 'gg')
+        self._col_offset: int = 0        # horizontal scroll (cgdb sel_col)
+        self._show_logo: bool = False    # force logo display (:logo command)
         self.can_focus = True
 
     # ------------------------------------------------------------------
@@ -172,6 +174,8 @@ class SourceView(Widget):
                     sf.bp_flags.append(BP_NONE)
                 sf.marks_local = dict(self.source_file.marks_local)
             self.source_file = sf
+            self._show_logo = False
+            self._col_offset = 0
             self.sel_line = max(1, min(self.sel_line, len(lines)))
             self._ensure_visible(self.sel_line)
             self.refresh()
@@ -242,6 +246,10 @@ class SourceView(Widget):
 
     def scroll_up(self, n: int = 1) -> None:   self.move_to(self.sel_line - n)
     def scroll_down(self, n: int = 1) -> None:  self.move_to(self.sel_line + n)
+    def scroll_col(self, delta: int) -> None:
+        """Horizontal scroll — cgdb sel_col."""
+        self._col_offset = max(0, self._col_offset + delta)
+        self.refresh()
     def page_up(self) -> None:
         h = self._visible_height()
         self._scroll_top = max(0, self._scroll_top - h)
@@ -266,6 +274,10 @@ class SourceView(Widget):
         tmp = self._last_jump_line
         self._last_jump_line = self.sel_line
         self.move_to(tmp)
+    def show_logo(self) -> None:
+        """Force logo display (:logo command)."""
+        self._show_logo = True
+        self.refresh()
     def goto_screen_top(self) -> None:    self.move_to(self._scroll_top + 1)
     def goto_screen_middle(self) -> None:
         self.move_to(self._scroll_top + self._visible_height() // 2 + 1)
@@ -347,8 +359,8 @@ class SourceView(Widget):
         sf = self.source_file
         result = Text(no_wrap=True, overflow="crop")
 
-        # ── Logo: centered vertically and horizontally when no file loaded ──
-        if sf is None:
+        # ── Logo: shown when no file loaded or :logo was called ──
+        if sf is None or self._show_logo:
             logo  = _LOGO_LINES
             v_pad = max(0, (h - len(logo)) // 2)  # rows above logo
             style = self.hl.style("Logo")
@@ -488,9 +500,11 @@ class SourceView(Widget):
             spans = [(sf.lines[line_idx], "Normal")]
 
         # For long arrow: skip col_off leading whitespace chars (cgdb: sel_col + column_offset)
-        if col_off > 0:
+        # For horizontal scroll (_col_offset): skip additional chars from the source text.
+        total_skip = col_off + self._col_offset
+        if total_skip > 0:
             trimmed = []
-            skip = col_off
+            skip = total_skip
             for tok_text, group in spans:
                 if skip <= 0:
                     trimmed.append((tok_text, group))
@@ -559,11 +573,13 @@ class SourceView(Widget):
         consumed = True
         if key in ("j", "down"):            self.scroll_down(count)
         elif key in ("k", "up"):            self.scroll_up(count)
+        elif key in ("h", "left"):          self.scroll_col(-count)
+        elif key in ("l", "right"):         self.scroll_col(count)
         elif key in ("ctrl+f", "pagedown"): [self.page_down() for _ in range(count)]
         elif key in ("ctrl+b", "pageup"):   [self.page_up()   for _ in range(count)]
         elif key == "ctrl+d":               self.half_page_down()
         elif key == "ctrl+u":               self.half_page_up()
-        elif key == "G":                    self.goto_bottom(count if self._num_buf == "" and count != 1 else None) or self.goto_bottom()
+        elif key == "G":                    self.goto_bottom(count if count != 1 else None)
         elif key == "H":                    self.goto_screen_top()
         elif key == "M":                    self.goto_screen_middle()
         elif key == "L":                    self.goto_screen_bottom()
