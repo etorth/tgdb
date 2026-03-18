@@ -595,6 +595,7 @@ class TGDBApp(App):
             "noh":     self._cmd_noh,
             "shell":   self._cmd_shell,   "sh":   self._cmd_shell,
             "logo":    self._cmd_logo,
+            "syntax":  self._cmd_syntax,
             "continue": gdb_cmd("continue"), "c":   gdb_cmd("continue"),
             "next":     gdb_cmd("next"),     "n":   gdb_cmd("next"),
             "nexti":    gdb_cmd("nexti"),
@@ -644,6 +645,14 @@ class TGDBApp(App):
             src.refresh()
         except NoMatches:
             pass
+
+    def _cmd_syntax(self, args: list) -> None:
+        """Mirror cgdb's :syntax [on|off|c|asm|…] command."""
+        value = args[0] if args else ""
+        if value:
+            self.cp._set_option("syntax", value)
+        # No args: cgdb prints info (TODO); we just refresh
+        self._sync_config()
 
     def _cmd_shell(self, args: list) -> None:
         import subprocess, shlex
@@ -767,6 +776,7 @@ class TGDBApp(App):
             src.ignorecase = cfg.ignorecase
             src.wrapscan   = cfg.wrapscan
             src.showmarks  = cfg.showmarks
+            src.color      = cfg.color
             # If tabstop changed, reload the current file so tabs are re-expanded
             # and the token cache is rebuilt with the new width.
             if cfg.tabstop != old_tabstop and src.source_file.path:
@@ -780,6 +790,10 @@ class TGDBApp(App):
             gdb_w.ignorecase     = cfg.ignorecase
             gdb_w.wrapscan       = cfg.wrapscan
             gdb_w.max_scrollback = cfg.scrollbackbuffersize
+            gdb_w.debugwincolor  = cfg.debugwincolor
+            if gdb_w._screen:
+                gdb_w._screen.use_color = cfg.debugwincolor
+            gdb_w.refresh()
         except NoMatches:
             pass
         self.km.timeout_ms       = cfg.timeoutlen

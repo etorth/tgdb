@@ -308,7 +308,14 @@ class ConfigParser:
     _KEY_NAMES = {
         "space": " ", "enter": "\r", "return": "\r", "cr": "\r",
         "nl": "\n", "tab": "\t", "esc": "\x1b", "escape": "\x1b",
-        "bs": "\x08", "backspace": "\x08", "del": "\x7f",
+        "bs": "\x08", "backspace": "\x08",
+        "del": "\x7f", "delete": "\x7f",
+        "insert": "\x1b[2~",
+        "nul": "\x00",
+        "ff": "\x0c",           # formfeed
+        "lt": "<",              # less-than
+        "bslash": "\\",         # backslash
+        "bar": "|",             # vertical bar
         "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
         "pageup": "\x1b[5~", "pagedown": "\x1b[6~",
         "home": "\x1b[H", "end": "\x1b[F",
@@ -321,10 +328,13 @@ class ConfigParser:
     def _keyname(self, token: str) -> str:
         if token in self._KEY_NAMES:
             return self._KEY_NAMES[token]
-        # C-x → Ctrl char
+        # C-x → Ctrl char (e.g. <C-a> → 0x01)
         if token.startswith("c-") and len(token) == 3:
             ch = token[2]
             return chr(ord(ch.upper()) - 64)
+        # S-x → shifted char (e.g. <S-a> → 'A')  cgdb: shift keys
+        if token.startswith("s-") and len(token) == 3:
+            return token[2].upper()
         # M-x → Alt (ESC + char)
         if token.startswith("m-") and len(token) == 3:
             return "\x1b" + token[2]
