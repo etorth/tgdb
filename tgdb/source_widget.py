@@ -148,6 +148,7 @@ class SourceView(Widget):
         self.ignorecase: bool = False
         self.wrapscan: bool = True
         self.showmarks: bool = True
+        self.color: bool = True          # :set color — enables/disables syntax colors
         self._global_marks: dict[str, tuple[str, int]] = {}
         self._last_jump_line: int = 1
         self._num_buf: str = ""
@@ -518,7 +519,19 @@ class SourceView(Widget):
 
         src_t = Text(no_wrap=True, overflow="crop")
         for tok_text, group in spans:
-            st = line_bg if line_bg else self.hl.style(group)
+            if line_bg:
+                st = line_bg
+            elif self.color:
+                st = self.hl.style(group)
+            else:
+                # :set color off — strip colors, keep only bold/reverse attrs
+                # (matches cgdb: uses A_BOLD/A_REVERSE only when color disabled)
+                hs = self.hl.get(group)
+                attrs = []
+                if hs.bold:    attrs.append("bold")
+                if hs.reverse: attrs.append("reverse")
+                if hs.underline: attrs.append("underline")
+                st = " ".join(attrs) if attrs else ""
             src_t.append(tok_text, style=st)
 
         # hlsearch overlay
@@ -608,7 +621,7 @@ class SourceView(Widget):
         elif char == "o":                   self.post_message(OpenFileDialog())
         elif key == "apostrophe":           self.post_message(AwaitMarkJump())
         elif char == "m":                   self.post_message(AwaitMarkSet())
-        elif key == "ctrl+l":               self.refresh()
+        elif key == "ctrl+l":               self.app.refresh()
         elif key == "minus":                self.post_message(ResizeSource(-1, rows=True))
         elif key in ("equal",) or char == "=": self.post_message(ResizeSource(1,  rows=True))
         elif key == "underscore":           self.post_message(ResizeSource(-1, jump=True))

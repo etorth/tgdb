@@ -70,23 +70,34 @@ def _pyte_color(c: str) -> Optional[str]:
     return None
 
 
-def _row_to_text(row: dict, width: int, cursor_col: int = -1) -> Text:
+def _row_to_text(row: dict, width: int, cursor_col: int = -1,
+                 use_color: bool = True) -> Text:
     """Convert one pyte screen row to a Rich Text line."""
     result = Text(no_wrap=True, overflow="crop")
     for col in range(width):
         char = row[col]          # defaultdict — always returns a Char
         data = char.data or " "
-        fg   = _pyte_color(char.fg)
-        bg   = _pyte_color(char.bg)
-        if char.reverse:
-            fg, bg = bg, fg
-        st = Style(
-            color=fg, bgcolor=bg,
-            bold=char.bold,
-            italic=char.italics,
-            underline=char.underscore,
-            blink=char.blink,
-        )
+        if use_color:
+            fg   = _pyte_color(char.fg)
+            bg   = _pyte_color(char.bg)
+            if char.reverse:
+                fg, bg = bg, fg
+            st = Style(
+                color=fg, bgcolor=bg,
+                bold=char.bold,
+                italic=char.italics,
+                underline=char.underscore,
+                blink=char.blink,
+            )
+        else:
+            # :set debugwincolor off — strip ANSI colors, keep bold/reverse
+            st = Style(
+                bold=char.bold,
+                italic=char.italics,
+                underline=char.underscore,
+                blink=char.blink,
+                reverse=char.reverse,
+            )
         if col == cursor_col:     # show GDB readline cursor (blinking block)
             st = st + Style(reverse=True, blink=True)
         result.append(data, style=st)
@@ -104,12 +115,13 @@ class _GDBScreen(pyte.Screen):
                  scrollback: deque[Text]) -> None:
         super().__init__(columns, lines)
         self._scrollback = scrollback
+        self.use_color: bool = True   # set by GDBWidget to honour debugwincolor
 
     def index(self) -> None:
         if self.cursor.y == self.lines - 1:
             # Row 0 is about to be lost — capture it
             row  = self.buffer[0]
-            text = _row_to_text(row, self.columns)
+            text = _row_to_text(row, self.columns, use_color=self.use_color)
             self._scrollback.append(text)
         super().index()
 
@@ -167,6 +179,7 @@ class GDBWidget(Widget):
 
         self.ignorecase: bool = False
         self.wrapscan:   bool = True
+        self.debugwincolor: bool = True  # :set debugwincolor — show ANSI colors
         self._num_buf:   str  = ""
         self._await_g:   bool = False   # true after first 'g' (for 'gg')
         self._dot_pending: bool = False  # true after apostrophe (for `'.`)
@@ -182,6 +195,7 @@ class GDBWidget(Widget):
             self._pyte_rows = rows
             self._pyte_cols = cols
             self._screen = _GDBScreen(cols, rows, self._scrollback)
+            self._screen.use_color = self.debugwincolor
             self._stream = pyte.ByteStream(self._screen)
         else:
             # Resize — pyte.Screen.resize() preserves buffer content
@@ -225,7 +239,8 @@ class GDBWidget(Widget):
             for r in range(self._pyte_rows):
                 cursor_col = cx if (r == cy and not self._scroll_mode and self.gdb_focused) else -1
                 lines.append(_row_to_text(self._screen.buffer[r],
-                                          self._pyte_cols, cursor_col))
+                                          self._pyte_cols, cursor_col,
+                                          use_color=self.debugwincolor))
         return lines
 
     def render(self) -> Text:
@@ -246,7 +261,8 @@ class GDBWidget(Widget):
                 result.append("\n")
             cursor_col = cx if (r == cy and self.gdb_focused) else -1
             result.append_text(
-                _row_to_text(self._screen.buffer[r], self._pyte_cols, cursor_col)
+                _row_to_text(self._screen.buffer[r], self._pyte_cols, cursor_col,
+                             use_color=self.debugwincolor)
             )
         # Pad remaining rows if widget is taller than pyte screen
         for r in range(self._pyte_rows, h):
