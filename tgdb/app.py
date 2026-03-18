@@ -759,6 +759,7 @@ class TGDBApp(App):
         cfg = self.cfg
         try:
             src = self.query_one("#src-pane", SourceView)
+            old_tabstop = src.tabstop
             src.executing_line_display = cfg.executinglinedisplay
             src.selected_line_display  = cfg.selectedlinedisplay
             src.tabstop    = cfg.tabstop
@@ -766,7 +767,12 @@ class TGDBApp(App):
             src.ignorecase = cfg.ignorecase
             src.wrapscan   = cfg.wrapscan
             src.showmarks  = cfg.showmarks
-            src.refresh()
+            # If tabstop changed, reload the current file so tabs are re-expanded
+            # and the token cache is rebuilt with the new width.
+            if cfg.tabstop != old_tabstop and src.source_file.path:
+                src.load_file(src.source_file.path)
+            else:
+                src.refresh()
         except NoMatches:
             pass
         try:

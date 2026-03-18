@@ -260,6 +260,7 @@ class FileDialog(Widget):
             event.stop()
             return
         count = int(self._num_buf) if self._num_buf else 1
+        had_count = bool(self._num_buf)
         self._num_buf = ""
 
         if key in ("q", "escape"):
@@ -281,8 +282,8 @@ class FileDialog(Widget):
         elif key == "ctrl+u":
             self._move(-self._list_height() // 2)
         elif char == "G":
-            self._sel = self._clamp((count - 1) if self._num_buf == "" and count != 1
-                                    else len(self._files) - 1)
+            # [N]G → jump to file N (1-indexed); G alone → jump to last
+            self._sel = self._clamp(count - 1 if had_count else len(self._files) - 1)
             self.refresh()
         elif char == "g":
             self._await_g = True
