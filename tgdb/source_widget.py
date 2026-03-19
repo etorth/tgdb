@@ -554,6 +554,9 @@ class SourceView(Widget):
                 pass
 
         out.append_text(src_t)
+        # Match cgdb: source rows are clipped to the pane width instead of
+        # soft-wrapping onto following rows.
+        out.truncate(max(1, self.size.width or 80), overflow="crop")
         return out
 
 
