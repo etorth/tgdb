@@ -187,9 +187,9 @@ class GDBController:
         on_running()                         — execution resumed
         on_breakpoints(bps: list[Breakpoint])
         on_source_files(files: list[str])
-        on_source_file(path: str, line: int) — single current source file + line
+        on_source_file(path: str, line: int) — current source file + line
         on_exit()                            — GDB exited
-        on_error(msg: str)                   — ^error
+        on_error(msg: str)                   — user-visible ^error
     """
 
     def __init__(self, gdb_path: str = "gdb",
@@ -205,6 +205,7 @@ class GDBController:
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
+        self._request_meta: dict[int, dict[str, object]] = {}
 
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
@@ -374,11 +375,17 @@ class GDBController:
         cls     = rec.get("class_", "")
         results = rec.get("results", {})
         token   = rec.get("token")
+        meta: dict[str, object] = {}
+        if token is not None:
+            meta = self._request_meta.pop(token, {})
 
         if cls == "error":
-            msg = results.get("msg", "")
-            if isinstance(msg, str):
-                self.on_error(msg)
+            if meta.get("kind") == "current-location":
+                self.request_source_file(report_error=bool(meta.get("report_error", True)))
+            else:
+                msg = results.get("msg", "")
+                if isinstance(msg, str) and bool(meta.get("report_error", True)):
+                    self.on_error(msg)
 
         elif cls in ("done", "running"):
             bkpt = results.get("bkpt")
@@ -398,12 +405,87 @@ class GDBController:
                 self._handle_source_files(files)
             frame = results.get("frame")
             if frame:
-                self.current_frame = self._parse_frame(frame)
+                parsed = self._parse_frame(frame)
+                self.current_frame = parsed
+                path = parsed.fullname or parsed.file
+                if path:
+                    self.on_source_file(path, parsed.line)
+                elif meta.get("kind") == "current-location":
+                    self.request_source_file(report_error=bool(meta.get("report_error", True)))
+            elif meta.get("kind") == "current-location":
+                # Mirror cgdb's startup query path: ask for the current frame
+                # first, then fall back to exec source-file if needed.
+                self.request_source_file(report_error=bool(meta.get("report_error", True)))
 
         if token is not None and token in self._pending:
             fut = self._pending.pop(token)
             if not fut.done():
-                fut.set_result(results)
+                fut.set_result({"class_": cls, "results": results})
+
+    def _send_mi_command(
+        self,
+        cmd: str,
+        *,
+        report_error: bool = True,
+        kind: str | None = None,
+    ) -> int | None:
+        if self._mi_master_fd < 0:
+            return None
+
+        token = self._token
+        self._token += 1
+        self._request_meta[token] = {
+            "report_error": report_error,
+            "kind": kind,
+        }
+        try:
+            os.write(self._mi_master_fd, f"{token}{cmd}\n".encode())
+        except OSError:
+            self._request_meta.pop(token, None)
+            return None
+        return token
+
+    # ------------------------------------------------------------------
+    # MI command helpers (sent on MI channel, not primary console)
+    # ------------------------------------------------------------------
+
+    def mi_command(self, cmd: str, *, report_error: bool = True,
+                   kind: str | None = None) -> int | None:
+        return self._send_mi_command(cmd, report_error=report_error, kind=kind)
+
+    def request_source_files(self) -> None:
+        self.mi_command("-file-list-exec-source-files")
+
+    def request_source_file(self, *, report_error: bool = True) -> None:
+        self.mi_command("-file-list-exec-source-file", report_error=report_error)
+
+    def request_current_location(self, *, report_error: bool = True) -> None:
+        self.mi_command(
+            "-stack-info-frame",
+            report_error=report_error,
+            kind="current-location",
+        )
+
+    async def _refresh_breakpoints(self) -> None:
+        self.mi_command("-break-list")
+
+    def set_breakpoint(self, location: str, temporary: bool = False) -> None:
+        flag = "-t " if temporary else ""
+        self.mi_command(f"-break-insert {flag}{location}")
+        asyncio.ensure_future(self._delayed_break_list())
+
+    async def _delayed_break_list(self) -> None:
+        await asyncio.sleep(0.1)
+        self.mi_command("-break-list")
+
+    def delete_breakpoint(self, number: int) -> None:
+        self.mi_command(f"-break-delete {number}")
+
+    def enable_breakpoint(self, number: int) -> None:
+        self.mi_command(f"-break-enable {number}")
+
+    def disable_breakpoint(self, number: int) -> None:
+        self.mi_command(f"-break-disable {number}")
 
     def _handle_async(self, rec: dict) -> None:
         cls     = rec.get("class_", "")
@@ -428,44 +510,6 @@ class GDBController:
                 self.on_breakpoints(list(self.breakpoints))
             except (ValueError, TypeError):
                 pass
-
-    # ------------------------------------------------------------------
-    # MI command helpers (sent on MI channel, not primary console)
-    # ------------------------------------------------------------------
-
-    def mi_command(self, cmd: str) -> None:
-        if self._mi_master_fd >= 0:
-            try:
-                os.write(self._mi_master_fd, (cmd + "\n").encode())
-            except OSError:
-                pass
-
-    def request_source_files(self) -> None:
-        self.mi_command("-file-list-exec-source-files")
-
-    def request_source_file(self) -> None:
-        self.mi_command("-file-list-exec-source-file")
-
-    async def _refresh_breakpoints(self) -> None:
-        self.mi_command("-break-list")
-
-    def set_breakpoint(self, location: str, temporary: bool = False) -> None:
-        flag = "-t " if temporary else ""
-        self.mi_command(f"-break-insert {flag}{location}")
-        asyncio.ensure_future(self._delayed_break_list())
-
-    async def _delayed_break_list(self) -> None:
-        await asyncio.sleep(0.1)
-        self.mi_command("-break-list")
-
-    def delete_breakpoint(self, number: int) -> None:
-        self.mi_command(f"-break-delete {number}")
-
-    def enable_breakpoint(self, number: int) -> None:
-        self.mi_command(f"-break-enable {number}")
-
-    def disable_breakpoint(self, number: int) -> None:
-        self.mi_command(f"-break-disable {number}")
 
     # ------------------------------------------------------------------
     # Internal helpers

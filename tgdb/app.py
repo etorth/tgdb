@@ -234,7 +234,7 @@ class TGDBApp(App):
 
         # Start async read loop
         self._gdb_task = asyncio.create_task(self.gdb.run_async())
-        asyncio.ensure_future(self._request_initial_source())
+        asyncio.ensure_future(self._request_initial_location())
 
         # Initial mode: GDB focused
         self._set_mode("GDB")
@@ -635,10 +635,10 @@ class TGDBApp(App):
         except NoMatches:
             pass
 
-    async def _request_initial_source(self) -> None:
-        """Wait for GDB's first prompt then query the initial source file."""
+    async def _request_initial_location(self) -> None:
+        """Mirror cgdb startup: query current location without surfacing noise."""
         await asyncio.sleep(0.5)
-        self.gdb.request_source_file()
+        self.gdb.request_current_location(report_error=False)
 
     def _ui_gdb_exit(self) -> None:
         # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
