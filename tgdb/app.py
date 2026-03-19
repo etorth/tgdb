@@ -171,6 +171,7 @@ class TGDBApp(App):
         self.km = KeyMapper()
         self.cfg = Config()
         self.cp = ConfigParser(self.cfg, self.hl, self.km)
+        self._initial_source_pending = bool(gdb_args)
         self._register_commands()
         if rc_file:
             self.cp.load_file(rc_file)
@@ -306,15 +307,7 @@ class TGDBApp(App):
         except NoMatches:
             pass
 
-    # ------------------------------------------------------------------
-    # Global key handling
-    # ------------------------------------------------------------------
-
-    def on_key(self, event: events.Key) -> None:
-        key  = event.key
-        char = event.character or ""
-
-        # Awaiting mark jump — next keypress is the mark letter
+    def _handle_pending_mark_key(self, char: str) -> bool:
         if self._await_mark_jump:
             self._await_mark_jump = False
             if char == ".":
@@ -323,13 +316,65 @@ class TGDBApp(App):
                 self.query_one("#src-pane", SourceView).goto_last_jump()
             elif char.isalpha():
                 self.query_one("#src-pane", SourceView).jump_to_mark(char)
-            event.stop(); return
+            return True
 
-        # Awaiting mark set — next keypress is the mark letter
         if self._await_mark_set:
             self._await_mark_set = False
             if char.isalpha():
                 self.query_one("#src-pane", SourceView).set_mark(char)
+            return True
+
+        return False
+
+    def _handle_cgdb_mode_key(self, key: str, char: str) -> bool:
+        if self._mode != "CGDB":
+            return False
+
+        try:
+            src = self.query_one("#src-pane", SourceView)
+        except NoMatches:
+            src = None
+
+        if src is not None and src.handle_cgdb_key(key, char):
+            return True
+
+        if key == "i":
+            self._switch_to_gdb()
+            return True
+        if key == "s":
+            self._switch_to_gdb()
+            self.query_one("#gdb-pane", GDBWidget).enter_scroll_mode()
+            return True
+
+        return False
+
+    def _handle_non_gdb_focus_key(self, key: str, char: str) -> bool:
+        """Absorb keys that arrive at GDB during focus handoff to CGDB/STATUS."""
+        if self._handle_pending_mark_key(char):
+            return True
+
+        if self._mode == "STATUS":
+            try:
+                self.query_one("#status", StatusBar).feed_key(key, char)
+            except NoMatches:
+                pass
+            return True
+
+        if self._mode == "CGDB":
+            self._handle_cgdb_mode_key(key, char)
+            return True
+
+        return False
+
+    # ------------------------------------------------------------------
+    # Global key handling
+    # ------------------------------------------------------------------
+
+    def on_key(self, event: events.Key) -> None:
+        key  = event.key
+        char = event.character or ""
+
+        if self._handle_pending_mark_key(char):
             event.stop(); return
 
         # ESC / cgdb mode key → switch to CGDB from GDB/STATUS/SCROLL
@@ -344,20 +389,8 @@ class TGDBApp(App):
             if status.feed_key(key, char):
                 event.stop(); return
 
-        # CGDB-mode-only global keys
-        if self._mode == "CGDB":
-            if key == "i":
-                self._switch_to_gdb()
-                event.stop(); return
-            if key == "s":
-                self._switch_to_gdb()
-                self.query_one("#gdb-pane", GDBWidget).enter_scroll_mode()
-                event.stop(); return
-            if key == "colon" or char == ":":
-                self.query_one("#status", StatusBar).start_command()
-                self._set_mode("STATUS")
-                self.query_one("#status", StatusBar).focus()
-                event.stop(); return
+        if self._handle_cgdb_mode_key(key, char):
+            event.stop(); return
 
         # Ctrl-C always interrupts GDB
         if key == "ctrl+c":
@@ -680,6 +713,8 @@ class TGDBApp(App):
                 src.load_file(path)
                 if line > 0:
                     src.move_to(line)
+                self._initial_source_pending = False
+                src.run_pending_search()
                 self._update_status_file_info()
         except NoMatches:
             pass

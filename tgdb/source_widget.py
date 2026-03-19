@@ -158,6 +158,7 @@ class SourceView(Widget):
         self._col_offset: int = 0        # horizontal scroll (cgdb sel_col)
         self._show_logo: bool = False    # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}
+        self._pending_search: Optional[tuple[str, bool]] = None
         self.can_focus = True
 
     # ------------------------------------------------------------------
@@ -323,6 +324,15 @@ class SourceView(Widget):
 
     def search_next(self) -> bool: return self.search(self._search_pattern, self._search_forward)
     def search_prev(self) -> bool: return self.search(self._search_pattern, not self._search_forward)
+
+    def run_pending_search(self) -> bool:
+        if not self._pending_search:
+            return False
+        pattern, forward = self._pending_search
+        self._pending_search = None
+        self._search_pattern = pattern
+        self._search_forward = forward
+        return self.search(pattern, forward)
 
     # ------------------------------------------------------------------
     # Marks
@@ -622,22 +632,10 @@ class SourceView(Widget):
     # Key handling
     # ------------------------------------------------------------------
 
-    def on_key(self, event: events.Key) -> None:
-        key = event.key
-        char = event.character or ""
-
-        if getattr(self.app, "_mode", None) == "STATUS":
-            from .status_bar import StatusBar
-
-            status = self.app.query_one("#status", StatusBar)
-            if status.feed_key(key, char):
-                event.stop()
-                return
-
+    def handle_cgdb_key(self, key: str, char: str) -> bool:
         if self._search_active:
             self._handle_search_input(key, char)
-            event.stop()
-            return
+            return True
 
         # 'g' double-press for gg (goto top)
         if self._await_g:
@@ -645,16 +643,14 @@ class SourceView(Widget):
             if char == "g":
                 self._num_buf = ""
                 self.goto_top()
-                event.stop()
-                return
+                return True
             # Not 'gg' — treat buffered 'g' as nothing, reprocess current key
             self._num_buf = ""
 
         # Numeric prefix (not starting with 0)
         if char.isdigit() and char != "0":
             self._num_buf += char
-            event.stop()
-            return
+            return True
         count = int(self._num_buf) if self._num_buf else 1
         self._num_buf = ""
 
@@ -717,7 +713,21 @@ class SourceView(Widget):
         elif key == "f10":                  self.post_message(GDBCommand("step"))
         else:                               consumed = False
 
-        if consumed:
+        return consumed
+
+    def on_key(self, event: events.Key) -> None:
+        key = event.key
+        char = event.character or ""
+
+        if getattr(self.app, "_mode", None) == "STATUS":
+            from .status_bar import StatusBar
+
+            status = self.app.query_one("#status", StatusBar)
+            if status.feed_key(key, char):
+                event.stop()
+                return
+
+        if self.handle_cgdb_key(key, char):
             event.stop()
 
     def _handle_search_input(self, key: str, char: str) -> None:
@@ -728,7 +738,13 @@ class SourceView(Widget):
             self._search_active = False
             self._search_pattern = self._search_buf
             if self._search_pattern:
-                self.search(self._search_pattern, self._search_forward)
+                if (
+                    self.source_file is None
+                    and getattr(self.app, "_initial_source_pending", False)
+                ):
+                    self._pending_search = (self._search_pattern, self._search_forward)
+                else:
+                    self.search(self._search_pattern, self._search_forward)
             self.post_message(SearchCommit(self._search_pattern))
         elif key in ("backspace", "ctrl+h"):
             self._search_buf = self._search_buf[:-1]
