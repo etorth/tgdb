@@ -43,6 +43,7 @@ from .gdb_widget import (
 )
 from .status_bar import StatusBar, CommandSubmit, CommandCancel
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
+from .context_menu import ContextMenu, ContextMenuSelected, ContextMenuClosed
 
 
 class DragResize(Message):
@@ -63,9 +64,10 @@ class Splitter(Widget):
     }
     """
 
-    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, draggable: bool = True, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
+        self._draggable = draggable
         self._dragging = False
         self._is_horizontal_split = True
 
@@ -93,7 +95,7 @@ class Splitter(Widget):
         return Text(" " * width, style=style, no_wrap=True, overflow="crop")
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
-        if event.button == 1:
+        if self._draggable and event.button == 1:
             self._dragging = True
             self.capture_mouse()
             event.stop()
@@ -110,6 +112,97 @@ class Splitter(Widget):
             self._dragging = False
             self.release_mouse()
             event.stop()
+
+
+class EmptyPane(Widget):
+    """An empty workspace leaf created by context-menu split actions."""
+
+    DEFAULT_CSS = """
+    EmptyPane {
+        width: 1fr;
+        height: 1fr;
+        min-width: 4;
+        min-height: 2;
+        background: $surface-darken-1;
+    }
+    """
+
+    def render(self) -> Text:
+        width = max(1, self.size.width or 1)
+        return Text(" " * width, no_wrap=True, overflow="crop")
+
+
+class PaneContainer(Widget):
+    """A generic horizontal/vertical container with equal-sized child items."""
+
+    DEFAULT_CSS = """
+    PaneContainer {
+        width: 1fr;
+        height: 1fr;
+    }
+    """
+
+    def __init__(self, hl: HighlightGroups, orientation: str = "horizontal", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.hl = hl
+        self.orientation = orientation
+        self._items: list[Widget] = []
+
+    @property
+    def items(self) -> tuple[Widget, ...]:
+        return tuple(self._items)
+
+    def index_of(self, item: Widget) -> int:
+        return self._items.index(item)
+
+    def set_orientation(self, orientation: str) -> None:
+        self.orientation = orientation
+        self._apply_orientation()
+        self.refresh(layout=True)
+
+    async def set_items(self, items: list[Widget]) -> None:
+        self._items = list(items)
+        await self._rebuild()
+
+    async def insert_item(self, index: int, item: Widget) -> None:
+        self._items.insert(index, item)
+        await self._rebuild()
+
+    async def replace_item(self, old_item: Widget, new_item: Widget) -> None:
+        self._items[self.index_of(old_item)] = new_item
+        await self._rebuild()
+
+    def _apply_item_style(self, item: Widget) -> None:
+        item.styles.display = "block"
+        item.styles.width = "1fr"
+        item.styles.height = "1fr"
+
+    def _apply_orientation(self) -> None:
+        self.styles.layout = self.orientation
+        is_horizontal = self.orientation == "horizontal"
+        for child in self.children:
+            if isinstance(child, Splitter):
+                child.set_orientation(is_horizontal)
+            else:
+                self._apply_item_style(child)
+
+    async def _rebuild(self) -> None:
+        is_horizontal = self.orientation == "horizontal"
+        children: list[Widget] = []
+        for index, item in enumerate(self._items):
+            self._apply_item_style(item)
+            children.append(item)
+            if index < len(self._items) - 1:
+                splitter = Splitter(self.hl, draggable=False)
+                splitter.set_orientation(is_horizontal)
+                children.append(splitter)
+
+        async with self.batch():
+            await self.remove_children()
+            self.styles.layout = self.orientation
+            if children:
+                await self.mount_all(children)
+        self.refresh(layout=True)
 
 
 class TGDBApp(App):
@@ -148,6 +241,12 @@ class TGDBApp(App):
         min-width: 4;
     }
     #splitter {
+        display: block;
+    }
+    #context-menu {
+        display: none;
+    }
+    #context-menu.visible {
         display: block;
     }
     #file-dlg {
@@ -198,6 +297,8 @@ class TGDBApp(App):
         self._preserve_window_shift_once: bool = False
         self._file_dialog_pending: bool = False
         self._inf_tty_fd: Optional[int] = None
+        self._workspace_dynamic: bool = False
+        self._context_menu_target: Optional[Widget] = None
 
     # ------------------------------------------------------------------
     # Compose
@@ -212,6 +313,16 @@ class TGDBApp(App):
                                 id="gdb-pane")
             yield StatusBar(self.hl, id="status")
         yield FileDialog(self.hl, id="file-dlg")
+        yield ContextMenu(
+            self.hl,
+            [
+                "◧ Add window left",
+                "◨ Add window right",
+                "⬒ Add window up",
+                "⬓ Add window down",
+            ],
+            id="context-menu",
+        )
 
     # ------------------------------------------------------------------
     # on_mount — async so asyncio.create_task works
@@ -307,6 +418,140 @@ class TGDBApp(App):
         except NoMatches:
             pass
 
+    def _get_context_menu(self) -> Optional[ContextMenu]:
+        try:
+            return self.query_one("#context-menu", ContextMenu)
+        except NoMatches:
+            return None
+
+    def _context_menu_contains(self, screen_x: int, screen_y: int) -> bool:
+        menu = self._get_context_menu()
+        if not menu or not menu.is_open:
+            return False
+        region = menu.region
+        return (
+            region.x <= screen_x < region.x + region.width
+            and region.y <= screen_y < region.y + region.height
+        )
+
+    def _open_context_menu(self, screen_x: int, screen_y: int) -> None:
+        menu = self._get_context_menu()
+        if not menu:
+            return
+        menu.open_at(screen_x, screen_y)
+
+    def _restore_focus_after_context_menu(self) -> None:
+        if self._mode == "FILEDLG":
+            try:
+                self.query_one("#file-dlg", FileDialog).focus()
+                return
+            except NoMatches:
+                return
+        if self._mode == "STATUS":
+            try:
+                self.query_one("#status", StatusBar).focus()
+                return
+            except NoMatches:
+                return
+        if self._mode in ("GDB", "SCROLL"):
+            try:
+                self.query_one("#gdb-pane", GDBWidget).focus()
+                return
+            except NoMatches:
+                return
+        try:
+            self.query_one("#src-pane", SourceView).focus()
+        except NoMatches:
+            pass
+
+    def _close_context_menu(self) -> None:
+        menu = self._get_context_menu()
+        if not menu or not menu.is_open:
+            return
+        menu.close()
+        self._context_menu_target = None
+        self._restore_focus_after_context_menu()
+
+    def _find_workspace_item(self, widget: Optional[Widget]) -> Optional[Widget]:
+        current = widget
+        while isinstance(current, Widget):
+            if isinstance(current, Splitter):
+                return None
+            parent = current.parent
+            if isinstance(parent, PaneContainer):
+                return current
+            if getattr(parent, "id", None) == "split-container" and getattr(current, "id", None) in {
+                "src-pane",
+                "gdb-pane",
+            }:
+                return current
+            current = parent if isinstance(parent, Widget) else None
+        return None
+
+    async def _ensure_dynamic_workspace(self) -> Optional[PaneContainer]:
+        if self._workspace_dynamic:
+            try:
+                return self.query_one("#split-container", PaneContainer)
+            except NoMatches:
+                return None
+
+        try:
+            old_root = self.query_one("#split-container")
+            global_container = self.query_one("#global-container")
+            status = self.query_one("#status")
+            src = self.query_one("#src-pane", SourceView)
+            gdb = self.query_one("#gdb-pane", GDBWidget)
+            splitter = self.query_one("#splitter", Splitter)
+        except NoMatches:
+            return None
+
+        new_root = PaneContainer(
+            self.hl,
+            orientation=self.cfg.winsplitorientation,
+            id="split-container",
+        )
+        async with global_container.batch():
+            await old_root.remove_children([src, splitter, gdb])
+            await old_root.remove()
+            await global_container.mount(new_root, before=status)
+        await new_root.set_items([src, gdb])
+        self._workspace_dynamic = True
+        return new_root
+
+    def _context_menu_direction(self, item: str) -> Optional[str]:
+        label = item.lower()
+        if "left" in label:
+            return "left"
+        if "right" in label:
+            return "right"
+        if "up" in label:
+            return "up"
+        if "down" in label:
+            return "down"
+        return None
+
+    async def _apply_context_menu_action(self, target: Widget, direction: str) -> bool:
+        axis = "horizontal" if direction in ("left", "right") else "vertical"
+        insert_before = direction in ("left", "up")
+        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if parent is None:
+            return False
+
+        if parent.orientation == axis:
+            index = parent.index_of(target)
+            if not insert_before:
+                index += 1
+            await parent.insert_item(index, EmptyPane())
+            return True
+
+        new_container = PaneContainer(self.hl, orientation=axis)
+        await parent.replace_item(target, new_container)
+        if insert_before:
+            await new_container.set_items([EmptyPane(), target])
+        else:
+            await new_container.set_items([target, EmptyPane()])
+        return True
+
     def _handle_pending_mark_key(self, char: str) -> bool:
         if self._await_mark_jump:
             self._await_mark_jump = False
@@ -373,6 +618,13 @@ class TGDBApp(App):
     def on_key(self, event: events.Key) -> None:
         key  = event.key
         char = event.character or ""
+        menu = self._get_context_menu()
+
+        if menu and menu.is_open:
+            if key == "escape":
+                self._close_context_menu()
+            event.stop()
+            return
 
         if self._handle_pending_mark_key(char):
             event.stop(); return
@@ -396,6 +648,28 @@ class TGDBApp(App):
         if key == "ctrl+c":
             self.gdb.send_interrupt()
             event.stop()
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        menu = self._get_context_menu()
+        screen_x = int(event.screen_x)
+        screen_y = int(event.screen_y)
+
+        if event.button == 3:
+            try:
+                clicked_widget, _ = self.get_widget_at(screen_x, screen_y)
+            except Exception:
+                clicked_widget = event.widget
+            target = self._find_workspace_item(clicked_widget)
+            if target is not None:
+                self._context_menu_target = target
+                self._open_context_menu(screen_x, screen_y)
+                event.stop()
+                return
+
+        if menu and menu.is_open and event.button == 1:
+            if not self._context_menu_contains(screen_x, screen_y):
+                self._close_context_menu()
+                event.stop()
 
     # ------------------------------------------------------------------
     # Source widget messages
@@ -539,6 +813,8 @@ class TGDBApp(App):
         return src_size, gdb_size
 
     def on_resize_source(self, msg: ResizeSource) -> None:
+        if self._workspace_dynamic:
+            return
         is_horizontal = (self.cfg.winsplitorientation == "horizontal")
         half_axis = self._split_axis(is_horizontal) // 2
 
@@ -590,6 +866,12 @@ class TGDBApp(App):
             else "horizontal"
         )
         self.cfg.winsplitorientation = new_orientation
+        if self._workspace_dynamic:
+            try:
+                self.query_one("#split-container", PaneContainer).set_orientation(new_orientation)
+            except NoMatches:
+                pass
+            return
         self._set_window_shift_from_ratio(new_orientation == "horizontal", self._split_ratio)
         self._preserve_window_shift_once = True
         self._apply_split()
@@ -648,6 +930,26 @@ class TGDBApp(App):
     def on_file_dialog_closed(self, _: FileDialogClosed) -> None:
         self.query_one("#file-dlg", FileDialog).close()
         self._switch_to_cgdb()
+
+    async def on_context_menu_selected(self, msg: ContextMenuSelected) -> None:
+        target = self._context_menu_target
+        self._close_context_menu()
+        if target is None:
+            return
+        direction = self._context_menu_direction(msg.item)
+        if direction is None:
+            self._show_status(f"Context menu: {msg.item}")
+            return
+        if await self._ensure_dynamic_workspace() is None:
+            self._show_status("Unable to create workspace container")
+            return
+        if await self._apply_context_menu_action(target, direction):
+            self._show_status(f"Added window {direction}")
+        else:
+            self._show_status(f"Unable to add window {direction}")
+
+    def on_context_menu_closed(self, _: ContextMenuClosed) -> None:
+        self._close_context_menu()
 
     # ------------------------------------------------------------------
     # GDB UI callbacks (scheduled via call_later — runs on main event loop)
@@ -851,6 +1153,15 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def _apply_split(self) -> None:
+        if self._workspace_dynamic:
+            try:
+                self.query_one("#split-container", PaneContainer).set_orientation(
+                    self.cfg.winsplitorientation
+                )
+            except NoMatches:
+                pass
+            self._last_orientation = self.cfg.winsplitorientation
+            return
         split = self.cfg.winsplit.lower()
         is_horizontal = (self.cfg.winsplitorientation == "horizontal")
         split_changed = split != self._last_split_setting
@@ -909,6 +1220,8 @@ class TGDBApp(App):
             self._preserve_window_shift_once = False
 
     def on_drag_resize(self, msg: DragResize) -> None:
+        if self._workspace_dynamic:
+            return
         is_horizontal = (self.cfg.winsplitorientation == "horizontal")
         axis = self._pane_axis(is_horizontal)
         if axis <= 0:
@@ -931,6 +1244,12 @@ class TGDBApp(App):
         self._apply_split()
 
     def on_resize(self, event: events.Resize) -> None:
+        if self._workspace_dynamic:
+            try:
+                self.query_one("#split-container", PaneContainer).refresh(layout=True)
+            except NoMatches:
+                pass
+            return
         self._apply_split()
         # GDBWidget.on_resize handles pyte + PTY resize itself via resize_gdb callback
 
@@ -980,7 +1299,7 @@ class TGDBApp(App):
         self.km.ttimeout_ms      = cfg.ttimeoutlen
         self.km.timeout_enabled  = cfg.timeout
         self.km.ttimeout_enabled = cfg.ttimeout
-        if cfg.winsplitorientation != self._last_orientation:
+        if not self._workspace_dynamic and cfg.winsplitorientation != self._last_orientation:
             self._set_window_shift_from_ratio(
                 cfg.winsplitorientation == "horizontal",
                 self._split_ratio,
