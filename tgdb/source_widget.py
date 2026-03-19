@@ -23,6 +23,7 @@ from pygments.token import Token
 from textual.widget import Widget
 from textual import events
 from textual.message import Message
+from rich.cells import cell_len, split_graphemes
 from rich.text import Text
 from rich.style import Style
 
@@ -111,7 +112,7 @@ _LOGO_LINES = [
     "   ██║   ╚██████╔╝██████╔╝██████╔╝",
     "   ╚═╝    ╚═════╝ ╚═════╝ ╚═════╝ ",
     "",
-    "Python front-end for GDB",
+    "Vi-like TUI front-end for GDB",
     "Compatible with CGDB keybindings, :help for more details",
 ]
 
@@ -510,23 +511,11 @@ class SourceView(Widget):
         if not spans:
             spans = [(sf.lines[line_idx], "Normal")]
 
-        # For long arrow: skip col_off leading whitespace chars (cgdb: sel_col + column_offset)
-        # For horizontal scroll (_col_offset): skip additional chars from the source text.
+        # For long arrow: skip col_off leading whitespace cells (cgdb: sel_col + column_offset)
+        # For horizontal scroll (_col_offset): skip additional display cells from the source text.
         total_skip = col_off + self._col_offset
-        if total_skip > 0:
-            trimmed = []
-            skip = total_skip
-            for tok_text, group in spans:
-                if skip <= 0:
-                    trimmed.append((tok_text, group))
-                elif skip >= len(tok_text):
-                    skip -= len(tok_text)
-                else:
-                    trimmed.append((tok_text[skip:], group))
-                    skip = 0
-            spans = trimmed
-
-        src_t = Text(no_wrap=True, overflow="crop")
+        source_width = max(0, (self.size.width or 80) - cell_len(out.plain))
+        styled_spans: list[tuple[str, str]] = []
         for tok_text, group in spans:
             if line_bg:
                 st = line_bg
@@ -541,7 +530,9 @@ class SourceView(Widget):
                 if hs.reverse: attrs.append("reverse")
                 if hs.underline: attrs.append("underline")
                 st = " ".join(attrs) if attrs else ""
-            src_t.append(tok_text, style=st)
+            styled_spans.append((tok_text, st))
+
+        src_t = self._clip_spans_to_cells(styled_spans, total_skip, source_width)
 
         # hlsearch overlay
         if self.hlsearch and self._search_pattern:
@@ -557,6 +548,51 @@ class SourceView(Widget):
         # Match cgdb: source rows are clipped to the pane width instead of
         # soft-wrapping onto following rows.
         out.truncate(max(1, self.size.width or 80), overflow="crop")
+        return out
+
+    def _clip_spans_to_cells(
+        self, spans: list[tuple[str, str]], start_cell: int, max_cells: int
+    ) -> Text:
+        """Clip styled text by display cells.
+
+        If clipping starts or ends in the middle of a wide character, render the
+        visible half as '?' so cell-based alignment is preserved during
+        horizontal scrolling and truncation.
+        """
+        out = Text(no_wrap=True, overflow="crop")
+        if max_cells <= 0:
+            return out
+
+        view_start = max(0, start_cell)
+        view_end = view_start + max_cells
+        cell_pos = 0
+
+        for tok_text, style in spans:
+            graphemes, _ = split_graphemes(tok_text)
+            for start, end, width in graphemes:
+                grapheme = tok_text[start:end]
+                grapheme_start = cell_pos
+                grapheme_end = grapheme_start + width
+                cell_pos = grapheme_end
+
+                if width <= 0:
+                    continue
+                if grapheme_end <= view_start:
+                    continue
+                if grapheme_start >= view_end:
+                    return out
+
+                overlap_start = max(grapheme_start, view_start)
+                overlap_end = min(grapheme_end, view_end)
+                overlap = overlap_end - overlap_start
+                if overlap <= 0:
+                    continue
+
+                if overlap == width:
+                    out.append(grapheme, style=style)
+                else:
+                    out.append("?" * overlap, style=style)
+
         return out
 
 
