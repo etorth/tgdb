@@ -49,10 +49,16 @@ from .context_menu import ContextMenu, ContextMenuSelected, ContextMenuClosed
 class DragResize(Message):
     """Resize the split by dragging the splitter widget."""
 
-    def __init__(self, screen_x: int = 0, screen_y: int = 0) -> None:
+    def __init__(
+        self,
+        screen_x: int = 0,
+        screen_y: int = 0,
+        splitter: Optional["Splitter"] = None,
+    ) -> None:
         super().__init__()
         self.screen_x = screen_x
         self.screen_y = screen_y
+        self.splitter = splitter
 
 
 class Splitter(Widget):
@@ -103,7 +109,11 @@ class Splitter(Widget):
     def on_mouse_move(self, event: events.MouseMove) -> None:
         if self._dragging:
             self.post_message(
-                DragResize(screen_x=int(event.screen_x), screen_y=int(event.screen_y))
+                DragResize(
+                    screen_x=int(event.screen_x),
+                    screen_y=int(event.screen_y),
+                    splitter=self,
+                )
             )
             event.stop()
 
@@ -133,7 +143,7 @@ class EmptyPane(Widget):
 
 
 class PaneContainer(Widget):
-    """A generic horizontal/vertical container with equal-sized child items."""
+    """A generic horizontal/vertical container with resizable child items."""
 
     DEFAULT_CSS = """
     PaneContainer {
@@ -142,11 +152,21 @@ class PaneContainer(Widget):
     }
     """
 
-    def __init__(self, hl: HighlightGroups, orientation: str = "horizontal", **kwargs) -> None:
+    def __init__(
+        self,
+        hl: HighlightGroups,
+        orientation: str = "horizontal",
+        min_item_width: int = 4,
+        min_item_height: int = 2,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.hl = hl
         self.orientation = orientation
         self._items: list[Widget] = []
+        self._weights: list[int] = []
+        self.min_item_width = min_item_width
+        self.min_item_height = min_item_height
 
     @property
     def items(self) -> tuple[Widget, ...]:
@@ -162,38 +182,109 @@ class PaneContainer(Widget):
 
     async def set_items(self, items: list[Widget]) -> None:
         self._items = list(items)
+        self._weights = [1] * len(self._items)
         await self._rebuild()
 
     async def insert_item(self, index: int, item: Widget) -> None:
         self._items.insert(index, item)
+        self._weights = [1] * len(self._items)
         await self._rebuild()
 
     async def replace_item(self, old_item: Widget, new_item: Widget) -> None:
-        self._items[self.index_of(old_item)] = new_item
+        index = self.index_of(old_item)
+        self._items[index] = new_item
+        if len(self._weights) != len(self._items):
+            self._weights = [1] * len(self._items)
         await self._rebuild()
 
-    def _apply_item_style(self, item: Widget) -> None:
+    def _apply_item_style(self, item: Widget, weight: int) -> None:
         item.styles.display = "block"
-        item.styles.width = "1fr"
-        item.styles.height = "1fr"
+        weight_fr = f"{max(1, int(weight))}fr"
+        if self.orientation == "horizontal":
+            item.styles.width = weight_fr
+            item.styles.height = "1fr"
+        else:
+            item.styles.width = "1fr"
+            item.styles.height = weight_fr
 
     def _apply_orientation(self) -> None:
         self.styles.layout = self.orientation
         is_horizontal = self.orientation == "horizontal"
+        item_iter = iter(
+            zip(self._items, self._weights or ([1] * len(self._items)), strict=False)
+        )
         for child in self.children:
             if isinstance(child, Splitter):
                 child.set_orientation(is_horizontal)
             else:
-                self._apply_item_style(child)
+                item, weight = next(item_iter, (child, 1))
+                self._apply_item_style(item, weight)
+
+    def _adjacent_items(self, splitter: "Splitter") -> Optional[tuple[Widget, Widget]]:
+        children = list(self.children)
+        try:
+            index = children.index(splitter)
+        except ValueError:
+            return None
+        if index <= 0 or index >= len(children) - 1:
+            return None
+        before = children[index - 1]
+        after = children[index + 1]
+        if isinstance(before, Splitter) or isinstance(after, Splitter):
+            return None
+        return before, after
+
+    def _capture_layout_weights(self) -> None:
+        is_horizontal = self.orientation == "horizontal"
+        if not self._items:
+            self._weights = []
+            return
+        self._weights = [
+            max(1, item.size.width if is_horizontal else item.size.height)
+            for item in self._items
+        ]
+
+    def _resize_from_drag(self, splitter: "Splitter", screen_x: int, screen_y: int) -> bool:
+        adjacent = self._adjacent_items(splitter)
+        if adjacent is None:
+            return False
+
+        self._capture_layout_weights()
+        before, after = adjacent
+        before_index = self.index_of(before)
+        after_index = self.index_of(after)
+        is_horizontal = self.orientation == "horizontal"
+        min_size = self.min_item_width if is_horizontal else self.min_item_height
+
+        start = before.region.x if is_horizontal else before.region.y
+        before_size = before.size.width if is_horizontal else before.size.height
+        after_size = after.size.width if is_horizontal else after.size.height
+        total_size = before_size + after_size
+        if total_size <= (min_size * 2):
+            return False
+
+        pointer = screen_x if is_horizontal else screen_y
+        new_before = max(min_size, min(total_size - min_size, int(pointer - start)))
+        new_after = total_size - new_before
+        if new_before <= 0 or new_after <= 0:
+            return False
+
+        self._weights[before_index] = new_before
+        self._weights[after_index] = new_after
+        self._apply_orientation()
+        self.refresh(layout=True)
+        return True
 
     async def _rebuild(self) -> None:
         is_horizontal = self.orientation == "horizontal"
+        if len(self._weights) != len(self._items):
+            self._weights = [1] * len(self._items)
         children: list[Widget] = []
         for index, item in enumerate(self._items):
-            self._apply_item_style(item)
+            self._apply_item_style(item, self._weights[index])
             children.append(item)
             if index < len(self._items) - 1:
-                splitter = Splitter(self.hl, draggable=False)
+                splitter = Splitter(self.hl, draggable=True)
                 splitter.set_orientation(is_horizontal)
                 children.append(splitter)
 
@@ -203,6 +294,13 @@ class PaneContainer(Widget):
             if children:
                 await self.mount_all(children)
         self.refresh(layout=True)
+
+    def on_drag_resize(self, msg: DragResize) -> None:
+        splitter = msg.splitter
+        if splitter is None or splitter.parent is not self:
+            return
+        if self._resize_from_drag(splitter, msg.screen_x, msg.screen_y):
+            msg.stop()
 
 
 class TGDBApp(App):
