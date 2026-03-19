@@ -223,6 +223,24 @@ class GDBWidget(Widget):
         if not self._scroll_mode:
             self.refresh()
 
+    def _at_empty_gdb_prompt(self) -> bool:
+        if not self._screen:
+            return False
+
+        cy = self._screen.cursor.y
+        row = _row_to_text(self._screen.buffer[cy], self._pyte_cols, use_color=False).plain
+        before_cursor = row[: self._screen.cursor.x]
+        return before_cursor.endswith("(gdb) ")
+
+    def _maybe_escape_burst_key(self, key: str, char: str) -> Optional[tuple[str, str]]:
+        if key.startswith("alt+") and char and char.isprintable():
+            return char, char
+
+        if self._at_empty_gdb_prompt() and key in ("colon", "slash", "question_mark"):
+            return key, char
+
+        return None
+
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
@@ -466,6 +484,21 @@ class GDBWidget(Widget):
 
         if self._scroll_mode:
             self._handle_scroll_key(key, char)
+            event.stop()
+            return
+
+        # If focus is still on the GDB pane after switching modes, absorb and
+        # reroute the key instead of leaking it into the GDB PTY.
+        handler = getattr(self.app, "_handle_non_gdb_focus_key", None)
+        if callable(handler) and handler(key, char):
+            event.stop()
+            return
+
+        burst_key = self._maybe_escape_burst_key(key, char)
+        if burst_key is not None:
+            self.on_switch_to_cgdb()
+            if callable(handler):
+                handler(*burst_key)
             event.stop()
             return
 
