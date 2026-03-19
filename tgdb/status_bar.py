@@ -1,7 +1,5 @@
 """
-Status bar widget — single row showing mode, filename, line number.
-Also handles ':' command input and search prompts.
-Mouse press+drag resizes the src/gdb panes.
+Dedicated bottom status bar for ':' commands, search prompts, and messages.
 """
 from __future__ import annotations
 
@@ -9,14 +7,12 @@ from textual.widget import Widget
 from textual.message import Message
 from textual import events
 from rich.text import Text
-from typing import Callable, Optional
 
 from .highlight_groups import HighlightGroups
 
 
 class StatusBar(Widget):
-    """One-row status bar between source and GDB panes.
-    Drag vertically to resize the split."""
+    """One-row status bar at the bottom of the screen."""
 
     DEFAULT_CSS = """
     StatusBar {
@@ -29,9 +25,6 @@ class StatusBar(Widget):
         super().__init__(**kwargs)
         self.hl = hl
         self._mode: str = "GDB"
-        self._filename: str = ""
-        self._lineno: int = 0
-        self._total: int = 0
         self._message: str = ""
         self._input_active: bool = False
         self._input_buf: str = ""
@@ -39,9 +32,6 @@ class StatusBar(Widget):
         self._search_buf: str = ""
         self._search_forward: bool = True
         self.can_focus = True
-        # Resize drag state
-        self._dragging: bool = False
-        self.drag_enabled: bool = True   # disabled in vertical split
 
     # ------------------------------------------------------------------
     # State setters (called by app)
@@ -49,13 +39,6 @@ class StatusBar(Widget):
 
     def set_mode(self, mode: str) -> None:
         self._mode = mode
-        self._message = ""
-        self.refresh()
-
-    def set_file_info(self, filename: str, lineno: int, total: int) -> None:
-        self._filename = filename
-        self._lineno   = lineno
-        self._total    = total
         self.refresh()
 
     def show_message(self, msg: str) -> None:
@@ -138,16 +121,7 @@ class StatusBar(Widget):
                      no_wrap=True, overflow="crop")
             return t
 
-        # Normal: filename left-aligned, '*' at right edge when GDB focused
-        # Matches cgdb update_status_win(): if_display_message("", filename)
-        # with '*' appended at WIDTH-1 when focus==GDB.
-        fname = self._filename
-        star  = "*" if self._mode == "GDB" else " "
-        avail = max(0, w - 1)  # leave last column for star
-        if len(fname) > avail:
-            fname = "…" + fname[-(avail - 1):]
-        line = fname.ljust(avail) + star
-        return Text(line[:w], style=style, no_wrap=True, overflow="crop")
+        return Text(" " * w, style=style, no_wrap=True, overflow="crop")
 
     # ------------------------------------------------------------------
     # Key handling — only active during command input
@@ -158,28 +132,6 @@ class StatusBar(Widget):
             event.stop()
 
 
-    # ------------------------------------------------------------------
-    # Mouse drag — resize src/gdb panes by dragging the status bar
-    # ------------------------------------------------------------------
-
-    def on_mouse_down(self, event: events.MouseDown) -> None:
-        if event.button == 1 and self.drag_enabled:
-            self._dragging = True
-            self.capture_mouse()
-            event.stop()
-
-    def on_mouse_move(self, event: events.MouseMove) -> None:
-        if self._dragging:
-            self.post_message(DragResize(int(event.screen_y)))
-            event.stop()
-
-    def on_mouse_up(self, event: events.MouseUp) -> None:
-        if self._dragging and event.button == 1:
-            self._dragging = False
-            self.release_mouse()
-            event.stop()
-
-
 class CommandSubmit(Message):
     def __init__(self, command: str) -> None:
         super().__init__()
@@ -187,13 +139,3 @@ class CommandSubmit(Message):
 
 class CommandCancel(Message):
     pass
-
-class DragResize(Message):
-    """Posted while the user drags a splitter bar.
-    screen_y: used when dragging status bar (horizontal split)
-    screen_x: used when dragging vsep (vertical split)
-    """
-    def __init__(self, screen_y: int = 0, screen_x: int = 0) -> None:
-        super().__init__()
-        self.screen_y = screen_y
-        self.screen_x = screen_x

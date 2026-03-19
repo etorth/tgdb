@@ -10,6 +10,7 @@ Features:
   • Regex search (/ ? n N) with optional hlsearch
   • Marks (m[a-z/A-Z], '[a-z/A-Z], '', '.)
   • Auto-reload on file change
+  • Footer row showing the current file path
 """
 from __future__ import annotations
 
@@ -233,7 +234,8 @@ class SourceView(Widget):
         return len(_LOGO_LINES)
 
     def _visible_height(self) -> int:
-        return max(1, self.size.height)
+        total_height = max(1, self.size.height)
+        return max(0, total_height - 1)
 
     def _ensure_visible(self, line: int) -> None:
         """Mirror cgdb: keep the selected line centered when possible."""
@@ -383,6 +385,9 @@ class SourceView(Widget):
                     left = max(0, (w - lw) // 2)
                     result.append(" " * left + line, style=style)
                 # else: empty row (blank padding above/below logo)
+            if h > 0:
+                result.append("\n")
+            result.append_text(self._build_footer(w, None))
             return result
 
         render_top = self._scroll_top
@@ -394,6 +399,9 @@ class SourceView(Widget):
             result.append_text(self._build_line(line_idx, sf))
             if y < h - 1:
                 result.append("\n")
+        if h > 0:
+            result.append("\n")
+        result.append_text(self._build_footer(w, sf))
         return result
 
     # Width of the line-number field (minimum 1, grows with file size)
@@ -594,6 +602,16 @@ class SourceView(Widget):
                     out.append("?" * overlap, style=style)
 
         return out
+
+    def _build_footer(self, width: int, sf: Optional[SourceFile]) -> Text:
+        footer = Text(no_wrap=True, overflow="crop")
+        path = ""
+        if sf is not None and not self._show_logo:
+            path = sf.path
+            if len(path) > width:
+                path = "…" + path[-(width - 1):]
+        footer.append(path.ljust(width), style=self.hl.style("StatusLine"))
+        return footer
 
 
     def on_resize(self, event: events.Resize) -> None:

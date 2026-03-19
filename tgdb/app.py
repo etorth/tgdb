@@ -1,14 +1,14 @@
 """
 Main Textual application — mirrors cgdb's interface.cpp + cgdb.cpp.
 
-Layout (horizontal split, default):
+Global layout:
   ┌──────────────────────────┐
-  │     Source Window        │  upper pane — CGDB mode
+  │    Source / GDB area     │
   ├──────────────────────────┤
-  │  status bar              │  1 line
-  ├──────────────────────────┤
-  │     GDB Window           │  lower pane — GDB mode
+  │    dedicated status bar  │  1 line
   └──────────────────────────┘
+
+The source pane itself reserves its bottom row for the current file path.
 
 Modes: CGDB | GDB | SCROLL | STATUS | FILEDLG
 """
@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from textual.app import App, ComposeResult
+from textual.message import Message
 from textual.widget import Widget
 from textual import events
 from textual.css.query import NoMatches
@@ -40,16 +41,24 @@ from .gdb_widget import (
     GDBWidget, ScrollModeChange,
     ScrollSearchStart, ScrollSearchUpdate, ScrollSearchCommit, ScrollSearchCancel,
 )
-from .status_bar import StatusBar, CommandSubmit, CommandCancel, DragResize
+from .status_bar import StatusBar, CommandSubmit, CommandCancel
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 
 
-class VSeparator(Widget):
-    """1-char wide vertical separator (cgdb vseparator_win, swin_wvline SWIN_SYM_VLINE).
-    Drag it horizontally to resize the left/right panes in vertical split mode."""
+class DragResize(Message):
+    """Resize the split by dragging the splitter widget."""
+
+    def __init__(self, screen_x: int = 0, screen_y: int = 0) -> None:
+        super().__init__()
+        self.screen_x = screen_x
+        self.screen_y = screen_y
+
+
+class Splitter(Widget):
+    """1-cell splitter between the source and GDB panes."""
 
     DEFAULT_CSS = """
-    VSeparator {
+    Splitter {
         background: $primary-darken-2;
     }
     """
@@ -58,11 +67,30 @@ class VSeparator(Widget):
         super().__init__(**kwargs)
         self.hl = hl
         self._dragging = False
+        self._is_horizontal_split = True
+
+    def set_orientation(self, is_horizontal_split: bool) -> None:
+        self._is_horizontal_split = is_horizontal_split
+        if is_horizontal_split:
+            self.styles.width = 1
+            self.styles.height = "1fr"
+        else:
+            self.styles.width = "1fr"
+            self.styles.height = 1
+        self.refresh()
 
     def render(self) -> Text:
-        h = self.size.height
-        st = self.hl.style("StatusLine")
-        return Text(" \n" * h, style=st, no_wrap=True, overflow="crop")
+        style = self.hl.style("StatusLine")
+        if self._is_horizontal_split:
+            height = max(1, self.size.height or 1)
+            return Text(
+                "\n".join(" " for _ in range(height)),
+                style=style,
+                no_wrap=True,
+                overflow="crop",
+            )
+        width = max(1, self.size.width or 1)
+        return Text(" " * width, style=style, no_wrap=True, overflow="crop")
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:
@@ -72,7 +100,9 @@ class VSeparator(Widget):
 
     def on_mouse_move(self, event: events.MouseMove) -> None:
         if self._dragging:
-            self.post_message(DragResize(screen_x=int(event.screen_x)))
+            self.post_message(
+                DragResize(screen_x=int(event.screen_x), screen_y=int(event.screen_y))
+            )
             event.stop()
 
     def on_mouse_up(self, event: events.MouseUp) -> None:
@@ -90,39 +120,35 @@ class TGDBApp(App):
         layers: base dialog;
         layout: vertical;
     }
-    #split-container {
+    #global-container {
         layer: base;
         layout: vertical;
         height: 1fr;
         width: 1fr;
     }
-    /* #src-col wraps source pane + status bar in vertical split */
-    #src-col {
-        layout: vertical;
+    #split-container {
+        layout: horizontal;
         height: 1fr;
-        min-width: 4;
+        width: 1fr;
     }
     #src-pane {
+        width: 1fr;
         height: 1fr;
         min-height: 2;
+        min-width: 4;
     }
     #status {
         height: 1;
         width: 1fr;
     }
-    /* Vertical separator (cgdb vseparator_win) — shown in vertical split only */
-    #vsep {
-        width: 1;
-        height: 1fr;
-        display: none;
-    }
-    #vsep.visible {
-        display: block;
-    }
     #gdb-pane {
+        width: 1fr;
         height: 1fr;
         min-height: 2;
         min-width: 4;
+    }
+    #splitter {
+        display: block;
     }
     #file-dlg {
         layer: dialog;
@@ -177,13 +203,13 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        with Widget(id="split-container"):
-            with Widget(id="src-col"):
+        with Widget(id="global-container"):
+            with Widget(id="split-container"):
                 yield SourceView(self.hl, id="src-pane")
-                yield StatusBar(self.hl, id="status")
-            yield VSeparator(self.hl, id="vsep")
-            yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
-                            id="gdb-pane")
+                yield Splitter(self.hl, id="splitter")
+                yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
+                                id="gdb-pane")
+            yield StatusBar(self.hl, id="status")
         yield FileDialog(self.hl, id="file-dlg")
 
     # ------------------------------------------------------------------
@@ -423,26 +449,42 @@ class TGDBApp(App):
     }
     _SPLIT_NAMES = {value: key for key, value in _SPLIT_MARKS.items()}
 
-    def _split_axis(self, is_vertical: bool) -> int:
-        return max(1, self.size.width if is_vertical else self.size.height)
+    def _split_axis(self, is_horizontal: bool) -> int:
+        try:
+            container = self.query_one("#split-container")
+            axis = container.size.width if is_horizontal else container.size.height
+            if axis:
+                return max(1, axis)
+        except NoMatches:
+            pass
+        return max(1, self.size.width if is_horizontal else max(1, self.size.height - 1))
 
-    def _reset_window_shift(self, is_vertical: bool) -> None:
-        half_axis = self._split_axis(is_vertical) // 2
+    def _pane_axis(self, is_horizontal: bool) -> int:
+        return max(0, self._split_axis(is_horizontal) - 1)
+
+    def _reset_window_shift(self, is_horizontal: bool) -> None:
+        half_axis = self._pane_axis(is_horizontal) // 2
         self._window_shift = int(half_axis * (self._cur_win_split / 2.0))
-        self._validate_window_shift(is_vertical)
+        self._validate_window_shift(is_horizontal)
 
-    def _validate_window_shift(self, is_vertical: bool) -> None:
-        axis = self._split_axis(is_vertical)
-        odd_size = (axis + 1) % 2
-        max_shift = (axis // 2) - odd_size
-        min_shift = -(axis // 2)
+    def _set_window_shift_from_ratio(self, is_horizontal: bool, ratio: float) -> None:
+        axis = self._pane_axis(is_horizontal)
+        if axis <= 0:
+            self._window_shift = 0
+            return
+        target_src = int(round(axis * ratio))
+        self._window_shift = target_src - (axis // 2)
+        self._validate_window_shift(is_horizontal)
 
-        if is_vertical:
-            min_shift += self.cfg.winminwidth
-            max_shift -= self.cfg.winminwidth
-        else:
-            min_shift += self.cfg.winminheight
-            max_shift -= self.cfg.winminheight
+    def _validate_window_shift(self, is_horizontal: bool) -> None:
+        axis = self._pane_axis(is_horizontal)
+        if axis <= 0:
+            self._window_shift = 0
+            return
+        base = axis // 2
+        min_size = self.cfg.winminwidth if is_horizontal else self.cfg.winminheight
+        min_shift = min_size - base
+        max_shift = (axis - min_size) - base
 
         if max_shift < min_shift:
             max_shift = min_shift = 0
@@ -452,21 +494,26 @@ class TGDBApp(App):
         elif self._window_shift < min_shift:
             self._window_shift = min_shift
 
-    def _compute_split_sizes(self, is_vertical: bool) -> tuple[int, int]:
-        axis = self._split_axis(is_vertical)
+    def _compute_split_sizes(self, is_horizontal: bool, axis: int | None = None) -> tuple[int, int]:
+        axis = self._pane_axis(is_horizontal) if axis is None else max(0, axis)
+        if self._cur_win_split == -2:
+            return 0, axis
+        if self._cur_win_split == 2:
+            return axis, 0
         src_size = (axis // 2) + self._window_shift
-        gdb_size = (axis // 2) - self._window_shift - 1 + (axis % 2)
-        return max(0, src_size), max(0, gdb_size)
+        src_size = max(0, min(axis, src_size))
+        gdb_size = max(0, axis - src_size)
+        return src_size, gdb_size
 
     def on_resize_source(self, msg: ResizeSource) -> None:
-        is_vertical = (self.cfg.winsplitorientation == "vertical")
-        half_axis = self._split_axis(is_vertical) // 2
+        is_horizontal = (self.cfg.winsplitorientation == "horizontal")
+        half_axis = self._split_axis(is_horizontal) // 2
 
         if msg.rows:
             # cgdb '=' / '-': change window_shift by exactly 1 unit
             self._cur_win_split = self._WIN_SPLIT_FREE
             self._window_shift += msg.delta
-            self._validate_window_shift(is_vertical)
+            self._validate_window_shift(is_horizontal)
             self.cfg.winsplit = "free"
             self._apply_split()
 
@@ -491,24 +538,26 @@ class TGDBApp(App):
 
             self._cur_win_split = split
             self._window_shift = int(half_axis * (split / 2.0))
-            self._validate_window_shift(is_vertical)
+            self._validate_window_shift(is_horizontal)
             self.cfg.winsplit = self._SPLIT_NAMES[split]
             self._apply_split()
 
         else:
             # legacy percent mode
-            axis = self._split_axis(is_vertical)
+            axis = self._split_axis(is_horizontal)
             self._cur_win_split = self._WIN_SPLIT_FREE
             self._window_shift += int((axis * msg.delta) / 100)
-            self._validate_window_shift(is_vertical)
+            self._validate_window_shift(is_horizontal)
             self.cfg.winsplit = "free"
             self._apply_split()
 
     def on_toggle_orientation(self, _: ToggleOrientation) -> None:
-        self.cfg.winsplitorientation = (
+        new_orientation = (
             "vertical" if self.cfg.winsplitorientation == "horizontal"
             else "horizontal"
         )
+        self.cfg.winsplitorientation = new_orientation
+        self._set_window_shift_from_ratio(new_orientation == "horizontal", self._split_ratio)
         self._preserve_window_shift_once = True
         self._apply_split()
 
@@ -768,7 +817,7 @@ class TGDBApp(App):
 
     def _apply_split(self) -> None:
         split = self.cfg.winsplit.lower()
-        is_vertical = (self.cfg.winsplitorientation == "vertical")
+        is_horizontal = (self.cfg.winsplitorientation == "horizontal")
         split_changed = split != self._last_split_setting
         orientation_changed = (
             self.cfg.winsplitorientation != self._last_orientation
@@ -776,54 +825,47 @@ class TGDBApp(App):
 
         if split in self._SPLIT_MARKS:
             self._cur_win_split = self._SPLIT_MARKS[split]
-            if split_changed or (
-                orientation_changed
-                and not self._preserve_window_shift_once
-                and self._cur_win_split != self._WIN_SPLIT_FREE
-            ):
-                self._reset_window_shift(is_vertical)
+            if split_changed:
+                self._reset_window_shift(is_horizontal)
+            elif orientation_changed and not self._preserve_window_shift_once:
+                self._set_window_shift_from_ratio(is_horizontal, self._split_ratio)
+        elif orientation_changed and not self._preserve_window_shift_once:
+            self._set_window_shift_from_ratio(is_horizontal, self._split_ratio)
 
-        self._validate_window_shift(is_vertical)
-        src_size, gdb_size = self._compute_split_sizes(is_vertical)
-        axis = max(1, self._split_axis(is_vertical) - 1)
-        self._split_ratio = src_size / axis
+        self._validate_window_shift(is_horizontal)
+        total_axis = max(1, self._split_axis(is_horizontal))
+        src_size, gdb_size = self._compute_split_sizes(is_horizontal)
+        show_splitter = (src_size > 0 and gdb_size > 0)
+        if not show_splitter:
+            src_size, gdb_size = self._compute_split_sizes(is_horizontal, total_axis)
+        pane_total = max(1, src_size + gdb_size)
+        self._split_ratio = src_size / pane_total
 
         try:
             container = self.query_one("#split-container")
-            src_col   = self.query_one("#src-col")
+            splitter  = self.query_one("#splitter", Splitter)
             src       = self.query_one("#src-pane")
             gdb       = self.query_one("#gdb-pane")
-            status    = self.query_one("#status")
-            vsep      = self.query_one("#vsep")
-            if is_vertical:
-                # cgdb WSO_VERTICAL: src+status on left, │ separator, gdb on right
-                # Separator is 1 col wide, full height
-                vsep.add_class("visible")
+            splitter.set_orientation(is_horizontal)
+            splitter.styles.display = "block" if show_splitter else "none"
+            if is_horizontal:
+                # Horizontal container: source on the left, GDB on the right.
                 container.styles.layout = "horizontal"
                 src.styles.display = "none" if src_size <= 0 else "block"
                 gdb.styles.display = "none" if gdb_size <= 0 else "block"
-                src_col.styles.width  = src_size
-                src_col.styles.height = "1fr"
-                src.styles.width  = "1fr"
+                src.styles.width  = src_size
                 src.styles.height = "1fr"
-                status.styles.width = "1fr"
                 gdb.styles.width  = gdb_size
                 gdb.styles.height = "1fr"
-                status.drag_enabled = False  # vertical split: drag vsep instead
             else:
-                # cgdb WSO_HORIZONTAL: src on top, status bar below src, gdb below status
-                vsep.remove_class("visible")
+                # Vertical container: source on top, GDB below.
                 container.styles.layout = "vertical"
                 src.styles.display = "none" if src_size <= 0 else "block"
                 gdb.styles.display = "none" if gdb_size <= 0 else "block"
-                src_col.styles.width  = "1fr"
-                src_col.styles.height = src_size + 1   # src rows + 1 status row
                 src.styles.width  = "1fr"
                 src.styles.height = src_size
-                status.styles.width = "1fr"
                 gdb.styles.width  = "1fr"
                 gdb.styles.height = gdb_size
-                status.drag_enabled = True   # horizontal split: drag status bar to resize
         except NoMatches:
             pass
         finally:
@@ -832,18 +874,24 @@ class TGDBApp(App):
             self._preserve_window_shift_once = False
 
     def on_drag_resize(self, msg: DragResize) -> None:
-        """Mouse drag on status bar (horizontal) or vsep (vertical) — resize panes."""
-        is_vertical = (self.cfg.winsplitorientation == "vertical")
-        half_axis = self._split_axis(is_vertical) // 2
+        is_horizontal = (self.cfg.winsplitorientation == "horizontal")
+        axis = self._pane_axis(is_horizontal)
+        if axis <= 0:
+            return
+
+        try:
+            container = self.query_one("#split-container")
+            origin_x = getattr(container.region, "x", 0)
+            origin_y = getattr(container.region, "y", 0)
+        except NoMatches:
+            origin_x = 0
+            origin_y = 0
+
+        pos = (msg.screen_x - origin_x) if is_horizontal else (msg.screen_y - origin_y)
+        pos = max(0, min(axis, int(pos)))
         self._cur_win_split = self._WIN_SPLIT_FREE
-        if is_vertical:
-            # Drag vsep: screen_x is the column the separator is at
-            # src-col takes columns 0..screen_x-1
-            self._window_shift = msg.screen_x - half_axis
-        else:
-            # Drag status bar: screen_y is the row the status bar is at
-            self._window_shift = msg.screen_y - half_axis
-        self._validate_window_shift(is_vertical)
+        self._window_shift = pos - (axis // 2)
+        self._validate_window_shift(is_horizontal)
         self.cfg.winsplit = "free"
         self._apply_split()
 
@@ -857,13 +905,7 @@ class TGDBApp(App):
 
     def _update_status_file_info(self) -> None:
         try:
-            src = self.query_one("#src-pane", SourceView)
-            if src.source_file:
-                self.query_one("#status", StatusBar).set_file_info(
-                    src.source_file.path,          # full path, like cgdb source_current_file()
-                    src.sel_line,
-                    len(src.source_file.lines),
-                )
+            self.query_one("#src-pane", SourceView).refresh()
         except NoMatches:
             pass
 
@@ -903,6 +945,12 @@ class TGDBApp(App):
         self.km.ttimeout_ms      = cfg.ttimeoutlen
         self.km.timeout_enabled  = cfg.timeout
         self.km.ttimeout_enabled = cfg.ttimeout
+        if cfg.winsplitorientation != self._last_orientation:
+            self._set_window_shift_from_ratio(
+                cfg.winsplitorientation == "horizontal",
+                self._split_ratio,
+            )
+            self._preserve_window_shift_once = True
         self._apply_split()
 
     def _show_help_in_source(self) -> None:
