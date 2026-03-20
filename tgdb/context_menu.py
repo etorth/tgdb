@@ -20,10 +20,17 @@ class ContextMenuItem:
     label: str
     action: Optional[str] = None
     children: tuple["ContextMenuItem", ...] = ()
+    separator_before: bool = False
 
     @property
     def has_children(self) -> bool:
         return bool(self.children)
+
+
+@dataclass(frozen=True)
+class _PanelRow:
+    kind: str
+    item_index: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -32,11 +39,22 @@ class _PanelLayout:
     selected_index: int
     x: int
     y: int
-    width: int
+    inner_width: int
+    rows: tuple[_PanelRow, ...]
+
+    @property
+    def width(self) -> int:
+        return self.inner_width + 2
 
     @property
     def height(self) -> int:
-        return len(self.items)
+        return len(self.rows) + 2
+
+    def row_for_item(self, item_index: int) -> Optional[int]:
+        for row_index, row in enumerate(self.rows):
+            if row.kind == "item" and row.item_index == item_index:
+                return row_index
+        return None
 
 
 class ContextMenu(Widget):
@@ -53,6 +71,10 @@ class ContextMenu(Widget):
         display: block;
     }
     """
+
+    _PADDING_LEFT = 2
+    _PADDING_RIGHT = 2
+    _SUBMENU_GLYPH = "▸"
 
     def __init__(
         self,
@@ -102,7 +124,7 @@ class ContextMenu(Widget):
             return False
         local_x = screen_x - self.region.x
         local_y = screen_y - self.region.y
-        return self._panel_at(local_x, local_y) is not None
+        return self._panel_bounds_at(local_x, local_y) is not None
 
     def _entries_at_depth(self, depth: int) -> tuple[ContextMenuItem, ...]:
         items = self._items
@@ -128,10 +150,20 @@ class ContextMenu(Widget):
             return items[index]
         return None
 
-    def _panel_width(self, items: tuple[ContextMenuItem, ...]) -> int:
+    def _row_layout(self, items: tuple[ContextMenuItem, ...]) -> tuple[_PanelRow, ...]:
+        rows: list[_PanelRow] = []
+        for index, item in enumerate(items):
+            if index and item.separator_before:
+                rows.append(_PanelRow("separator"))
+            rows.append(_PanelRow("item", item_index=index))
+        return tuple(rows)
+
+    def _inner_width(self, items: tuple[ContextMenuItem, ...]) -> int:
+        base_padding = self._PADDING_LEFT + self._PADDING_RIGHT
+        submenu_tail = 3
         return max(
             (
-                cell_len(f" {item.label}") + (2 if item.has_children else 0)
+                cell_len(item.label) + base_padding + (submenu_tail if item.has_children else 0)
                 for item in items
             ),
             default=1,
@@ -194,7 +226,12 @@ class ContextMenu(Widget):
         item = self._selected_item(depth)
         if item is None or not item.has_children:
             return False
-        self._set_selection(depth, self._selection_path[depth], open_child=True, preserve_child=True)
+        self._set_selection(
+            depth,
+            self._selection_path[depth],
+            open_child=True,
+            preserve_child=True,
+        )
         return True
 
     def _close_child_panel(self) -> bool:
@@ -215,21 +252,23 @@ class ContextMenu(Widget):
             if not items:
                 break
             selected_index = max(0, min(len(items) - 1, self._selection_path[depth]))
-            width = self._panel_width(items)
-            panels.append(
-                _PanelLayout(
-                    items=items,
-                    selected_index=selected_index,
-                    x=x,
-                    y=y,
-                    width=width,
-                )
+            panel = _PanelLayout(
+                items=items,
+                selected_index=selected_index,
+                x=x,
+                y=y,
+                inner_width=self._inner_width(items),
+                rows=self._row_layout(items),
             )
+            panels.append(panel)
             selected_item = items[selected_index]
             if not selected_item.has_children or depth >= len(self._selection_path) - 1:
                 break
-            x += width
-            y += selected_index
+            row_index = panel.row_for_item(selected_index)
+            if row_index is None:
+                break
+            x = panel.x + panel.width
+            y = panel.y + 1 + row_index
 
         self._panels = panels
         self._menu_width = max((panel.x + panel.width for panel in panels), default=1)
@@ -245,30 +284,40 @@ class ContextMenu(Widget):
         )
         self.refresh()
 
-    def _panel_row_text(self, panel: _PanelLayout, row_index: int) -> str:
-        item = panel.items[row_index]
-        base = f" {item.label}"
-        if item.has_children:
-            padding = max(1, panel.width - cell_len(base) - 1)
-            return f"{base}{' ' * padding}›"
-        return base + (" " * max(0, panel.width - cell_len(base)))
-
-    def _panel_at(self, local_x: int, local_y: int) -> Optional[tuple[int, int]]:
+    def _panel_bounds_at(self, local_x: int, local_y: int) -> Optional[int]:
         for depth in range(len(self._panels) - 1, -1, -1):
             panel = self._panels[depth]
             if (
                 panel.x <= local_x < panel.x + panel.width
                 and panel.y <= local_y < panel.y + panel.height
             ):
-                return depth, local_y - panel.y
+                return depth
+        return None
+
+    def _panel_item_at(self, local_x: int, local_y: int) -> Optional[tuple[int, int]]:
+        for depth in range(len(self._panels) - 1, -1, -1):
+            panel = self._panels[depth]
+            if not (
+                panel.x <= local_x < panel.x + panel.width
+                and panel.y <= local_y < panel.y + panel.height
+            ):
+                continue
+            inner_x = local_x - panel.x
+            inner_y = local_y - panel.y
+            if inner_x in (0, panel.width - 1) or inner_y in (0, panel.height - 1):
+                return None
+            row = panel.rows[inner_y - 1]
+            if row.kind != "item" or row.item_index is None:
+                return None
+            return depth, row.item_index
         return None
 
     def _select_pointer(self, local_x: int, local_y: int) -> bool:
-        hit = self._panel_at(local_x, local_y)
+        hit = self._panel_item_at(local_x, local_y)
         if hit is None:
             return False
-        depth, row = hit
-        self._set_selection(depth, row, open_child=True)
+        depth, item_index = hit
+        self._set_selection(depth, item_index, open_child=True)
         return True
 
     def _submit_selection(self) -> None:
@@ -281,31 +330,77 @@ class ContextMenu(Widget):
         if item.action:
             self.post_message(ContextMenuSelected(item.action))
 
+    def _item_row_text(self, panel: _PanelLayout, item: ContextMenuItem) -> str:
+        left = " " * self._PADDING_LEFT
+        right = " " * self._PADDING_RIGHT
+        if item.has_children:
+            tail = f" {self._SUBMENU_GLYPH} "
+            filler = max(1, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(tail))
+            return f"{left}{item.label}{' ' * filler}{tail}"
+        filler = max(0, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(right))
+        return f"{left}{item.label}{' ' * filler}{right}"
+
+    def _draw_panel(
+        self,
+        panel: _PanelLayout,
+        chars: list[list[str]],
+        styles: list[list[Optional[str]]],
+    ) -> None:
+        border_style = self.hl.style("StatusLine")
+        top = "┌" + ("─" * panel.inner_width) + "┐"
+        bottom = "└" + ("─" * panel.inner_width) + "┘"
+        separator = "├" + ("─" * panel.inner_width) + "┤"
+
+        for dx, ch in enumerate(top):
+            chars[panel.y][panel.x + dx] = ch
+            styles[panel.y][panel.x + dx] = border_style
+
+        for row_offset, row in enumerate(panel.rows, start=1):
+            y = panel.y + row_offset
+            if row.kind == "separator":
+                line = separator
+                row_style = border_style
+                for dx, ch in enumerate(line):
+                    chars[y][panel.x + dx] = ch
+                    styles[y][panel.x + dx] = row_style
+                continue
+
+            assert row.item_index is not None
+            item = panel.items[row.item_index]
+            row_style = (
+                self.hl.style("SelectedLineHighlight")
+                if row.item_index == panel.selected_index
+                else self.hl.style("StatusLine")
+            )
+            chars[y][panel.x] = "│"
+            styles[y][panel.x] = border_style
+            inner = self._item_row_text(panel, item)
+            for dx, ch in enumerate(inner, start=1):
+                chars[y][panel.x + dx] = ch
+                styles[y][panel.x + dx] = row_style
+            chars[y][panel.x + panel.width - 1] = "│"
+            styles[y][panel.x + panel.width - 1] = border_style
+
+        bottom_y = panel.y + panel.height - 1
+        for dx, ch in enumerate(bottom):
+            chars[bottom_y][panel.x + dx] = ch
+            styles[bottom_y][panel.x + dx] = border_style
+
     def render(self) -> Text:
         width = max(1, self._menu_width)
         height = max(1, self._menu_height)
-        result = Text(no_wrap=True, overflow="crop")
+        chars = [[" "] * width for _ in range(height)]
+        styles: list[list[Optional[str]]] = [[None] * width for _ in range(height)]
 
-        for row in range(height):
-            if row:
+        for panel in self._panels:
+            self._draw_panel(panel, chars, styles)
+
+        result = Text(no_wrap=True, overflow="crop")
+        for y in range(height):
+            if y:
                 result.append("\n")
-            cursor_x = 0
-            row_panels = [panel for panel in self._panels if panel.y <= row < panel.y + panel.height]
-            row_panels.sort(key=lambda panel: panel.x)
-            for depth, panel in ((self._panels.index(panel), panel) for panel in row_panels):
-                if panel.x > cursor_x:
-                    result.append(" " * (panel.x - cursor_x))
-                    cursor_x = panel.x
-                row_index = row - panel.y
-                style = (
-                    self.hl.style("SelectedLineHighlight")
-                    if row_index == panel.selected_index
-                    else self.hl.style("StatusLine")
-                )
-                result.append(self._panel_row_text(panel, row_index), style=style)
-                cursor_x = panel.x + panel.width
-            if cursor_x < width:
-                result.append(" " * (width - cursor_x))
+            for x in range(width):
+                result.append(chars[y][x], style=styles[y][x])
         return result
 
     def on_mouse_move(self, event: events.MouseMove) -> None:
@@ -315,14 +410,18 @@ class ContextMenu(Widget):
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if not self.is_open or event.button != 1:
             return
-        hit = self._panel_at(int(event.x), int(event.y))
-        if hit is None:
+        panel_depth = self._panel_bounds_at(int(event.x), int(event.y))
+        if panel_depth is None:
             self.post_message(ContextMenuClosed())
             event.stop()
             return
-        depth, row = hit
-        item = self._entries_at_depth(depth)[row]
-        self._set_selection(depth, row, open_child=item.has_children)
+        hit = self._panel_item_at(int(event.x), int(event.y))
+        if hit is None:
+            event.stop()
+            return
+        depth, item_index = hit
+        item = self._entries_at_depth(depth)[item_index]
+        self._set_selection(depth, item_index, open_child=item.has_children)
         if item.has_children:
             event.stop()
             return
