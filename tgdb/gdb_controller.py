@@ -42,6 +42,7 @@ class Breakpoint:
 
 @dataclass
 class Frame:
+    level: int = 0
     file: str = ""
     fullname: str = ""
     line: int = 0
@@ -55,6 +56,17 @@ class LocalVariable:
     value: str = ""
     type: str = ""
     is_arg: bool = False
+
+
+@dataclass
+class ThreadInfo:
+    id: str = ""
+    target_id: str = ""
+    name: str = ""
+    state: str = ""
+    core: str = ""
+    frame: Optional[Frame] = None
+    is_current: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +209,8 @@ class GDBController:
         on_source_files(files: list[str])
         on_source_file(path: str, line: int) — current source file + line
         on_locals(vars: list[LocalVariable]) — locals in current frame
+        on_stack(frames: list[Frame])        — call stack in current thread
+        on_threads(threads: list[ThreadInfo]) — thread list
         on_exit()                            — GDB exited
         on_error(msg: str)                   — user-visible ^error
     """
@@ -220,6 +234,10 @@ class GDBController:
         self.source_files: list[str] = []
         self.current_frame: Optional[Frame] = None
         self.locals: list[LocalVariable] = []
+        self.stack: list[Frame] = []
+        self.threads: list[ThreadInfo] = []
+        self.current_thread_id: str = ""
+        self._inferior_running: bool = False
 
         # Callbacks
         self.on_console: Callable[[bytes], None]              = lambda d: None
@@ -229,6 +247,8 @@ class GDBController:
         self.on_source_files: Callable[[list[str]], None]        = lambda f: None
         self.on_source_file: Callable[[str, int], None]          = lambda f, l: None
         self.on_locals: Callable[[list[LocalVariable]], None]    = lambda v: None
+        self.on_stack: Callable[[list[Frame]], None]             = lambda v: None
+        self.on_threads: Callable[[list[ThreadInfo]], None]      = lambda v: None
         self.on_exit: Callable[[], None]                      = lambda: None
         self.on_error: Callable[[str], None]                  = lambda m: None
 
@@ -396,6 +416,13 @@ class GDBController:
             elif meta.get("kind") == "stack-locals":
                 self.locals = []
                 self.on_locals([])
+            elif meta.get("kind") == "stack-frames":
+                self.stack = []
+                self.on_stack([])
+            elif meta.get("kind") == "thread-info":
+                if not self._inferior_running:
+                    self.threads = []
+                    self.on_threads([])
             else:
                 msg = results.get("msg", "")
                 if isinstance(msg, str) and bool(meta.get("report_error", True)):
@@ -420,6 +447,15 @@ class GDBController:
             if "variables" in results:
                 self.locals = self._parse_local_variables(results.get("variables"))
                 self.on_locals(list(self.locals))
+            if "stack" in results:
+                self.stack = self._parse_stack_frames(results.get("stack"))
+                self.on_stack(list(self.stack))
+            if "threads" in results:
+                current_thread_id = results.get("current-thread-id")
+                if isinstance(current_thread_id, str):
+                    self.current_thread_id = current_thread_id
+                self.threads = self._parse_threads(results.get("threads"))
+                self._emit_threads()
             frame = results.get("frame")
             if frame:
                 parsed = self._parse_frame(frame)
@@ -431,6 +467,8 @@ class GDBController:
                     self.request_source_file(report_error=bool(meta.get("report_error", True)))
                 if meta.get("kind") == "current-location":
                     self.request_current_frame_locals(report_error=False)
+                    self.request_current_stack_frames(report_error=False)
+                    self.request_current_threads(report_error=False)
             elif meta.get("kind") == "current-location":
                 # Mirror cgdb's startup query path: ask for the current frame
                 # first, then fall back to exec source-file if needed.
@@ -492,6 +530,20 @@ class GDBController:
             kind="stack-locals",
         )
 
+    def request_current_stack_frames(self, *, report_error: bool = False) -> None:
+        self.mi_command(
+            "-stack-list-frames",
+            report_error=report_error,
+            kind="stack-frames",
+        )
+
+    def request_current_threads(self, *, report_error: bool = False) -> None:
+        self.mi_command(
+            "-thread-info",
+            report_error=report_error,
+            kind="thread-info",
+        )
+
     async def _refresh_breakpoints(self) -> None:
         self.mi_command("-break-list")
 
@@ -518,15 +570,42 @@ class GDBController:
         results = rec.get("results", {})
 
         if cls == "stopped":
+            self._inferior_running = False
             frame = self._parse_frame(results.get("frame", {}))
             self.current_frame = frame
+            thread_id = results.get("thread-id")
+            if isinstance(thread_id, str):
+                self.current_thread_id = thread_id
             self.on_stopped(frame)
             self.request_current_frame_locals(report_error=False)
+            self.request_current_stack_frames(report_error=False)
+            self.request_current_threads(report_error=False)
             asyncio.ensure_future(self._refresh_breakpoints())
         elif cls == "running":
+            self._inferior_running = True
             self.locals = []
             self.on_locals([])
+            self.stack = []
+            self.on_stack([])
+            running_thread = results.get("thread-id")
+            if self.threads:
+                if running_thread == "all":
+                    for thread in self.threads:
+                        thread.state = "running"
+                elif isinstance(running_thread, str):
+                    for thread in self.threads:
+                        if thread.id == running_thread:
+                            thread.state = "running"
+                self._emit_threads()
             self.on_running()
+        elif cls == "thread-created" or cls == "thread-exited":
+            if not self._inferior_running:
+                self.request_current_threads(report_error=False)
+        elif cls == "thread-selected":
+            thread_id = results.get("id") or results.get("thread-id")
+            if isinstance(thread_id, str):
+                self.current_thread_id = thread_id
+            self.request_current_location(report_error=False)
         elif cls == "breakpoint-modified":
             bkpt = results.get("bkpt", {})
             if bkpt:
@@ -548,6 +627,7 @@ class GDBController:
         if not isinstance(data, dict):
             return Frame()
         return Frame(
+            level=self._safe_int(data.get("level", 0)),
             file=data.get("file", ""),
             fullname=data.get("fullname", ""),
             line=self._safe_int(data.get("line", 0)),
@@ -575,6 +655,64 @@ class GDBController:
                 )
             )
         return locals_list
+
+    def _parse_stack_frames(self, data) -> list[Frame]:
+        frames_raw: list[dict] = []
+        if isinstance(data, dict):
+            raw = data.get("frame")
+            if isinstance(raw, list):
+                frames_raw.extend(item for item in raw if isinstance(item, dict))
+            elif isinstance(raw, dict):
+                frames_raw.append(raw)
+        elif isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                raw = item.get("frame", item)
+                if isinstance(raw, list):
+                    frames_raw.extend(entry for entry in raw if isinstance(entry, dict))
+                elif isinstance(raw, dict):
+                    frames_raw.append(raw)
+        return [self._parse_frame(item) for item in frames_raw]
+
+    def _parse_threads(self, data) -> list[ThreadInfo]:
+        threads_raw: list[dict] = []
+        if isinstance(data, dict):
+            raw = data.get("thread", data)
+            if isinstance(raw, list):
+                threads_raw.extend(item for item in raw if isinstance(item, dict))
+            elif isinstance(raw, dict):
+                threads_raw.append(raw)
+        elif isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                raw = item.get("thread", item)
+                if isinstance(raw, list):
+                    threads_raw.extend(entry for entry in raw if isinstance(entry, dict))
+                elif isinstance(raw, dict):
+                    threads_raw.append(raw)
+
+        threads: list[ThreadInfo] = []
+        for raw in threads_raw:
+            frame = raw.get("frame")
+            threads.append(
+                ThreadInfo(
+                    id=str(raw.get("id", "")),
+                    target_id=str(raw.get("target-id", "")),
+                    name=str(raw.get("name", "")),
+                    state=str(raw.get("state", "")),
+                    core=str(raw.get("core", "")),
+                    frame=self._parse_frame(frame) if isinstance(frame, dict) else None,
+                    is_current=str(raw.get("id", "")) == self.current_thread_id,
+                )
+            )
+        return threads
+
+    def _emit_threads(self) -> None:
+        for thread in self.threads:
+            thread.is_current = (thread.id == self.current_thread_id)
+        self.on_threads(list(self.threads))
 
     def _update_breakpoint_from_mi(self, data: dict) -> None:
         if not isinstance(data, dict):
