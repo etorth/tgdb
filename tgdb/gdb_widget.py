@@ -198,7 +198,20 @@ class GDBWidget(Widget):
             self._screen.use_color = self.debugwincolor
             self._stream = pyte.ByteStream(self._screen)
         else:
-            # Resize — pyte.Screen.resize() preserves buffer content
+            # When shrinking vertically, pyte.Screen.resize() drops rows from
+            # the top via delete_lines() — permanently losing content before it
+            # can reach our scrollback hook in _GDBScreen.index().  Save those
+            # rows into scrollback ourselves before the resize so that the user
+            # can still scroll up to see them.
+            if rows < self._pyte_rows:
+                n_drop = self._pyte_rows - rows
+                use_color = self._screen.use_color
+                cols_now = self._pyte_cols
+                for r in range(n_drop):
+                    self._scrollback.append(
+                        _row_to_text(self._screen.buffer[r], cols_now,
+                                     use_color=use_color)
+                    )
             self._pyte_rows = rows
             self._pyte_cols = cols
             self._screen.resize(rows, cols)
