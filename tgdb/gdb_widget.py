@@ -144,8 +144,11 @@ class _GDBScreen(pyte.Screen):
             # grows back later.  Use .get(0) to avoid phantom defaultdict entries.
             row  = self.buffer.get(0)
             text = _row_to_text(row, self.columns, use_color=self.use_color)
-            raw  = dict(row) if row is not None else None
-            self._push_scrollback(text, raw)
+            # Save the row reference directly — no dict() copy needed.
+            # super().index() shifts the buffer and removes row 0, so after
+            # this call pyte no longer holds a reference to this object.
+            # _scrollback_raw becomes the sole owner; pyte cannot mutate it.
+            self._push_scrollback(text, row)
         super().index()
 
 
@@ -257,12 +260,16 @@ class GDBWidget(Widget):
 
                 top_scroll = max(0, cy + 1 - rows)
 
-                # Push displaced rows to both scrollback deques (text + raw copy).
+                # Push displaced rows to both scrollback deques (text + raw ref).
+                # We save the StaticDefaultDict reference directly — no O(cols)
+                # dict() copy.  After buf.clear() below, pyte no longer holds
+                # these references, so _scrollback_raw is the sole owner and
+                # pyte cannot mutate them.
                 for r in range(top_scroll):
                     row = buf.get(r)
                     self._push_to_scrollback(
                         _row_to_text(row, self._pyte_cols, use_color=use_color),
-                        dict(row) if row is not None else None,
+                        row,   # save reference, not a copy
                     )
 
                 # Shift the buffer up by top_scroll rows in-place.
