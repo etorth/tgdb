@@ -30,7 +30,14 @@ from rich.text import Text
 from .highlight_groups import HighlightGroups
 from .key_mapper import KeyMapper
 from .config import Config, ConfigParser
-from .gdb_controller import GDBController, Breakpoint, Frame, LocalVariable, ThreadInfo
+from .gdb_controller import (
+    GDBController,
+    Breakpoint,
+    Frame,
+    LocalVariable,
+    RegisterInfo,
+    ThreadInfo,
+)
 from .source_widget import (
     SourceView, SourceFile,
     ToggleBreakpoint, OpenFileDialog, AwaitMarkJump, AwaitMarkSet,
@@ -45,6 +52,7 @@ from .status_bar import StatusBar, CommandSubmit, CommandCancel
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 from .context_menu import ContextMenu, ContextMenuSelected, ContextMenuClosed
 from .local_variable_pane import LocalVariablePane
+from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
 
@@ -408,8 +416,11 @@ class TGDBApp(App):
         self._current_stack: list[Frame] = []
         self._thread_panes: list[ThreadPane] = []
         self._current_threads: list[ThreadInfo] = []
+        self._register_panes: list[RegisterPane] = []
+        self._current_registers: list[RegisterInfo] = []
         self._pane_factories: dict[str, Callable[[], Widget]] = {
             "locals": self._make_local_variable_pane,
+            "registers": self._make_register_pane,
             "stack": self._make_stack_pane,
             "threads": self._make_thread_pane,
         }
@@ -442,6 +453,7 @@ class TGDBApp(App):
                 "⬒ Add window up",
                 "⬓ Add window down",
                 "Show local variables window",
+                "Show register window",
                 "Show stack window",
                 "Show thread window",
             ],
@@ -488,6 +500,7 @@ class TGDBApp(App):
         self.gdb.on_source_files = lambda    f: self.call_later(self._ui_set_source_files, f)
         self.gdb.on_source_file  = lambda f, l: self.call_later(self._ui_load_source_file, f, l)
         self.gdb.on_locals       = lambda    v: self.call_later(self._ui_set_locals, v)
+        self.gdb.on_registers    = lambda    v: self.call_later(self._ui_set_registers, v)
         self.gdb.on_stack        = lambda    v: self.call_later(self._ui_set_stack, v)
         self.gdb.on_threads      = lambda    v: self.call_later(self._ui_set_threads, v)
         self.gdb.on_exit         = lambda     : self.call_later(self._ui_gdb_exit)
@@ -598,6 +611,12 @@ class TGDBApp(App):
         pane = LocalVariablePane(self.hl)
         pane.set_variables(self._current_locals)
         self._locals_panes.append(pane)
+        return pane
+
+    def _make_register_pane(self) -> RegisterPane:
+        pane = RegisterPane(self.hl)
+        pane.set_registers(self._current_registers)
+        self._register_panes.append(pane)
         return pane
 
     def _make_stack_pane(self) -> StackPane:
@@ -732,6 +751,8 @@ class TGDBApp(App):
     def _context_menu_pane_kind(self, item: str) -> Optional[str]:
         if item.lower() == "show local variables window":
             return "locals"
+        if item.lower() == "show register window":
+            return "registers"
         if item.lower() == "show stack window":
             return "stack"
         if item.lower() == "show thread window":
@@ -1172,12 +1193,15 @@ class TGDBApp(App):
             if await self._replace_workspace_item(target, pane):
                 if pane_kind == "locals":
                     self.gdb.request_current_frame_locals(report_error=False)
+                elif pane_kind == "registers":
+                    self.gdb.request_current_registers(report_error=False)
                 elif pane_kind == "stack":
                     self.gdb.request_current_stack_frames(report_error=False)
                 elif pane_kind == "threads":
                     self.gdb.request_current_threads(report_error=False)
                 status_messages = {
                     "locals": "Showing local variables",
+                    "registers": "Showing registers",
                     "stack": "Showing stack",
                     "threads": "Showing threads",
                 }
@@ -1244,6 +1268,15 @@ class TGDBApp(App):
             if self._widget_attached(pane):
                 mounted_panes.append(pane)
         self._locals_panes = mounted_panes
+
+    def _ui_set_registers(self, registers: list[RegisterInfo]) -> None:
+        self._current_registers = list(registers)
+        mounted_panes: list[RegisterPane] = []
+        for pane in self._register_panes:
+            pane.set_registers(self._current_registers)
+            if self._widget_attached(pane):
+                mounted_panes.append(pane)
+        self._register_panes = mounted_panes
 
     def _ui_set_stack(self, frames: list[Frame]) -> None:
         self._current_stack = list(frames)

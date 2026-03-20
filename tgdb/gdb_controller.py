@@ -69,6 +69,13 @@ class ThreadInfo:
     is_current: bool = False
 
 
+@dataclass
+class RegisterInfo:
+    number: int = 0
+    name: str = ""
+    value: str = ""
+
+
 # ---------------------------------------------------------------------------
 # GDB/MI output parser
 # ---------------------------------------------------------------------------
@@ -211,6 +218,7 @@ class GDBController:
         on_locals(vars: list[LocalVariable]) — locals in current frame
         on_stack(frames: list[Frame])        — call stack in current thread
         on_threads(threads: list[ThreadInfo]) — thread list
+        on_registers(registers: list[RegisterInfo]) — register list
         on_exit()                            — GDB exited
         on_error(msg: str)                   — user-visible ^error
     """
@@ -237,6 +245,9 @@ class GDBController:
         self.stack: list[Frame] = []
         self.threads: list[ThreadInfo] = []
         self.current_thread_id: str = ""
+        self.registers: list[RegisterInfo] = []
+        self.register_names: list[str] = []
+        self._register_values: dict[int, str] = {}
         self._inferior_running: bool = False
 
         # Callbacks
@@ -249,6 +260,7 @@ class GDBController:
         self.on_locals: Callable[[list[LocalVariable]], None]    = lambda v: None
         self.on_stack: Callable[[list[Frame]], None]             = lambda v: None
         self.on_threads: Callable[[list[ThreadInfo]], None]      = lambda v: None
+        self.on_registers: Callable[[list[RegisterInfo]], None]  = lambda v: None
         self.on_exit: Callable[[], None]                      = lambda: None
         self.on_error: Callable[[str], None]                  = lambda m: None
 
@@ -423,6 +435,11 @@ class GDBController:
                 if not self._inferior_running:
                     self.threads = []
                     self.on_threads([])
+            elif meta.get("kind") == "register-values":
+                if not self._inferior_running:
+                    self._register_values = {}
+                    self.registers = []
+                    self.on_registers([])
             else:
                 msg = results.get("msg", "")
                 if isinstance(msg, str) and bool(meta.get("report_error", True)):
@@ -456,6 +473,14 @@ class GDBController:
                     self.current_thread_id = current_thread_id
                 self.threads = self._parse_threads(results.get("threads"))
                 self._emit_threads()
+            register_names = results.get("register-names")
+            if isinstance(register_names, list):
+                self.register_names = [name if isinstance(name, str) else "" for name in register_names]
+                self._emit_registers()
+            register_values = results.get("register-values")
+            if isinstance(register_values, list):
+                self._register_values = self._parse_register_values(register_values)
+                self._emit_registers()
             frame = results.get("frame")
             if frame:
                 parsed = self._parse_frame(frame)
@@ -469,6 +494,7 @@ class GDBController:
                     self.request_current_frame_locals(report_error=False)
                     self.request_current_stack_frames(report_error=False)
                     self.request_current_threads(report_error=False)
+                    self.request_current_registers(report_error=False)
             elif meta.get("kind") == "current-location":
                 # Mirror cgdb's startup query path: ask for the current frame
                 # first, then fall back to exec source-file if needed.
@@ -544,6 +570,19 @@ class GDBController:
             kind="thread-info",
         )
 
+    def request_current_registers(self, *, report_error: bool = False) -> None:
+        if not self.register_names:
+            self.mi_command(
+                "-data-list-register-names",
+                report_error=report_error,
+                kind="register-names",
+            )
+        self.mi_command(
+            "-data-list-register-values x",
+            report_error=report_error,
+            kind="register-values",
+        )
+
     async def _refresh_breakpoints(self) -> None:
         self.mi_command("-break-list")
 
@@ -580,6 +619,7 @@ class GDBController:
             self.request_current_frame_locals(report_error=False)
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
+            self.request_current_registers(report_error=False)
             asyncio.ensure_future(self._refresh_breakpoints())
         elif cls == "running":
             self._inferior_running = True
@@ -713,6 +753,33 @@ class GDBController:
         for thread in self.threads:
             thread.is_current = (thread.id == self.current_thread_id)
         self.on_threads(list(self.threads))
+
+    def _parse_register_values(self, data) -> dict[int, str]:
+        values: dict[int, str] = {}
+        if not isinstance(data, list):
+            return values
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            number = self._safe_int(item.get("number", -1))
+            if number < 0:
+                continue
+            value = item.get("value")
+            values[number] = value if isinstance(value, str) else ""
+        return values
+
+    def _emit_registers(self) -> None:
+        if not self.register_names or not self._register_values:
+            return
+
+        registers: list[RegisterInfo] = []
+        for number, value in sorted(self._register_values.items()):
+            name = self.register_names[number] if 0 <= number < len(self.register_names) else ""
+            if not name:
+                continue
+            registers.append(RegisterInfo(number=number, name=name, value=value))
+        self.registers = registers
+        self.on_registers(list(self.registers))
 
     def _update_breakpoint_from_mi(self, data: dict) -> None:
         if not isinstance(data, dict):
