@@ -1,5 +1,6 @@
 """
-File dialog widget — mirrors cgdb's filedlg.cpp exactly.
+File dialog widget — mirrors cgdb's filedlg.cpp closely, with an async
+loading state for slow source-file enumeration.
 
 Layout (matches cgdb filedlg_display()):
   Row 0:        "Select a file or press q to cancel."  (centered)
@@ -41,6 +42,8 @@ class FileDialog(Widget):
     """
 
     _LABEL = "Select a file or press q to cancel."
+    _PENDING_MESSAGE = "file list query pending"
+    _EMPTY_MESSAGE = "No source files available."
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -57,6 +60,8 @@ class FileDialog(Widget):
         self.wrapscan:   bool = True
         self._num_buf:   str  = ""
         self._await_g:   bool = False
+        self._query_pending: bool = False
+        self._body_message: Optional[str] = None
         self.can_focus = True
 
     # ------------------------------------------------------------------
@@ -94,19 +99,44 @@ class FileDialog(Widget):
             return (group, path)
 
         self._files = sorted(filtered, key=sort_key)
-        self._sel   = 0
+        self._sel = 0 if self._files else -1
         self._sel_col = 0
+        self._query_pending = False
+        self._body_message = None if self._files else self._EMPTY_MESSAGE
         self.refresh()
 
-    def open(self) -> None:
-        self._sel = 0
+    @property
+    def is_open(self) -> bool:
+        return self.has_class("visible")
+
+    def _reset_interaction(self) -> None:
+        self._sel = 0 if self._files else -1
         self._sel_col = 0
         self._search_active = False
+        self._search_buf = ""
+        self._search_pattern = ""
+        self._search_origin = 0
+        self._num_buf = ""
+        self._await_g = False
+
+    def open(self) -> None:
+        self._reset_interaction()
+        self.add_class("visible")
+        self.focus()
+        self.refresh()
+
+    def open_pending(self) -> None:
+        self._files = []
+        self._query_pending = True
+        self._body_message = self._PENDING_MESSAGE
+        self._reset_interaction()
         self.add_class("visible")
         self.focus()
         self.refresh()
 
     def close(self) -> None:
+        self._query_pending = False
+        self._search_active = False
         self.remove_class("visible")
 
     # ------------------------------------------------------------------
@@ -135,6 +165,8 @@ class FileDialog(Widget):
         """First file index to show (centres selected line, cgdb style)."""
         count  = len(self._files)
         height = self._list_height()
+        if count == 0:
+            return 0
         if count < height:
             return (count - height) // 2   # may be negative → clamp below
         start = self._sel - height // 2
@@ -213,6 +245,29 @@ class FileDialog(Widget):
                       style=self.hl.style("StatusLine"))
         result.append("\n")
 
+        if self._query_pending or (count == 0 and self._body_message):
+            message = self._body_message or ""
+            message_row = max(0, (lh - 1) // 2)
+            for i in range(lh):
+                if i:
+                    result.append("\n")
+                if i == message_row and message:
+                    pad = max(0, (w - len(message)) // 2)
+                    result.append(" " * pad, style=self.hl.style("Normal"))
+                    result.append(message, style=self.hl.style("StatusLine"))
+                    result.append(" " * max(0, w - pad - len(message)), style=self.hl.style("Normal"))
+                else:
+                    result.append(" " * w, style=self.hl.style("Normal"))
+
+            result.append("\n")
+            bar_style = self.hl.style("StatusLine")
+            if self._query_pending:
+                bar = " Esc=quit"
+            else:
+                bar = " q=quit"
+            result.append(bar[:w].ljust(w), style=bar_style)
+            return result
+
         # ── Rows 1..lh: file list ──
         start = self._scroll_start()
 
@@ -253,7 +308,8 @@ class FileDialog(Widget):
             pfx = "/" if self._search_forward else "?"
             bar = f"{pfx}{self._search_buf}"
         else:
-            bar = f" {self._sel + 1}/{count}  j/k=move  Enter=open  /=search  q=quit"
+            current = self._sel + 1 if self._sel >= 0 else 0
+            bar = f" {current}/{count}  j/k=move  Enter=open  /=search  q=quit"
         result.append(bar[:w].ljust(w), style=bar_style)
 
         return result
@@ -265,6 +321,12 @@ class FileDialog(Widget):
     def on_key(self, event: events.Key) -> None:
         key  = event.key
         char = event.character or ""
+
+        if self._query_pending:
+            if key in ("q", "escape"):
+                self.post_message(FileDialogClosed())
+            event.stop()
+            return
 
         if self._search_active:
             self._handle_search_key(key, char)

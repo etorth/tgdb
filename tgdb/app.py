@@ -1069,10 +1069,16 @@ class TGDBApp(App):
                                     temporary=msg.temporary)
 
     def on_open_file_dialog(self, msg: OpenFileDialog) -> None:
-        # Mirror cgdb interface.cpp: always request fresh source files,
-        # then open the dialog when the MI response arrives (_ui_set_source_files).
-        # cgdb never shows an error here — it just fires the request and waits.
+        # Open immediately and show a pending state while GDB enumerates files.
+        # Large binaries can make -file-list-exec-source-files noticeably slow.
+        try:
+            fd = self.query_one("#file-dlg", FileDialog)
+        except NoMatches:
+            self._show_status("File dialog is unavailable")
+            return
         self._file_dialog_pending = True
+        fd.open_pending()
+        self._set_mode("FILEDLG")
         self.gdb.request_source_files()
 
     def on_open_tty(self, _: OpenTTY) -> None:
@@ -1297,6 +1303,7 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def on_file_selected(self, msg: FileSelected) -> None:
+        self._file_dialog_pending = False
         self.query_one("#file-dlg", FileDialog).close()
         src = self._get_source_view()
         if src is not None:
@@ -1305,6 +1312,7 @@ class TGDBApp(App):
         self._switch_to_cgdb()
 
     def on_file_dialog_closed(self, _: FileDialogClosed) -> None:
+        self._file_dialog_pending = False
         self.query_one("#file-dlg", FileDialog).close()
         self._switch_to_cgdb()
 
@@ -1441,18 +1449,14 @@ class TGDBApp(App):
     def _ui_set_source_files(self, files: list[str]) -> None:
         try:
             fd = self.query_one("#file-dlg", FileDialog)
-            fd.files = files
-            # Mirror cgdb update_source_files(): if 'o' was pressed, open
-            # the dialog now that the file list has arrived from GDB.
-            if self._file_dialog_pending:
-                self._file_dialog_pending = False
-                if files:
-                    fd.open()
-                    self._set_mode("FILEDLG")
-                else:
-                    self._show_status("No sources available! Was the program compiled with debug?")
         except NoMatches:
             pass
+            return
+        if not self._file_dialog_pending or not fd.is_open:
+            self._file_dialog_pending = False
+            return
+        self._file_dialog_pending = False
+        fd.files = files
 
     def _ui_load_source_file(self, path: str, line: int = 0) -> None:
         """Load a specific source file (from -file-list-exec-source-file)."""
