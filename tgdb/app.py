@@ -17,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -1594,11 +1596,18 @@ class TGDBApp(App):
     def _cmd_capturescreen(self, args: list) -> Optional[str]:
         """Save an SVG screenshot of the current screen.
 
-        :capturescreen            — saves to the current directory with an auto-generated name
-        :capturescreen myfile.svg — saves to myfile.svg in the current directory
+        :capturescreen            — saves to tgdb-<nanosecond-timestamp>.svg
+        :capturescreen myfile.svg — saves to myfile.svg
         """
         try:
-            filename = args[0] if args else None
+            if args:
+                filename = args[0]
+            else:
+                ns = time.time_ns()
+                dt = datetime.fromtimestamp(ns // 1_000_000_000)
+                nano = ns % 1_000_000_000
+                ts = dt.strftime('%Y-%m-%d-%H-%M-%S-') + f"{nano:09d}"
+                filename = f"tgdb-{ts}.svg"
             path = self.save_screenshot(filename=filename)
             self._show_status(f"Screenshot saved: {path}")
         except Exception as e:
