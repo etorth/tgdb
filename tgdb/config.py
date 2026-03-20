@@ -50,7 +50,7 @@ class Config:
     executinglinedisplay: str = "longarrow"   # shortarrow|longarrow|highlight|block
     selectedlinedisplay: str = "block"
     winsplit: str = "even"          # src_full|src_big|even|gdb_big|gdb_full
-    winsplitorientation: str = "horizontal"   # horizontal|vertical
+    winsplitorientation: str = "vertical"   # horizontal|vertical
     syntax: str = "on"              # on|off|c|asm|…
 
 

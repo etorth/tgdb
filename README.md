@@ -161,7 +161,7 @@ Commands can also be typed interactively via `:`.
 | `winminheight=N` | `wmh` | 0 | Minimum window height |
 | `winminwidth=N` | `wmw` | 0 | Minimum window width |
 | `winsplit=STYLE` | — | `even` | `src_full`\|`src_big`\|`even`\|`gdb_big`\|`gdb_full` |
-| `winsplitorientation=STYLE` | `wso` | `horizontal` | `horizontal`\|`vertical` |
+| `winsplitorientation=STYLE` | `wso` | `vertical` | `horizontal`\|`vertical` |
 | `wrapscan` | `ws` | on | Search wraps around end of file |
 
 ### `:highlight` — customise colours
