@@ -1395,8 +1395,11 @@ class TGDBApp(App):
                 src.exe_line = frame.line
                 src.move_to(frame.line)
                 self._update_status_file_info()
-        # Ask GDB for updated breakpoints and source file list
-        self.gdb.request_source_files()
+        # Refresh the full source-file list only when the file dialog is waiting
+        # for it; on large binaries this MI query can block interactive GDB input
+        # long enough to make the console look hung after commands like `start`.
+        if self._file_dialog_pending:
+            self.gdb.request_source_files()
         asyncio.ensure_future(self._refresh_breakpoints_async())
 
     async def _refresh_breakpoints_async(self) -> None:
