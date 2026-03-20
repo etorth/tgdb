@@ -1506,6 +1506,7 @@ class TGDBApp(App):
             "shell":   self._cmd_shell,   "sh":   self._cmd_shell,
             "logo":    self._cmd_logo,
             "syntax":  self._cmd_syntax,
+            "capturescreen": self._cmd_capturescreen, "cs": self._cmd_capturescreen,
             "continue": gdb_cmd("continue"), "c":   gdb_cmd("continue"),
             "next":     gdb_cmd("next"),     "n":   gdb_cmd("next"),
             "nexti":    gdb_cmd("nexti"),
@@ -1588,6 +1589,20 @@ class TGDBApp(App):
         except Exception as e:
             return str(e)
         self.refresh()
+        return None
+
+    def _cmd_capturescreen(self, args: list) -> Optional[str]:
+        """Save an SVG screenshot of the current screen.
+
+        :capturescreen            — saves to the current directory with an auto-generated name
+        :capturescreen myfile.svg — saves to myfile.svg in the current directory
+        """
+        try:
+            filename = args[0] if args else None
+            path = self.save_screenshot(filename=filename)
+            self._show_status(f"Screenshot saved: {path}")
+        except Exception as e:
+            return str(e)
         return None
 
     def _send_gdb_cli(self, cmd: str) -> None:
@@ -1813,6 +1828,7 @@ class TGDBApp(App):
             "  :highlight Statement ctermfg=Yellow cterm=bold",
             "  :map <F8> :next<Enter>  :imap <F8> :next<Enter>",
             "  :break :continue :next :step :finish :run :quit",
+            "  :shell [cmd]  run shell command    :capturescreen [file.svg]",
         ]
         sf = SourceFile("<help>", lines)
         src.source_file = sf
