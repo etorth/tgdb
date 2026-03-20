@@ -748,9 +748,9 @@ class TGDBApp(App):
         ]
         return [
             ContextMenuItem("Add", children=tuple(add_children)),
-            ContextMenuItem("Delete", action="delete"),
-            ContextMenuItem("Hide", action="hide"),
             ContextMenuItem("Split", children=tuple(split_children)),
+            ContextMenuItem("Hide", action="hide", separator_before=True),
+            ContextMenuItem("Delete", action="delete"),
         ]
 
     def _open_context_menu(self, screen_x: int, screen_y: int) -> None:
