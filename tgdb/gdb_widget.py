@@ -208,38 +208,55 @@ class GDBWidget(Widget):
             self._screen.use_color = self.debugwincolor
             self._stream = pyte.ByteStream(self._screen)
         else:
-            # When shrinking, pyte.Screen.resize() calls delete_lines(n_drop)
-            # which shifts row (r+n_drop) → row r.  pyte only moves a row when
-            # the replacement slot (r+n_drop) is explicitly in the buffer dict.
-            # When (r+n_drop) is absent (a never-written blank row), pyte does
-            # nothing — leaving buffer[r] with stale old content instead of
-            # becoming blank.  This produces garbled output after toggling
-            # split orientation when the GDB pane shrinks.
-            #
-            # Fix (mirroring cgdb/libvterm semantics):
-            #   1. Push ALL n_drop top rows to scrollback — they're being
-            #      displaced from the visible screen just like when content
-            #      scrolls off the top normally.
-            #   2. Pre-delete buffer[r] when its replacement (r+n_drop) is
-            #      absent, so pyte's "do nothing" leaves the row correctly blank.
             if rows < self._pyte_rows:
-                n_drop = self._pyte_rows - rows
+                # pyte.Screen.resize() calls delete_lines(old_rows - new_rows)
+                # with the cursor moved to row 0.  This always drops
+                # (old_rows - new_rows) rows from the top regardless of where
+                # the cursor actually is — which destroys content when the
+                # pane shrinks but the cursor is not near the bottom.
+                #
+                # The correct behaviour (matching cgdb/libvterm) is:
+                #   only push as many rows off the top as needed to keep the
+                #   cursor on screen: top_scroll = max(0, cursor.y+1 - new_rows)
+                #
+                # We implement this ourselves and then tell pyte the new line
+                # count directly so its resize() skips delete_lines entirely.
+                cy = self._screen.cursor.y
                 buf = self._screen.buffer
                 use_color = self._screen.use_color
-                cols_now = self._pyte_cols
-                for r in range(n_drop):
-                    # (1) Save to scrollback if the row has any content.
+
+                top_scroll = max(0, cy + 1 - rows)
+
+                # Push displaced rows to scrollback.
+                for r in range(top_scroll):
                     if r in buf:
                         self._scrollback.append(
-                            _row_to_text(buf.get(r), cols_now,
+                            _row_to_text(buf.get(r), self._pyte_cols,
                                          use_color=use_color)
                         )
-                    # (2) If the replacement row is blank, pyte won't clear
-                    # this row.  Pre-delete it so it becomes blank.
-                    if (r + n_drop) not in buf:
-                        buf.pop(r, None)
+
+                # Shift the buffer up by top_scroll rows in-place.
+                new_entries: dict = {}
+                for old_r in list(buf.keys()):
+                    new_r = old_r - top_scroll
+                    if 0 <= new_r < rows:
+                        new_entries[new_r] = buf[old_r]
+                buf.clear()
+                buf.update(new_entries)
+
+                # Clamp cursor.
+                self._screen.cursor.y = max(0, cy - top_scroll)
+
+                # Tell pyte the screen is already at the new row count so
+                # its resize() sees lines == self.lines and skips delete_lines.
+                self._screen.lines = rows
+                self._screen.dirty.update(range(rows))
+
             self._pyte_rows = rows
             self._pyte_cols = cols
+            # Let pyte handle column changes (and the dirty/margin bookkeeping).
+            # Since lines is already updated above, pyte's resize() only runs
+            # the column-trim path (no-op if cols grew or stayed same).
             self._screen.resize(rows, cols)
 
     # ------------------------------------------------------------------
