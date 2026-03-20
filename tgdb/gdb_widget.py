@@ -210,6 +210,10 @@ class GDBWidget(Widget):
         self._num_buf:   str  = ""
         self._await_g:   bool = False   # true after first 'g' (for 'gg')
         self._dot_pending: bool = False  # true after apostrophe (for `'.`)
+        # Last (rows, cols) we sent SIGWINCH to GDB — tracked separately from
+        # _pyte_rows/_pyte_cols so the eager resize in render() doesn't suppress
+        # the SIGWINCH notification that on_resize() must still send to GDB.
+        self._gdb_resize_notified: tuple[int, int] = (24, 80)
 
     # ------------------------------------------------------------------
     # Scrollback helpers
@@ -385,7 +389,17 @@ class GDBWidget(Widget):
         return lines
 
     def render(self) -> Text:
+        # cgdb calls if_layout() → scr_move() (resize libvterm) → if_draw()
+        # in one synchronous step, so the draw always sees the correct size.
+        # Textual fires on_resize AFTER at least one frame has been rendered at
+        # the new widget size, causing a one-frame flash of stale content.
+        # Mirror cgdb's approach: eagerly resize the pyte buffer here so the
+        # very first render at the new size already shows the correct content.
+        # on_resize() will still send SIGWINCH to GDB via _gdb_resize_notified.
         h = self._visible_height()
+        w = self.size.width
+        if self._screen and w > 0 and (h != self._pyte_rows or w != self._pyte_cols):
+            self._init_pyte(h, w)
         if self._scroll_mode:
             return self._render_scroll(h)
         return self._render_live(h)
@@ -475,7 +489,12 @@ class GDBWidget(Widget):
         new_cols = event.size.width
         if new_rows != self._pyte_rows or new_cols != self._pyte_cols:
             self._init_pyte(new_rows, new_cols)
+        # Always notify GDB of the new size if it hasn't been told yet.
+        # render() may have already called _init_pyte (eager resize to avoid
+        # flash), so we track SIGWINCH notifications separately.
+        if (new_rows, new_cols) != self._gdb_resize_notified:
             self.resize_gdb(new_rows, new_cols)
+            self._gdb_resize_notified = (new_rows, new_cols)
         self.refresh()
 
     # ------------------------------------------------------------------
