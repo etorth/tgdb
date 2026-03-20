@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -50,7 +51,12 @@ from .gdb_widget import (
 )
 from .status_bar import StatusBar, CommandSubmit, CommandCancel
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
-from .context_menu import ContextMenu, ContextMenuSelected, ContextMenuClosed
+from .context_menu import (
+    ContextMenu,
+    ContextMenuClosed,
+    ContextMenuItem,
+    ContextMenuSelected,
+)
 from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
 from .stack_pane import StackPane
@@ -70,6 +76,14 @@ class DragResize(Message):
         self.screen_x = screen_x
         self.screen_y = screen_y
         self.splitter = splitter
+
+
+@dataclass(frozen=True)
+class PaneDescriptor:
+    label: str
+    create: Callable[[], Widget]
+    current: Callable[[], Optional[Widget]]
+    requester: Optional[Callable[[], None]] = None
 
 
 class Splitter(Widget):
@@ -148,6 +162,10 @@ class EmptyPane(Widget):
     }
     """
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.can_focus = True
+
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
         return Text(" " * width, no_wrap=True, overflow="crop")
@@ -207,6 +225,16 @@ class PaneContainer(Widget):
         if len(self._weights) != len(self._items):
             self._weights = [1] * len(self._items)
         await self._rebuild()
+
+    async def take_item(self, item: Widget) -> Widget:
+        index = self.index_of(item)
+        removed = self._items.pop(index)
+        if len(self._weights) == len(self._items) + 1:
+            self._weights.pop(index)
+        else:
+            self._weights = [1] * len(self._items)
+        await self._rebuild()
+        return removed
 
     def _apply_item_style(self, item: Widget, weight: int) -> None:
         item.styles.display = "block"
@@ -410,20 +438,50 @@ class TGDBApp(App):
         self._context_menu_target: Optional[Widget] = None
         self._source_view: Optional[SourceView] = None
         self._gdb_widget: Optional[GDBWidget] = None
-        self._locals_panes: list[LocalVariablePane] = []
+        self._locals_pane: Optional[LocalVariablePane] = None
         self._current_locals: list[LocalVariable] = []
-        self._stack_panes: list[StackPane] = []
+        self._stack_pane: Optional[StackPane] = None
         self._current_stack: list[Frame] = []
-        self._thread_panes: list[ThreadPane] = []
+        self._thread_pane: Optional[ThreadPane] = None
         self._current_threads: list[ThreadInfo] = []
-        self._register_panes: list[RegisterPane] = []
+        self._register_pane: Optional[RegisterPane] = None
         self._current_registers: list[RegisterInfo] = []
-        self._pane_factories: dict[str, Callable[[], Widget]] = {
-            "locals": self._make_local_variable_pane,
-            "registers": self._make_register_pane,
-            "stack": self._make_stack_pane,
-            "threads": self._make_thread_pane,
+        self._pane_descriptors: dict[str, PaneDescriptor] = {
+            "source": PaneDescriptor("Source", self._make_source_pane, lambda: self._source_view),
+            "gdb": PaneDescriptor("GDB", self._make_gdb_pane, lambda: self._gdb_widget),
+            "locals": PaneDescriptor(
+                "Local Variables",
+                self._make_local_variable_pane,
+                lambda: self._locals_pane,
+                lambda: self.gdb.request_current_frame_locals(report_error=False),
+            ),
+            "registers": PaneDescriptor(
+                "Registers",
+                self._make_register_pane,
+                lambda: self._register_pane,
+                lambda: self.gdb.request_current_registers(report_error=False),
+            ),
+            "stack": PaneDescriptor(
+                "Stack",
+                self._make_stack_pane,
+                lambda: self._stack_pane,
+                lambda: self.gdb.request_current_stack_frames(report_error=False),
+            ),
+            "threads": PaneDescriptor(
+                "Threads",
+                self._make_thread_pane,
+                lambda: self._thread_pane,
+                lambda: self.gdb.request_current_threads(report_error=False),
+            ),
         }
+        self._add_menu_order: tuple[str, ...] = (
+            "source",
+            "gdb",
+            "locals",
+            "registers",
+            "threads",
+            "stack",
+        )
 
     # ------------------------------------------------------------------
     # Compose
@@ -445,20 +503,7 @@ class TGDBApp(App):
                 yield self._gdb_widget
             yield StatusBar(self.hl, id="status")
         yield FileDialog(self.hl, id="file-dlg")
-        yield ContextMenu(
-            self.hl,
-            [
-                "◧ Add window left",
-                "◨ Add window right",
-                "⬒ Add window up",
-                "⬓ Add window down",
-                "Show local variables window",
-                "Show register window",
-                "Show stack window",
-                "Show thread window",
-            ],
-            id="context-menu",
-        )
+        yield ContextMenu(self.hl, id="context-menu")
 
     # ------------------------------------------------------------------
     # on_mount — async so asyncio.create_task works
@@ -607,36 +652,69 @@ class TGDBApp(App):
             return widget
         return None
 
+    def _make_source_pane(self) -> SourceView:
+        if self._source_view is None:
+            self._source_view = SourceView(self.hl, id="src-pane")
+        return self._source_view
+
+    def _make_gdb_pane(self) -> GDBWidget:
+        if self._gdb_widget is None:
+            self._gdb_widget = GDBWidget(
+                self.hl,
+                max_scrollback=self.cfg.scrollbackbuffersize,
+                id="gdb-pane",
+            )
+        return self._gdb_widget
+
     def _make_local_variable_pane(self) -> LocalVariablePane:
-        pane = LocalVariablePane(self.hl)
-        pane.set_variables(self._current_locals)
-        self._locals_panes.append(pane)
-        return pane
+        if self._locals_pane is None:
+            self._locals_pane = LocalVariablePane(self.hl)
+        self._locals_pane.set_variables(self._current_locals)
+        return self._locals_pane
 
     def _make_register_pane(self) -> RegisterPane:
-        pane = RegisterPane(self.hl)
-        pane.set_registers(self._current_registers)
-        self._register_panes.append(pane)
-        return pane
+        if self._register_pane is None:
+            self._register_pane = RegisterPane(self.hl)
+        self._register_pane.set_registers(self._current_registers)
+        return self._register_pane
 
     def _make_stack_pane(self) -> StackPane:
-        pane = StackPane(self.hl)
         current_level = self.gdb.current_frame.level if self.gdb.current_frame else 0
-        pane.set_frames(self._current_stack, current_level=current_level)
-        self._stack_panes.append(pane)
-        return pane
+        if self._stack_pane is None:
+            self._stack_pane = StackPane(self.hl)
+        self._stack_pane.set_frames(self._current_stack, current_level=current_level)
+        return self._stack_pane
 
     def _make_thread_pane(self) -> ThreadPane:
-        pane = ThreadPane(self.hl)
-        pane.set_threads(self._current_threads)
-        self._thread_panes.append(pane)
-        return pane
+        if self._thread_pane is None:
+            self._thread_pane = ThreadPane(self.hl)
+        self._thread_pane.set_threads(self._current_threads)
+        return self._thread_pane
+
+    def _pane_widget(self, pane_kind: str) -> Optional[Widget]:
+        descriptor = self._pane_descriptors.get(pane_kind)
+        if descriptor is None:
+            return None
+        return descriptor.current()
+
+    def _pane_label(self, pane_kind: str) -> str:
+        descriptor = self._pane_descriptors.get(pane_kind)
+        return descriptor.label if descriptor is not None else pane_kind
+
+    def _pane_is_attached(self, pane_kind: str) -> bool:
+        return self._widget_attached(self._pane_widget(pane_kind))
+
+    def _pane_kind_for_widget(self, widget: Widget) -> Optional[str]:
+        for pane_kind, descriptor in self._pane_descriptors.items():
+            if widget is descriptor.current():
+                return pane_kind
+        return None
 
     def _create_pane(self, pane_kind: str) -> Optional[Widget]:
-        factory = self._pane_factories.get(pane_kind)
-        if factory is None:
+        descriptor = self._pane_descriptors.get(pane_kind)
+        if descriptor is None:
             return None
-        return factory()
+        return descriptor.create()
 
     def _get_context_menu(self) -> Optional[ContextMenu]:
         try:
@@ -648,16 +726,38 @@ class TGDBApp(App):
         menu = self._get_context_menu()
         if not menu or not menu.is_open:
             return False
-        region = menu.region
-        return (
-            region.x <= screen_x < region.x + region.width
-            and region.y <= screen_y < region.y + region.height
-        )
+        return menu.contains_point(screen_x, screen_y)
+
+    def _build_context_menu_items(self) -> list[ContextMenuItem]:
+        add_children = [
+            ContextMenuItem(
+                self._pane_label(pane_kind),
+                action=f"add:{pane_kind}",
+            )
+            for pane_kind in self._add_menu_order
+            if not self._pane_is_attached(pane_kind)
+        ]
+        if not add_children:
+            add_children = [ContextMenuItem("No panes available")]
+
+        split_children = [
+            ContextMenuItem("Up", action="split:up"),
+            ContextMenuItem("Down", action="split:down"),
+            ContextMenuItem("Left", action="split:left"),
+            ContextMenuItem("Right", action="split:right"),
+        ]
+        return [
+            ContextMenuItem("Add", children=tuple(add_children)),
+            ContextMenuItem("Delete", action="delete"),
+            ContextMenuItem("Hide", action="hide"),
+            ContextMenuItem("Split", children=tuple(split_children)),
+        ]
 
     def _open_context_menu(self, screen_x: int, screen_y: int) -> None:
         menu = self._get_context_menu()
         if not menu:
             return
+        menu.set_items(self._build_context_menu_items())
         menu.open_at(screen_x, screen_y)
 
     def _restore_focus_after_context_menu(self) -> None:
@@ -680,13 +780,14 @@ class TGDBApp(App):
             return
         self._focus_widget(self._first_workspace_leaf())
 
-    def _close_context_menu(self) -> None:
+    def _close_context_menu(self, *, restore_focus: bool = True) -> None:
         menu = self._get_context_menu()
         if not menu or not menu.is_open:
             return
         menu.close()
         self._context_menu_target = None
-        self._restore_focus_after_context_menu()
+        if restore_focus:
+            self._restore_focus_after_context_menu()
 
     def _find_workspace_item(self, widget: Optional[Widget]) -> Optional[Widget]:
         current = widget
@@ -736,35 +837,66 @@ class TGDBApp(App):
         self._workspace_dynamic = True
         return new_root
 
-    def _context_menu_direction(self, item: str) -> Optional[str]:
-        label = item.lower()
-        if "left" in label:
-            return "left"
-        if "right" in label:
-            return "right"
-        if "up" in label:
-            return "up"
-        if "down" in label:
-            return "down"
-        return None
-
-    def _context_menu_pane_kind(self, item: str) -> Optional[str]:
-        if item.lower() == "show local variables window":
-            return "locals"
-        if item.lower() == "show register window":
-            return "registers"
-        if item.lower() == "show stack window":
-            return "stack"
-        if item.lower() == "show thread window":
-            return "threads"
-        return None
-
     async def _replace_workspace_item(self, target: Widget, new_item: Widget) -> bool:
         parent = target.parent if isinstance(target.parent, PaneContainer) else None
         if parent is None:
             return False
         await parent.replace_item(target, new_item)
         return True
+
+    async def _normalize_container_after_delete(self, container: PaneContainer) -> Optional[Widget]:
+        current = container
+        while True:
+            parent = current.parent if isinstance(current.parent, PaneContainer) else None
+            item_count = len(current.items)
+            if parent is None:
+                if item_count == 0:
+                    await current.set_items([EmptyPane()])
+                return self._first_workspace_leaf()
+
+            if item_count > 1:
+                return self._first_workspace_leaf()
+
+            if item_count == 1:
+                remaining = await current.take_item(current.items[0])
+                await parent.replace_item(current, remaining)
+            else:
+                await parent.replace_item(current, EmptyPane())
+            current = parent
+
+    async def _add_pane_to_workspace(self, target: Widget, pane_kind: str) -> Optional[Widget]:
+        pane = self._create_pane(pane_kind)
+        if pane is None:
+            return None
+        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if parent is None:
+            return None
+
+        if isinstance(target, EmptyPane):
+            await parent.replace_item(target, pane)
+        else:
+            index = parent.index_of(target) + 1
+            await parent.insert_item(index, pane)
+
+        descriptor = self._pane_descriptors.get(pane_kind)
+        if descriptor is not None and descriptor.requester is not None:
+            descriptor.requester()
+        return pane
+
+    async def _hide_workspace_item(self, target: Widget) -> Optional[Widget]:
+        if isinstance(target, EmptyPane):
+            return target
+        replacement = EmptyPane()
+        if await self._replace_workspace_item(target, replacement):
+            return replacement
+        return None
+
+    async def _delete_workspace_item(self, target: Widget) -> Optional[Widget]:
+        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if parent is None:
+            return None
+        await parent.take_item(target)
+        return await self._normalize_container_after_delete(parent)
 
     async def _apply_context_menu_action(self, target: Widget, direction: str) -> bool:
         axis = "horizontal" if direction in ("left", "right") else "vertical"
@@ -1178,48 +1310,70 @@ class TGDBApp(App):
 
     async def on_context_menu_selected(self, msg: ContextMenuSelected) -> None:
         target = self._context_menu_target
-        self._close_context_menu()
+        self._close_context_menu(restore_focus=False)
         if target is None:
-            return
-        pane_kind = self._context_menu_pane_kind(msg.item)
-        if pane_kind is not None:
-            if await self._ensure_dynamic_workspace() is None:
-                self._show_status("Unable to create workspace container")
-                return
-            pane = self._create_pane(pane_kind)
-            if pane is None:
-                self._show_status(f"Unknown pane type: {pane_kind}")
-                return
-            if await self._replace_workspace_item(target, pane):
-                if pane_kind == "locals":
-                    self.gdb.request_current_frame_locals(report_error=False)
-                elif pane_kind == "registers":
-                    self.gdb.request_current_registers(report_error=False)
-                elif pane_kind == "stack":
-                    self.gdb.request_current_stack_frames(report_error=False)
-                elif pane_kind == "threads":
-                    self.gdb.request_current_threads(report_error=False)
-                status_messages = {
-                    "locals": "Showing local variables",
-                    "registers": "Showing registers",
-                    "stack": "Showing stack",
-                    "threads": "Showing threads",
-                }
-                self._show_status(status_messages.get(pane_kind, f"Showing {pane_kind}"))
-            else:
-                self._show_status("Unable to replace pane")
-            return
-        direction = self._context_menu_direction(msg.item)
-        if direction is None:
-            self._show_status(f"Context menu: {msg.item}")
             return
         if await self._ensure_dynamic_workspace() is None:
             self._show_status("Unable to create workspace container")
+            self._restore_focus_after_context_menu()
             return
+
+        action = msg.action
+        focus_target: Optional[Widget] = None
+
+        if action.startswith("add:"):
+            pane_kind = action.split(":", 1)[1]
+            if self._pane_is_attached(pane_kind):
+                self._show_status(f"{self._pane_label(pane_kind)} is already shown")
+                self._restore_focus_after_context_menu()
+                return
+            focus_target = await self._add_pane_to_workspace(target, pane_kind)
+            if focus_target is None:
+                self._show_status(f"Unable to add {self._pane_label(pane_kind)}")
+                self._restore_focus_after_context_menu()
+                return
+            self._show_status(f"Added {self._pane_label(pane_kind)}")
+            self._focus_widget(focus_target)
+            return
+
+        if action == "hide":
+            pane_kind = self._pane_kind_for_widget(target)
+            if isinstance(target, EmptyPane):
+                self._show_status("Cell is already empty")
+                self._focus_widget(target)
+                return
+            focus_target = await self._hide_workspace_item(target)
+            if focus_target is None:
+                self._show_status("Unable to hide cell")
+                self._restore_focus_after_context_menu()
+                return
+            label = self._pane_label(pane_kind) if pane_kind is not None else "pane"
+            self._show_status(f"Hid {label}")
+            self._focus_widget(focus_target)
+            return
+
+        if action == "delete":
+            focus_target = await self._delete_workspace_item(target)
+            if focus_target is None:
+                self._show_status("Unable to delete cell")
+                self._restore_focus_after_context_menu()
+                return
+            self._show_status("Deleted cell")
+            self._focus_widget(focus_target)
+            return
+
+        direction = action.split(":", 1)[1] if action.startswith("split:") else None
+        if direction is None:
+            self._show_status(f"Context menu: {action}")
+            self._restore_focus_after_context_menu()
+            return
+
         if await self._apply_context_menu_action(target, direction):
             self._show_status(f"Added window {direction}")
+            self._focus_widget(target)
         else:
             self._show_status(f"Unable to add window {direction}")
+            self._restore_focus_after_context_menu()
 
     def on_context_menu_closed(self, _: ContextMenuClosed) -> None:
         self._close_context_menu()
@@ -1262,40 +1416,24 @@ class TGDBApp(App):
 
     def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
         self._current_locals = list(variables)
-        mounted_panes: list[LocalVariablePane] = []
-        for pane in self._locals_panes:
-            pane.set_variables(self._current_locals)
-            if self._widget_attached(pane):
-                mounted_panes.append(pane)
-        self._locals_panes = mounted_panes
+        if self._locals_pane is not None:
+            self._locals_pane.set_variables(self._current_locals)
 
     def _ui_set_registers(self, registers: list[RegisterInfo]) -> None:
         self._current_registers = list(registers)
-        mounted_panes: list[RegisterPane] = []
-        for pane in self._register_panes:
-            pane.set_registers(self._current_registers)
-            if self._widget_attached(pane):
-                mounted_panes.append(pane)
-        self._register_panes = mounted_panes
+        if self._register_pane is not None:
+            self._register_pane.set_registers(self._current_registers)
 
     def _ui_set_stack(self, frames: list[Frame]) -> None:
         self._current_stack = list(frames)
         current_level = self.gdb.current_frame.level if self.gdb.current_frame else 0
-        mounted_panes: list[StackPane] = []
-        for pane in self._stack_panes:
-            pane.set_frames(self._current_stack, current_level=current_level)
-            if self._widget_attached(pane):
-                mounted_panes.append(pane)
-        self._stack_panes = mounted_panes
+        if self._stack_pane is not None:
+            self._stack_pane.set_frames(self._current_stack, current_level=current_level)
 
     def _ui_set_threads(self, threads: list[ThreadInfo]) -> None:
         self._current_threads = list(threads)
-        mounted_panes: list[ThreadPane] = []
-        for pane in self._thread_panes:
-            pane.set_threads(self._current_threads)
-            if self._widget_attached(pane):
-                mounted_panes.append(pane)
-        self._thread_panes = mounted_panes
+        if self._thread_pane is not None:
+            self._thread_pane.set_threads(self._current_threads)
 
     def _ui_set_source_files(self, files: list[str]) -> None:
         try:
