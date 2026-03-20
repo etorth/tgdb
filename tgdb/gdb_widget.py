@@ -70,36 +70,45 @@ def _pyte_color(c: str) -> Optional[str]:
     return None
 
 
-def _row_to_text(row: dict, width: int, cursor_col: int = -1,
+def _row_to_text(row, width: int, cursor_col: int = -1,
                  use_color: bool = True) -> Text:
-    """Convert one pyte screen row to a Rich Text line."""
+    """Convert one pyte screen row to a Rich Text line.
+
+    ``row`` may be None (row was never written to in pyte's buffer).
+    Use ``screen.buffer.get(r)`` instead of ``screen.buffer[r]`` at
+    call sites to avoid creating phantom empty entries in the
+    defaultdict, which confuses pyte's delete_lines logic on resize.
+    """
     result = Text(no_wrap=True, overflow="crop")
     for col in range(width):
-        char = row[col]          # defaultdict — always returns a Char
-        data = char.data or " "
-        if use_color:
-            fg   = _pyte_color(char.fg)
-            bg   = _pyte_color(char.bg)
-            if char.reverse:
-                fg, bg = bg, fg
-            st = Style(
-                color=fg, bgcolor=bg,
-                bold=char.bold,
-                italic=char.italics,
-                underline=char.underscore,
-                blink=char.blink,
-            )
+        if row is None:
+            data = " "
+            st = Style(reverse=True, blink=True) if col == cursor_col else Style()
         else:
-            # :set debugwincolor off — strip ANSI colors, keep bold/reverse
-            st = Style(
-                bold=char.bold,
-                italic=char.italics,
-                underline=char.underscore,
-                blink=char.blink,
-                reverse=char.reverse,
-            )
-        if col == cursor_col:     # show GDB readline cursor (blinking block)
-            st = st + Style(reverse=True, blink=True)
+            char = row[col]          # StaticDefaultDict — never inserts on access
+            data = char.data or " "
+            if use_color:
+                fg   = _pyte_color(char.fg)
+                bg   = _pyte_color(char.bg)
+                if char.reverse:
+                    fg, bg = bg, fg
+                st = Style(
+                    color=fg, bgcolor=bg,
+                    bold=char.bold,
+                    italic=char.italics,
+                    underline=char.underscore,
+                    blink=char.blink,
+                )
+            else:
+                st = Style(
+                    bold=char.bold,
+                    italic=char.italics,
+                    underline=char.underscore,
+                    blink=char.blink,
+                    reverse=char.reverse,
+                )
+            if col == cursor_col:
+                st = st + Style(reverse=True, blink=True)
         result.append(data, style=st)
     return result
 
@@ -119,8 +128,9 @@ class _GDBScreen(pyte.Screen):
 
     def index(self) -> None:
         if self.cursor.y == self.lines - 1:
-            # Row 0 is about to be lost — capture it
-            row  = self.buffer[0]
+            # Row 0 is about to be lost — capture it.
+            # Use .get(0) to avoid creating a phantom empty entry via defaultdict.
+            row  = self.buffer.get(0)
             text = _row_to_text(row, self.columns, use_color=self.use_color)
             self._scrollback.append(text)
         super().index()
@@ -198,20 +208,24 @@ class GDBWidget(Widget):
             self._screen.use_color = self.debugwincolor
             self._stream = pyte.ByteStream(self._screen)
         else:
-            # When shrinking vertically, pyte.Screen.resize() drops rows from
-            # the top via delete_lines() — permanently losing content before it
-            # can reach our scrollback hook in _GDBScreen.index().  Save those
-            # rows into scrollback ourselves before the resize so that the user
-            # can still scroll up to see them.
+            # When shrinking, pyte.Screen.resize() calls delete_lines() which
+            # shifts rows (r + n_drop) → r.  It only actually overwrites row r
+            # when row (r + n_drop) is explicitly stored in the buffer dict; if
+            # that slot is absent (i.e. an empty row never written to), pyte
+            # leaves row r unchanged.  We mirror cgdb/libvterm semantics by
+            # saving to scrollback only the rows that pyte WILL discard — those
+            # where the replacement slot exists in the buffer.
             if rows < self._pyte_rows:
                 n_drop = self._pyte_rows - rows
                 use_color = self._screen.use_color
                 cols_now = self._pyte_cols
                 for r in range(n_drop):
-                    self._scrollback.append(
-                        _row_to_text(self._screen.buffer[r], cols_now,
-                                     use_color=use_color)
-                    )
+                    if (r + n_drop) in self._screen.buffer:
+                        # This row will be overwritten by pyte — save it first.
+                        self._scrollback.append(
+                            _row_to_text(self._screen.buffer[r], cols_now,
+                                         use_color=use_color)
+                        )
             self._pyte_rows = rows
             self._pyte_cols = cols
             self._screen.resize(rows, cols)
@@ -267,9 +281,10 @@ class GDBWidget(Widget):
         if self._screen:
             cx = self._screen.cursor.x
             cy = self._screen.cursor.y
+            buf = self._screen.buffer
             for r in range(self._pyte_rows):
                 cursor_col = cx if (r == cy and not self._scroll_mode and self.gdb_focused) else -1
-                lines.append(_row_to_text(self._screen.buffer[r],
+                lines.append(_row_to_text(buf.get(r),
                                           self._pyte_cols, cursor_col,
                                           use_color=self.debugwincolor))
         return lines
@@ -287,12 +302,17 @@ class GDBWidget(Widget):
             return result
         cx = self._screen.cursor.x
         cy = self._screen.cursor.y
+        buf = self._screen.buffer
         for r in range(min(h, self._pyte_rows)):
             if r > 0:
                 result.append("\n")
             cursor_col = cx if (r == cy and self.gdb_focused) else -1
+            # Use buf.get(r) — NOT buf[r] — to avoid creating phantom empty
+            # entries in pyte's defaultdict buffer.  Phantom entries confuse
+            # pyte's delete_lines logic on the next resize: it sees them as
+            # "content" and displaces real rows, clearing the screen.
             result.append_text(
-                _row_to_text(self._screen.buffer[r], self._pyte_cols, cursor_col,
+                _row_to_text(buf.get(r), self._pyte_cols, cursor_col,
                              use_color=self.debugwincolor)
             )
         # Pad remaining rows if widget is taller than pyte screen
