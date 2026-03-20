@@ -812,6 +812,10 @@ class TGDBApp(App):
             except NoMatches:
                 return None
 
+        # Set the flag immediately to prevent a second concurrent call from
+        # entering the same transformation path before the first one finishes.
+        self._workspace_dynamic = True
+
         try:
             old_root = self.query_one("#split-container")
             global_container = self.query_one("#global-container")
@@ -834,7 +838,6 @@ class TGDBApp(App):
             await old_root.remove()
             await global_container.mount(new_root, before=status)
         await new_root.set_items([src, gdb])
-        self._workspace_dynamic = True
         return new_root
 
     async def _replace_workspace_item(self, target: Widget, new_item: Widget) -> bool:
@@ -1450,12 +1453,12 @@ class TGDBApp(App):
         try:
             fd = self.query_one("#file-dlg", FileDialog)
         except NoMatches:
-            pass
-            return
-        if not self._file_dialog_pending or not fd.is_open:
             self._file_dialog_pending = False
             return
+        pending = self._file_dialog_pending
         self._file_dialog_pending = False
+        if not pending or not fd.is_open:
+            return
         fd.files = files
 
     def _ui_load_source_file(self, path: str, line: int = 0) -> None:
