@@ -121,18 +121,20 @@ class _GDBScreen(pyte.Screen):
     """Intercept index() to save lines that scroll off into a deque."""
 
     def __init__(self, columns: int, lines: int,
-                 scrollback: deque[Text]) -> None:
+                 push_fn: "Callable[[Text, Optional[dict]], None]") -> None:
         super().__init__(columns, lines)
-        self._scrollback = scrollback
+        self._push_scrollback = push_fn
         self.use_color: bool = True   # set by GDBWidget to honour debugwincolor
 
     def index(self) -> None:
         if self.cursor.y == self.lines - 1:
-            # Row 0 is about to be lost — capture it.
-            # Use .get(0) to avoid creating a phantom empty entry via defaultdict.
+            # Row 0 is about to be lost — capture both the rendered text and
+            # the raw pyte row dict so the row can be restored if the pane
+            # grows back later.  Use .get(0) to avoid phantom defaultdict entries.
             row  = self.buffer.get(0)
             text = _row_to_text(row, self.columns, use_color=self.use_color)
-            self._scrollback.append(text)
+            raw  = dict(row) if row is not None else None
+            self._push_scrollback(text, raw)
         super().index()
 
 
@@ -162,8 +164,12 @@ class GDBWidget(Widget):
         # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — cursor only shown when GDB focused
         self.gdb_focused: bool = True
 
-        # Scrollback: lines captured as they scroll off the pyte screen
-        self._scrollback: deque[Text] = deque(maxlen=max_scrollback)
+        # Scrollback: lines captured as they scroll off the pyte screen.
+        # _scrollback stores Rich Text (for display/search).
+        # _scrollback_raw stores the raw pyte row dict in parallel so rows can
+        # be restored back into the pyte buffer when the pane grows.
+        self._scrollback:     deque[Text] = deque(maxlen=max_scrollback)
+        self._scrollback_raw: deque       = deque(maxlen=max_scrollback)
         self.debugwincolor: bool = True  # :set debugwincolor — show ANSI colors
         # pyte terminal (lazily resized to match widget)
         self._screen: Optional[_GDBScreen] = None
@@ -195,6 +201,15 @@ class GDBWidget(Widget):
         self._dot_pending: bool = False  # true after apostrophe (for `'.`)
 
     # ------------------------------------------------------------------
+    # Scrollback helpers
+    # ------------------------------------------------------------------
+
+    def _push_to_scrollback(self, text: Text, raw=None) -> None:
+        """Append one line to both scrollback deques (text for display, raw for restoration)."""
+        self._scrollback.append(text)
+        self._scrollback_raw.append(raw)   # dict copy of pyte row, or None
+
+    # ------------------------------------------------------------------
     # pyte initialisation / resize
     # ------------------------------------------------------------------
 
@@ -204,7 +219,7 @@ class GDBWidget(Widget):
             # First init — create fresh screen
             self._pyte_rows = rows
             self._pyte_cols = cols
-            self._screen = _GDBScreen(cols, rows, self._scrollback)
+            self._screen = _GDBScreen(cols, rows, self._push_to_scrollback)
             self._screen.use_color = self.debugwincolor
             self._stream = pyte.ByteStream(self._screen)
         else:
@@ -227,13 +242,13 @@ class GDBWidget(Widget):
 
                 top_scroll = max(0, cy + 1 - rows)
 
-                # Push displaced rows to scrollback.
+                # Push displaced rows to both scrollback deques (text + raw copy).
                 for r in range(top_scroll):
-                    if r in buf:
-                        self._scrollback.append(
-                            _row_to_text(buf.get(r), self._pyte_cols,
-                                         use_color=use_color)
-                        )
+                    row = buf.get(r)
+                    self._push_to_scrollback(
+                        _row_to_text(row, self._pyte_cols, use_color=use_color),
+                        dict(row) if row is not None else None,
+                    )
 
                 # Shift the buffer up by top_scroll rows in-place.
                 new_entries: dict = {}
@@ -252,11 +267,51 @@ class GDBWidget(Widget):
                 self._screen.lines = rows
                 self._screen.dirty.update(range(rows))
 
+            elif rows > self._pyte_rows:
+                # Growing: pull rows back from scrollback to fill the newly
+                # visible space at the top — mirrors cgdb/libvterm grow behaviour.
+                grow      = rows - self._pyte_rows
+                n_restore = min(grow, len(self._scrollback_raw))
+
+                if n_restore > 0:
+                    buf = self._screen.buffer
+
+                    # Pop from the RIGHT (most recently pushed = was topmost row
+                    # just before the last shrink).  Collect in push order so
+                    # the oldest of the restored set goes to row 0 and the
+                    # most-recent goes to row n_restore-1 (just above content).
+                    to_restore: list[Optional[dict]] = []
+                    for _ in range(n_restore):
+                        self._scrollback.pop()           # keep display deque in sync
+                        to_restore.append(self._scrollback_raw.pop())
+                    # to_restore[0] = most recently pushed → row n_restore-1
+                    # to_restore[-1] = oldest restored    → row 0
+                    # reversed() puts them in correct top-to-bottom order.
+                    ordered = list(reversed(to_restore))
+
+                    # Shift existing buffer content down by n_restore.
+                    new_entries = {}
+                    for old_r in list(buf.keys()):
+                        new_entries[old_r + n_restore] = buf[old_r]
+                    buf.clear()
+                    buf.update(new_entries)
+
+                    # Place restored rows at the top.
+                    for i, raw in enumerate(ordered):
+                        if raw is not None:
+                            buf[i] = raw
+                        # else: leave the slot blank (not in buffer)
+
+                    # Shift cursor down to match the shifted content.
+                    cy = self._screen.cursor.y
+                    self._screen.cursor.y = min(rows - 1, cy + n_restore)
+                    self._screen.dirty.update(range(rows))
+
             self._pyte_rows = rows
             self._pyte_cols = cols
             # Let pyte handle column changes (and the dirty/margin bookkeeping).
-            # Since lines is already updated above, pyte's resize() only runs
-            # the column-trim path (no-op if cols grew or stayed same).
+            # For shrink: screen.lines was pre-set above, so pyte skips delete_lines.
+            # For grow:   pyte just extends self.lines and updates self.columns.
             self._screen.resize(rows, cols)
 
     # ------------------------------------------------------------------
@@ -275,7 +330,7 @@ class GDBWidget(Widget):
 
     def inject_text(self, text: str) -> None:
         """Inject plain text directly into the scrollback (showdebugcommands)."""
-        self._scrollback.append(Text(text.rstrip("\n")))
+        self._push_to_scrollback(Text(text.rstrip("\n")), None)
         if not self._scroll_mode:
             self.refresh()
 
