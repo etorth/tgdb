@@ -85,7 +85,18 @@ def _row_to_text(row, width: int, cursor_col: int = -1,
             data = " "
             st = Style(reverse=True, blink=True) if col == cursor_col else Style()
         else:
-            char = row[col]          # StaticDefaultDict — never inserts on access
+            # Use .get() rather than row[col] so that both pyte's
+            # StaticDefaultDict rows AND plain dict rows (restored from
+            # _scrollback_raw) work correctly.  StaticDefaultDict.__missing__
+            # is only triggered by [] syntax, not .get(), so .get() returns
+            # None for a missing column in either dict type — we treat that as
+            # a blank cell, which is the correct fallback.
+            char = row.get(col)
+            if char is None:
+                data = " "
+                st = Style(reverse=True, blink=True) if col == cursor_col else Style()
+                result.append(data, style=st)
+                continue
             data = char.data or " "
             if use_color:
                 fg   = _pyte_color(char.fg)
