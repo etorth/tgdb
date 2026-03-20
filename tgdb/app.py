@@ -18,7 +18,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from textual.app import App, ComposeResult
 from textual.message import Message
@@ -30,7 +30,7 @@ from rich.text import Text
 from .highlight_groups import HighlightGroups
 from .key_mapper import KeyMapper
 from .config import Config, ConfigParser
-from .gdb_controller import GDBController, Breakpoint, Frame
+from .gdb_controller import GDBController, Breakpoint, Frame, LocalVariable
 from .source_widget import (
     SourceView, SourceFile,
     ToggleBreakpoint, OpenFileDialog, AwaitMarkJump, AwaitMarkSet,
@@ -44,6 +44,7 @@ from .gdb_widget import (
 from .status_bar import StatusBar, CommandSubmit, CommandCancel
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 from .context_menu import ContextMenu, ContextMenuSelected, ContextMenuClosed
+from .local_variable_pane import LocalVariablePane
 
 
 class DragResize(Message):
@@ -397,18 +398,32 @@ class TGDBApp(App):
         self._inf_tty_fd: Optional[int] = None
         self._workspace_dynamic: bool = False
         self._context_menu_target: Optional[Widget] = None
+        self._source_view: Optional[SourceView] = None
+        self._gdb_widget: Optional[GDBWidget] = None
+        self._locals_panes: list[LocalVariablePane] = []
+        self._current_locals: list[LocalVariable] = []
+        self._pane_factories: dict[str, Callable[[], Widget]] = {
+            "locals": self._make_local_variable_pane,
+        }
 
     # ------------------------------------------------------------------
     # Compose
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
+        if self._source_view is None:
+            self._source_view = SourceView(self.hl, id="src-pane")
+        if self._gdb_widget is None:
+            self._gdb_widget = GDBWidget(
+                self.hl,
+                max_scrollback=self.cfg.scrollbackbuffersize,
+                id="gdb-pane",
+            )
         with Widget(id="global-container"):
             with Widget(id="split-container"):
-                yield SourceView(self.hl, id="src-pane")
+                yield self._source_view
                 yield Splitter(self.hl, id="splitter")
-                yield GDBWidget(self.hl, max_scrollback=self.cfg.scrollbackbuffersize,
-                                id="gdb-pane")
+                yield self._gdb_widget
             yield StatusBar(self.hl, id="status")
         yield FileDialog(self.hl, id="file-dlg")
         yield ContextMenu(
@@ -418,6 +433,7 @@ class TGDBApp(App):
                 "◨ Add window right",
                 "⬒ Add window up",
                 "⬓ Add window down",
+                "Show local variables window",
             ],
             id="context-menu",
         )
@@ -428,7 +444,11 @@ class TGDBApp(App):
 
     async def on_mount(self) -> None:
         # Configure source widget
-        src = self.query_one("#src-pane", SourceView)
+        src = self._get_source_view()
+        gdb_w = self._get_gdb_widget()
+        if src is None or gdb_w is None:
+            self._show_status("Failed to initialize core panes")
+            return
         src.executing_line_display = self.cfg.executinglinedisplay
         src.selected_line_display  = self.cfg.selectedlinedisplay
         src.tabstop    = self.cfg.tabstop
@@ -438,7 +458,6 @@ class TGDBApp(App):
         src.showmarks  = self.cfg.showmarks
 
         # Configure GDB widget
-        gdb_w = self.query_one("#gdb-pane", GDBWidget)
         gdb_w.ignorecase        = self.cfg.ignorecase
         gdb_w.wrapscan          = self.cfg.wrapscan
         gdb_w.send_to_gdb       = self.gdb.send_input        # bytes → primary PTY
@@ -458,6 +477,7 @@ class TGDBApp(App):
         self.gdb.on_breakpoints  = lambda    b: self.call_later(self._ui_set_breakpoints, b)
         self.gdb.on_source_files = lambda    f: self.call_later(self._ui_set_source_files, f)
         self.gdb.on_source_file  = lambda f, l: self.call_later(self._ui_load_source_file, f, l)
+        self.gdb.on_locals       = lambda    v: self.call_later(self._ui_set_locals, v)
         self.gdb.on_exit         = lambda     : self.call_later(self._ui_gdb_exit)
         self.gdb.on_error        = lambda    m: self.call_later(self._show_status, f"Error: {m}")
 
@@ -489,32 +509,90 @@ class TGDBApp(App):
         except NoMatches:
             pass
         # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — hide GDB cursor when not focused
-        try:
-            gdb_w = self.query_one("#gdb-pane", GDBWidget)
+        gdb_w = self._get_gdb_widget()
+        if gdb_w is not None:
             gdb_w.gdb_focused = (mode in ("GDB", "SCROLL"))
             gdb_w.refresh()
-        except NoMatches:
-            pass
 
     def _switch_to_cgdb(self) -> None:
         self._set_mode("CGDB")
-        try:
-            self.query_one("#src-pane").focus()
-        except NoMatches:
-            pass
+        if self._focus_widget(self._get_source_view(mounted_only=True)):
+            return
+        self._focus_widget(self._first_workspace_leaf())
 
     def _switch_to_gdb(self) -> None:
         self._set_mode("GDB")
-        try:
-            self.query_one("#gdb-pane").focus()
-        except NoMatches:
-            pass
+        if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
+            return
+        self._focus_widget(self._first_workspace_leaf())
 
     def _show_status(self, msg: str) -> None:
         try:
             self.query_one("#status", StatusBar).show_message(msg)
         except NoMatches:
             pass
+
+    @staticmethod
+    def _widget_attached(widget: Optional[Widget]) -> bool:
+        return widget is not None and widget.parent is not None
+
+    def _get_source_view(self, *, mounted_only: bool = False) -> Optional[SourceView]:
+        if self._source_view is None:
+            return None
+        if mounted_only and not self._widget_attached(self._source_view):
+            return None
+        return self._source_view
+
+    def _get_gdb_widget(self, *, mounted_only: bool = False) -> Optional[GDBWidget]:
+        if self._gdb_widget is None:
+            return None
+        if mounted_only and not self._widget_attached(self._gdb_widget):
+            return None
+        return self._gdb_widget
+
+    def _focus_widget(self, widget: Optional[Widget]) -> bool:
+        if not self._widget_attached(widget):
+            return False
+        try:
+            widget.focus()
+        except Exception:
+            return False
+        return True
+
+    def _first_workspace_leaf(self, widget: Optional[Widget] = None) -> Optional[Widget]:
+        if widget is None:
+            if not self._workspace_dynamic:
+                return (
+                    self._get_source_view(mounted_only=True)
+                    or self._get_gdb_widget(mounted_only=True)
+                )
+            try:
+                widget = self.query_one("#split-container", PaneContainer)
+            except NoMatches:
+                return None
+
+        if isinstance(widget, PaneContainer):
+            for item in widget.items:
+                leaf = self._first_workspace_leaf(item)
+                if leaf is not None:
+                    return leaf
+            return None
+
+        if getattr(widget, "can_focus", False) and self._widget_attached(widget):
+            return widget
+        return None
+
+    def _make_local_variable_pane(self) -> LocalVariablePane:
+        pane = LocalVariablePane(self.hl)
+        pane.set_variables(self._current_locals)
+        self._locals_panes.append(pane)
+        return pane
+
+    def _create_pane(self, pane_kind: str) -> Optional[Widget]:
+        factory = self._pane_factories.get(pane_kind)
+        if factory is None:
+            return None
+        return factory()
 
     def _get_context_menu(self) -> Optional[ContextMenu]:
         try:
@@ -552,15 +630,11 @@ class TGDBApp(App):
             except NoMatches:
                 return
         if self._mode in ("GDB", "SCROLL"):
-            try:
-                self.query_one("#gdb-pane", GDBWidget).focus()
+            if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
                 return
-            except NoMatches:
-                return
-        try:
-            self.query_one("#src-pane", SourceView).focus()
-        except NoMatches:
-            pass
+        if self._focus_widget(self._get_source_view(mounted_only=True)):
+            return
+        self._focus_widget(self._first_workspace_leaf())
 
     def _close_context_menu(self) -> None:
         menu = self._get_context_menu()
@@ -597,10 +671,12 @@ class TGDBApp(App):
             old_root = self.query_one("#split-container")
             global_container = self.query_one("#global-container")
             status = self.query_one("#status")
-            src = self.query_one("#src-pane", SourceView)
-            gdb = self.query_one("#gdb-pane", GDBWidget)
             splitter = self.query_one("#splitter", Splitter)
         except NoMatches:
+            return None
+        src = self._get_source_view(mounted_only=True)
+        gdb = self._get_gdb_widget(mounted_only=True)
+        if src is None or gdb is None:
             return None
 
         new_root = PaneContainer(
@@ -628,6 +704,18 @@ class TGDBApp(App):
             return "down"
         return None
 
+    def _context_menu_pane_kind(self, item: str) -> Optional[str]:
+        if item.lower() == "show local variables window":
+            return "locals"
+        return None
+
+    async def _replace_workspace_item(self, target: Widget, new_item: Widget) -> bool:
+        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if parent is None:
+            return False
+        await parent.replace_item(target, new_item)
+        return True
+
     async def _apply_context_menu_action(self, target: Widget, direction: str) -> bool:
         axis = "horizontal" if direction in ("left", "right") else "vertical"
         insert_before = direction in ("left", "up")
@@ -651,20 +739,26 @@ class TGDBApp(App):
         return True
 
     def _handle_pending_mark_key(self, char: str) -> bool:
+        src = self._get_source_view(mounted_only=True)
+        if src is None:
+            self._await_mark_jump = False
+            self._await_mark_set = False
+            return False
+
         if self._await_mark_jump:
             self._await_mark_jump = False
             if char == ".":
-                self.query_one("#src-pane", SourceView).goto_executing()
+                src.goto_executing()
             elif char == "'":
-                self.query_one("#src-pane", SourceView).goto_last_jump()
+                src.goto_last_jump()
             elif char.isalpha():
-                self.query_one("#src-pane", SourceView).jump_to_mark(char)
+                src.jump_to_mark(char)
             return True
 
         if self._await_mark_set:
             self._await_mark_set = False
             if char.isalpha():
-                self.query_one("#src-pane", SourceView).set_mark(char)
+                src.set_mark(char)
             return True
 
         return False
@@ -673,10 +767,7 @@ class TGDBApp(App):
         if self._mode != "CGDB":
             return False
 
-        try:
-            src = self.query_one("#src-pane", SourceView)
-        except NoMatches:
-            src = None
+        src = self._get_source_view(mounted_only=True)
 
         if src is not None and src.handle_cgdb_key(key, char):
             return True
@@ -686,7 +777,9 @@ class TGDBApp(App):
             return True
         if key == "s":
             self._switch_to_gdb()
-            self.query_one("#gdb-pane", GDBWidget).enter_scroll_mode()
+            gdb_w = self._get_gdb_widget(mounted_only=True)
+            if gdb_w is not None:
+                gdb_w.enter_scroll_mode()
             return True
 
         return False
@@ -774,7 +867,10 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def on_toggle_breakpoint(self, msg: ToggleBreakpoint) -> None:
-        src = self.query_one("#src-pane", SourceView)
+        src = self._get_source_view()
+        if src is None:
+            self._show_status("No source pane available")
+            return
         sf  = src.source_file
         if not sf:
             self._show_status("No source file loaded"); return
@@ -823,8 +919,8 @@ class TGDBApp(App):
         self._await_mark_set = True
 
     def on_jump_global_mark(self, msg: JumpGlobalMark) -> None:
-        src = self.query_one("#src-pane", SourceView)
-        if src.load_file(msg.path):
+        src = self._get_source_view()
+        if src is not None and src.load_file(msg.path):
             src.move_to(msg.line)
 
     def on_search_start(self, msg: SearchStart) -> None:
@@ -1020,9 +1116,10 @@ class TGDBApp(App):
 
     def on_file_selected(self, msg: FileSelected) -> None:
         self.query_one("#file-dlg", FileDialog).close()
-        src = self.query_one("#src-pane", SourceView)
-        src.load_file(msg.path)
-        self._update_status_file_info()
+        src = self._get_source_view()
+        if src is not None:
+            src.load_file(msg.path)
+            self._update_status_file_info()
         self._switch_to_cgdb()
 
     def on_file_dialog_closed(self, _: FileDialogClosed) -> None:
@@ -1033,6 +1130,22 @@ class TGDBApp(App):
         target = self._context_menu_target
         self._close_context_menu()
         if target is None:
+            return
+        pane_kind = self._context_menu_pane_kind(msg.item)
+        if pane_kind is not None:
+            if await self._ensure_dynamic_workspace() is None:
+                self._show_status("Unable to create workspace container")
+                return
+            pane = self._create_pane(pane_kind)
+            if pane is None:
+                self._show_status(f"Unknown pane type: {pane_kind}")
+                return
+            if await self._replace_workspace_item(target, pane):
+                if pane_kind == "locals":
+                    self.gdb.request_current_frame_locals(report_error=False)
+                self._show_status("Showing local variables")
+            else:
+                self._show_status("Unable to replace pane")
             return
         direction = self._context_menu_direction(msg.item)
         if direction is None:
@@ -1057,14 +1170,15 @@ class TGDBApp(App):
         """GDB stopped — update source view to executing location."""
         path = frame.fullname or frame.file
         if path and os.path.isfile(path):
-            src = self.query_one("#src-pane", SourceView)
-            if not src.source_file or src.source_file.path != path:
-                src.load_file(path)
-            elif self.cfg.autosourcereload:
-                src.reload_if_changed()
-            src.exe_line = frame.line
-            src.move_to(frame.line)
-            self._update_status_file_info()
+            src = self._get_source_view()
+            if src is not None:
+                if not src.source_file or src.source_file.path != path:
+                    src.load_file(path)
+                elif self.cfg.autosourcereload:
+                    src.reload_if_changed()
+                src.exe_line = frame.line
+                src.move_to(frame.line)
+                self._update_status_file_info()
         # Ask GDB for updated breakpoints and source file list
         self.gdb.request_source_files()
         asyncio.ensure_future(self._refresh_breakpoints_async())
@@ -1075,16 +1189,23 @@ class TGDBApp(App):
 
     def _ui_on_running(self) -> None:
         self._set_mode("GDB")
-        try:
-            self.query_one("#gdb-pane").focus()
-        except NoMatches:
-            pass
+        if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
+            return
+        self._focus_widget(self._first_workspace_leaf())
 
     def _ui_set_breakpoints(self, bps: list[Breakpoint]) -> None:
-        try:
-            self.query_one("#src-pane", SourceView).set_breakpoints(bps)
-        except NoMatches:
-            pass
+        src = self._get_source_view()
+        if src is not None:
+            src.set_breakpoints(bps)
+
+    def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
+        self._current_locals = list(variables)
+        mounted_panes: list[LocalVariablePane] = []
+        for pane in self._locals_panes:
+            pane.set_variables(self._current_locals)
+            if self._widget_attached(pane):
+                mounted_panes.append(pane)
+        self._locals_panes = mounted_panes
 
     def _ui_set_source_files(self, files: list[str]) -> None:
         try:
@@ -1106,18 +1227,17 @@ class TGDBApp(App):
         """Load a specific source file (from -file-list-exec-source-file)."""
         if not os.path.isfile(path):
             return
-        try:
-            src = self.query_one("#src-pane", SourceView)
-            # Only load if no file is shown yet (don't override a user selection)
-            if not src.source_file:
-                src.load_file(path)
-                if line > 0:
-                    src.move_to(line)
-                self._initial_source_pending = False
-                src.run_pending_search()
-                self._update_status_file_info()
-        except NoMatches:
-            pass
+        src = self._get_source_view()
+        if src is None:
+            return
+        # Only load if no file is shown yet (don't override a user selection)
+        if not src.source_file:
+            src.load_file(path)
+            if line > 0:
+                src.move_to(line)
+            self._initial_source_pending = False
+            src.run_pending_search()
+            self._update_status_file_info()
 
     async def _request_initial_location(self) -> None:
         """Mirror cgdb startup: query current location without surfacing noise."""
@@ -1172,14 +1292,13 @@ class TGDBApp(App):
         self._show_help_in_source()
 
     def _cmd_logo(self, _: list) -> None:
-        try:
-            self.query_one("#src-pane", SourceView).show_logo()
-        except NoMatches:
-            pass
+        src = self._get_source_view()
+        if src is not None:
+            src.show_logo()
 
     def _cmd_edit(self, _: list) -> None:
-        src = self.query_one("#src-pane", SourceView)
-        if src.source_file:
+        src = self._get_source_view()
+        if src is not None and src.source_file:
             src.source_file._tokens = None
             src.load_file(src.source_file.path)
 
@@ -1200,12 +1319,10 @@ class TGDBApp(App):
 
     def _cmd_noh(self, _: list) -> None:
         self.cfg.hlsearch = False
-        try:
-            src = self.query_one("#src-pane", SourceView)
+        src = self._get_source_view()
+        if src is not None:
             src.hlsearch = False
             src.refresh()
-        except NoMatches:
-            pass
 
     def _cmd_syntax(self, args: list) -> None:
         """Mirror cgdb's :syntax [on|off|c|asm|…] command."""
@@ -1238,12 +1355,16 @@ class TGDBApp(App):
     def _send_gdb_cli(self, cmd: str) -> None:
         if self.cfg.showdebugcommands:
             # Mirror cgdb showdebugcommands: echo the command into the GDB window
-            try:
-                gdb_w = self.query_one("#gdb-pane", GDBWidget)
+            gdb_w = self._get_gdb_widget()
+            if gdb_w is not None:
                 gdb_w.inject_text(f"(gdb) {cmd}\n")
-            except NoMatches:
-                pass
         self.gdb.send_input(cmd + "\n")
+        command_name = cmd.strip().split(None, 1)[0].lower() if cmd.strip() else ""
+        if command_name in {"up", "down", "frame", "f", "select-frame"}:
+            asyncio.get_running_loop().call_later(
+                0.1,
+                lambda: self.gdb.request_current_location(report_error=False),
+            )
         self._switch_to_gdb()
 
     # ------------------------------------------------------------------
@@ -1288,8 +1409,10 @@ class TGDBApp(App):
         try:
             container = self.query_one("#split-container")
             splitter  = self.query_one("#splitter", Splitter)
-            src       = self.query_one("#src-pane")
-            gdb       = self.query_one("#gdb-pane")
+            src = self._get_source_view(mounted_only=True)
+            gdb = self._get_gdb_widget(mounted_only=True)
+            if src is None or gdb is None:
+                return
             splitter.set_orientation(is_horizontal)
             splitter.styles.display = "block" if show_splitter else "none"
             if is_horizontal:
@@ -1356,15 +1479,14 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def _update_status_file_info(self) -> None:
-        try:
-            self.query_one("#src-pane", SourceView).refresh()
-        except NoMatches:
-            pass
+        src = self._get_source_view()
+        if src is not None:
+            src.refresh()
 
     def _sync_config(self) -> None:
         cfg = self.cfg
-        try:
-            src = self.query_one("#src-pane", SourceView)
+        src = self._get_source_view()
+        if src is not None:
             old_tabstop = src.tabstop
             src.executing_line_display = cfg.executinglinedisplay
             src.selected_line_display  = cfg.selectedlinedisplay
@@ -1376,14 +1498,12 @@ class TGDBApp(App):
             src.color      = cfg.color
             # If tabstop changed, reload the current file so tabs are re-expanded
             # and the token cache is rebuilt with the new width.
-            if cfg.tabstop != old_tabstop and src.source_file.path:
+            if cfg.tabstop != old_tabstop and src.source_file and src.source_file.path:
                 src.load_file(src.source_file.path)
             else:
                 src.refresh()
-        except NoMatches:
-            pass
-        try:
-            gdb_w = self.query_one("#gdb-pane", GDBWidget)
+        gdb_w = self._get_gdb_widget()
+        if gdb_w is not None:
             gdb_w.ignorecase     = cfg.ignorecase
             gdb_w.wrapscan       = cfg.wrapscan
             gdb_w.max_scrollback = cfg.scrollbackbuffersize
@@ -1391,8 +1511,6 @@ class TGDBApp(App):
             if gdb_w._screen:
                 gdb_w._screen.use_color = cfg.debugwincolor
             gdb_w.refresh()
-        except NoMatches:
-            pass
         self.km.timeout_ms       = cfg.timeoutlen
         self.km.ttimeout_ms      = cfg.ttimeoutlen
         self.km.timeout_enabled  = cfg.timeout
@@ -1411,7 +1529,10 @@ class TGDBApp(App):
             Path(sys.prefix) / "share" / "cgdb" / "cgdb.txt",
             Path(__file__).resolve().parents[1] / "doc" / "cgdb.txt",
         ]
-        src = self.query_one("#src-pane", SourceView)
+        src = self._get_source_view()
+        if src is None:
+            self._show_status("No source pane available")
+            return
         for candidate in help_candidates:
             if candidate.is_file():
                 if src.load_file(str(candidate)):

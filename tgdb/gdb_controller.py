@@ -49,6 +49,14 @@ class Frame:
     addr: str = ""
 
 
+@dataclass
+class LocalVariable:
+    name: str = ""
+    value: str = ""
+    type: str = ""
+    is_arg: bool = False
+
+
 # ---------------------------------------------------------------------------
 # GDB/MI output parser
 # ---------------------------------------------------------------------------
@@ -188,6 +196,7 @@ class GDBController:
         on_breakpoints(bps: list[Breakpoint])
         on_source_files(files: list[str])
         on_source_file(path: str, line: int) — current source file + line
+        on_locals(vars: list[LocalVariable]) — locals in current frame
         on_exit()                            — GDB exited
         on_error(msg: str)                   — user-visible ^error
     """
@@ -210,6 +219,7 @@ class GDBController:
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
         self.current_frame: Optional[Frame] = None
+        self.locals: list[LocalVariable] = []
 
         # Callbacks
         self.on_console: Callable[[bytes], None]              = lambda d: None
@@ -218,6 +228,7 @@ class GDBController:
         self.on_breakpoints: Callable[[list[Breakpoint]], None] = lambda b: None
         self.on_source_files: Callable[[list[str]], None]        = lambda f: None
         self.on_source_file: Callable[[str, int], None]          = lambda f, l: None
+        self.on_locals: Callable[[list[LocalVariable]], None]    = lambda v: None
         self.on_exit: Callable[[], None]                      = lambda: None
         self.on_error: Callable[[str], None]                  = lambda m: None
 
@@ -382,6 +393,9 @@ class GDBController:
         if cls == "error":
             if meta.get("kind") == "current-location":
                 self.request_source_file(report_error=bool(meta.get("report_error", True)))
+            elif meta.get("kind") == "stack-locals":
+                self.locals = []
+                self.on_locals([])
             else:
                 msg = results.get("msg", "")
                 if isinstance(msg, str) and bool(meta.get("report_error", True)):
@@ -403,6 +417,9 @@ class GDBController:
             files = results.get("files")
             if files:
                 self._handle_source_files(files)
+            if "variables" in results:
+                self.locals = self._parse_local_variables(results.get("variables"))
+                self.on_locals(list(self.locals))
             frame = results.get("frame")
             if frame:
                 parsed = self._parse_frame(frame)
@@ -412,6 +429,8 @@ class GDBController:
                     self.on_source_file(path, parsed.line)
                 elif meta.get("kind") == "current-location":
                     self.request_source_file(report_error=bool(meta.get("report_error", True)))
+                if meta.get("kind") == "current-location":
+                    self.request_current_frame_locals(report_error=False)
             elif meta.get("kind") == "current-location":
                 # Mirror cgdb's startup query path: ask for the current frame
                 # first, then fall back to exec source-file if needed.
@@ -466,6 +485,13 @@ class GDBController:
             kind="current-location",
         )
 
+    def request_current_frame_locals(self, *, report_error: bool = False) -> None:
+        self.mi_command(
+            "-stack-list-variables --all-values",
+            report_error=report_error,
+            kind="stack-locals",
+        )
+
     async def _refresh_breakpoints(self) -> None:
         self.mi_command("-break-list")
 
@@ -495,8 +521,11 @@ class GDBController:
             frame = self._parse_frame(results.get("frame", {}))
             self.current_frame = frame
             self.on_stopped(frame)
+            self.request_current_frame_locals(report_error=False)
             asyncio.ensure_future(self._refresh_breakpoints())
         elif cls == "running":
+            self.locals = []
+            self.on_locals([])
             self.on_running()
         elif cls == "breakpoint-modified":
             bkpt = results.get("bkpt", {})
@@ -525,6 +554,27 @@ class GDBController:
             func=data.get("func", ""),
             addr=data.get("addr", ""),
         )
+
+    def _parse_local_variables(self, data) -> list[LocalVariable]:
+        if not isinstance(data, list):
+            return []
+
+        locals_list: list[LocalVariable] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            arg = item.get("arg", 0)
+            value = item.get("value")
+            var_type = item.get("type")
+            locals_list.append(
+                LocalVariable(
+                    name=str(item.get("name", "")),
+                    value=value if isinstance(value, str) else "",
+                    type=var_type if isinstance(var_type, str) else "",
+                    is_arg=str(arg).lower() not in ("", "0", "false", "no", "n"),
+                )
+            )
+        return locals_list
 
     def _update_breakpoint_from_mi(self, data: dict) -> None:
         if not isinstance(data, dict):
