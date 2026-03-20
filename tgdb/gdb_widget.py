@@ -208,24 +208,36 @@ class GDBWidget(Widget):
             self._screen.use_color = self.debugwincolor
             self._stream = pyte.ByteStream(self._screen)
         else:
-            # When shrinking, pyte.Screen.resize() calls delete_lines() which
-            # shifts rows (r + n_drop) → r.  It only actually overwrites row r
-            # when row (r + n_drop) is explicitly stored in the buffer dict; if
-            # that slot is absent (i.e. an empty row never written to), pyte
-            # leaves row r unchanged.  We mirror cgdb/libvterm semantics by
-            # saving to scrollback only the rows that pyte WILL discard — those
-            # where the replacement slot exists in the buffer.
+            # When shrinking, pyte.Screen.resize() calls delete_lines(n_drop)
+            # which shifts row (r+n_drop) → row r.  pyte only moves a row when
+            # the replacement slot (r+n_drop) is explicitly in the buffer dict.
+            # When (r+n_drop) is absent (a never-written blank row), pyte does
+            # nothing — leaving buffer[r] with stale old content instead of
+            # becoming blank.  This produces garbled output after toggling
+            # split orientation when the GDB pane shrinks.
+            #
+            # Fix (mirroring cgdb/libvterm semantics):
+            #   1. Push ALL n_drop top rows to scrollback — they're being
+            #      displaced from the visible screen just like when content
+            #      scrolls off the top normally.
+            #   2. Pre-delete buffer[r] when its replacement (r+n_drop) is
+            #      absent, so pyte's "do nothing" leaves the row correctly blank.
             if rows < self._pyte_rows:
                 n_drop = self._pyte_rows - rows
+                buf = self._screen.buffer
                 use_color = self._screen.use_color
                 cols_now = self._pyte_cols
                 for r in range(n_drop):
-                    if (r + n_drop) in self._screen.buffer:
-                        # This row will be overwritten by pyte — save it first.
+                    # (1) Save to scrollback if the row has any content.
+                    if r in buf:
                         self._scrollback.append(
-                            _row_to_text(self._screen.buffer[r], cols_now,
+                            _row_to_text(buf.get(r), cols_now,
                                          use_color=use_color)
                         )
+                    # (2) If the replacement row is blank, pyte won't clear
+                    # this row.  Pre-delete it so it becomes blank.
+                    if (r + n_drop) not in buf:
+                        buf.pop(r, None)
             self._pyte_rows = rows
             self._pyte_cols = cols
             self._screen.resize(rows, cols)
