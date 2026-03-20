@@ -741,10 +741,10 @@ class TGDBApp(App):
             add_children = [ContextMenuItem("No panes available")]
 
         split_children = [
-            ContextMenuItem("Up", action="split:up"),
-            ContextMenuItem("Down", action="split:down"),
-            ContextMenuItem("Left", action="split:left"),
-            ContextMenuItem("Right", action="split:right"),
+            ContextMenuItem("⬒ Up", action="split:up"),
+            ContextMenuItem("⬓ Down", action="split:down"),
+            ContextMenuItem("◧ Left", action="split:left"),
+            ContextMenuItem("◨ Right", action="split:right"),
         ]
         return [
             ContextMenuItem("Add", children=tuple(add_children)),
