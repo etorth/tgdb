@@ -7,9 +7,12 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from rich.cells import cell_len
+from rich.segment import Segment
+from rich.style import Style as RichStyle
 from rich.text import Text
 from textual import events
 from textual.message import Message
+from textual.strip import Strip
 from textual.widget import Widget
 
 from .highlight_groups import HighlightGroups
@@ -340,6 +343,67 @@ class ContextMenu(Widget):
         filler = max(0, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(right))
         return f"{left}{item.label}{' ' * filler}{right}"
 
+    def _draw_panel_row(
+        self,
+        panel: _PanelLayout,
+        panel_row: int,
+        chars: list[str],
+        styles_row: list,
+        total_width: int,
+    ) -> None:
+        """Fill one row of a panel into the chars/styles_row arrays."""
+        border_style = self.hl.style("StatusLine")
+        inner_width = panel.inner_width
+
+        if panel_row == 0:
+            line = "┌" + ("─" * inner_width) + "┐"
+            for dx, ch in enumerate(line):
+                xi = panel.x + dx
+                if 0 <= xi < total_width:
+                    chars[xi] = ch
+                    styles_row[xi] = border_style
+        elif panel_row == panel.height - 1:
+            line = "└" + ("─" * inner_width) + "┘"
+            for dx, ch in enumerate(line):
+                xi = panel.x + dx
+                if 0 <= xi < total_width:
+                    chars[xi] = ch
+                    styles_row[xi] = border_style
+        else:
+            row_idx = panel_row - 1
+            if row_idx >= len(panel.rows):
+                return
+            row = panel.rows[row_idx]
+            if row.kind == "separator":
+                line = "├" + ("─" * inner_width) + "┤"
+                for dx, ch in enumerate(line):
+                    xi = panel.x + dx
+                    if 0 <= xi < total_width:
+                        chars[xi] = ch
+                        styles_row[xi] = border_style
+            else:
+                assert row.item_index is not None
+                item = panel.items[row.item_index]
+                row_style = (
+                    self.hl.style("SelectedLineHighlight")
+                    if row.item_index == panel.selected_index
+                    else self.hl.style("StatusLine")
+                )
+                xi = panel.x
+                if 0 <= xi < total_width:
+                    chars[xi] = "│"
+                    styles_row[xi] = border_style
+                inner_text = self._item_row_text(panel, item)
+                for dx, ch in enumerate(inner_text, start=1):
+                    xi = panel.x + dx
+                    if 0 <= xi < total_width:
+                        chars[xi] = ch
+                        styles_row[xi] = row_style
+                xi = panel.x + panel.width - 1
+                if 0 <= xi < total_width:
+                    chars[xi] = "│"
+                    styles_row[xi] = border_style
+
     def _draw_panel(
         self,
         panel: _PanelLayout,
@@ -402,6 +466,39 @@ class ContextMenu(Widget):
             for x in range(width):
                 result.append(chars[y][x], style=styles[y][x])
         return result
+
+    def render_line(self, y: int) -> Strip:
+        """Render one line as a Strip.
+
+        Cells outside any panel use Style.null() (no background) so Textual's
+        layer compositor shows whatever is on the base layer beneath them —
+        e.g. the status bar's gray background.  Using render() → Text would
+        cause those cells to inherit the widget's visual_style background
+        (resolved from 'background: transparent' → dark), covering content
+        behind the menu widget's bounding box.
+        """
+        width  = max(1, self._menu_width)
+        height = max(1, self._menu_height)
+        if y >= height:
+            return Strip([Segment(" " * width, RichStyle.null())], width)
+
+        chars: list[str] = [" "] * width
+        styles_row: list[Optional[RichStyle]] = [None] * width
+
+        for panel in self._panels:
+            panel_row = y - panel.y
+            if 0 <= panel_row < panel.height:
+                self._draw_panel_row(panel, panel_row, chars, styles_row, width)
+
+        segments: list[Segment] = []
+        for x in range(width):
+            s = styles_row[x]
+            if s is None:
+                # Outside every panel: transparent — show the base layer
+                segments.append(Segment(" ", RichStyle.null()))
+            else:
+                segments.append(Segment(chars[x], s))
+        return Strip(segments, width)
 
     def on_mouse_move(self, event: events.MouseMove) -> None:
         if self.is_open and self._select_pointer(int(event.x), int(event.y)):
