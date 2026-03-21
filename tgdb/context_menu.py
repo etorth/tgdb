@@ -350,9 +350,10 @@ class ContextMenu(Widget):
         chars: list[str],
         styles_row: list,
         total_width: int,
+        border_rich: "RichStyle",
+        sel_rich: "RichStyle",
     ) -> None:
         """Fill one row of a panel into the chars/styles_row arrays."""
-        border_style = self.hl.style("StatusLine")
         inner_width = panel.inner_width
 
         if panel_row == 0:
@@ -361,14 +362,14 @@ class ContextMenu(Widget):
                 xi = panel.x + dx
                 if 0 <= xi < total_width:
                     chars[xi] = ch
-                    styles_row[xi] = border_style
+                    styles_row[xi] = border_rich
         elif panel_row == panel.height - 1:
             line = "└" + ("─" * inner_width) + "┘"
             for dx, ch in enumerate(line):
                 xi = panel.x + dx
                 if 0 <= xi < total_width:
                     chars[xi] = ch
-                    styles_row[xi] = border_style
+                    styles_row[xi] = border_rich
         else:
             row_idx = panel_row - 1
             if row_idx >= len(panel.rows):
@@ -380,29 +381,25 @@ class ContextMenu(Widget):
                     xi = panel.x + dx
                     if 0 <= xi < total_width:
                         chars[xi] = ch
-                        styles_row[xi] = border_style
+                        styles_row[xi] = border_rich
             else:
                 assert row.item_index is not None
                 item = panel.items[row.item_index]
-                row_style = (
-                    self.hl.style("SelectedLineHighlight")
-                    if row.item_index == panel.selected_index
-                    else self.hl.style("StatusLine")
-                )
+                row_rich = sel_rich if row.item_index == panel.selected_index else border_rich
                 xi = panel.x
                 if 0 <= xi < total_width:
                     chars[xi] = "│"
-                    styles_row[xi] = border_style
+                    styles_row[xi] = border_rich
                 inner_text = self._item_row_text(panel, item)
                 for dx, ch in enumerate(inner_text, start=1):
                     xi = panel.x + dx
                     if 0 <= xi < total_width:
                         chars[xi] = ch
-                        styles_row[xi] = row_style
+                        styles_row[xi] = row_rich
                 xi = panel.x + panel.width - 1
                 if 0 <= xi < total_width:
                     chars[xi] = "│"
-                    styles_row[xi] = border_style
+                    styles_row[xi] = border_rich
 
     def _draw_panel(
         self,
@@ -483,12 +480,19 @@ class ContextMenu(Widget):
             return Strip([Segment(" " * width, RichStyle.null())], width)
 
         chars: list[str] = [" "] * width
+        # styles_row holds RichStyle objects (not strings); None = transparent.
+        # Parse hl.style() strings to RichStyle here once per render_line call.
+        border_rich  = RichStyle.parse(self.hl.style("StatusLine"))
+        sel_rich     = RichStyle.parse(self.hl.style("SelectedLineHighlight"))
         styles_row: list[Optional[RichStyle]] = [None] * width
 
         for panel in self._panels:
             panel_row = y - panel.y
             if 0 <= panel_row < panel.height:
-                self._draw_panel_row(panel, panel_row, chars, styles_row, width)
+                self._draw_panel_row(
+                    panel, panel_row, chars, styles_row, width,
+                    border_rich, sel_rich,
+                )
 
         segments: list[Segment] = []
         for x in range(width):
