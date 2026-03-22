@@ -267,6 +267,24 @@ class PaneContainer(Widget):
         self.refresh(layout=True)
         return True
 
+    async def _restore_nested_containers(self) -> None:
+        """
+        Rebuild nested PaneContainer children after this container is remounted.
+
+        Textual unmounts the full subtree when a parent removes and re-mounts a
+        child widget. For nested PaneContainer children, that means the child
+        widget keeps its logical ``_items`` / ``_weights`` state but loses its
+        mounted child widgets. Re-running the child's own rebuild restores its
+        splitters and nested panes while preserving its stored weights.
+        """
+        for item in self._items:
+            if not isinstance(item, PaneContainer):
+                continue
+            if item._items and not list(item.children):
+                await item._rebuild()
+            else:
+                await item._restore_nested_containers()
+
     async def _rebuild(self) -> None:
         is_horizontal = self.orientation == "horizontal"
         if len(self._weights) != len(self._items):
@@ -285,6 +303,7 @@ class PaneContainer(Widget):
             self.styles.layout = self.orientation
             if children:
                 await self.mount_all(children)
+        await self._restore_nested_containers()
         self.refresh(layout=True)
 
     def on_drag_resize(self, msg: DragResize) -> None:
