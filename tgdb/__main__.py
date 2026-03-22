@@ -7,27 +7,9 @@ import sys
 import time
 
 
-def _debugger_attached() -> bool:
-    """Best-effort Linux debugger attach detection, mirroring cgdb -w."""
-    try:
-        with open("/proc/self/status", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("TracerPid:"):
-                    return int(line.split(":", 1)[1].strip()) != 0
-    except OSError:
-        pass
-    return False
-
-
 def _wait_for_debugger() -> None:
-    if os.path.exists("/proc/self/status"):
-        print("Waiting for debugger to attach...")
-        while not _debugger_attached():
-            time.sleep(1)
-    else:
-        print("Press any key to continue execution...")
-        sys.stdin.read(1)
-
+    from pudb.remote import set_trace
+    set_trace()
 
 def main() -> None:
     parser = argparse.ArgumentParser(
