@@ -73,16 +73,16 @@ class _PanelLayout:
 # Module-level constants / helpers
 # ---------------------------------------------------------------------------
 
-_PADDING_LEFT  = 2
+_PADDING_LEFT = 2
 _PADDING_RIGHT = 2
 _SUBMENU_GLYPH = "▸"
 
 
 def _item_row_text(panel: _PanelLayout, item: ContextMenuItem) -> str:
-    left  = " " * _PADDING_LEFT
+    left = " " * _PADDING_LEFT
     right = " " * _PADDING_RIGHT
     if item.has_children:
-        tail   = f" {_SUBMENU_GLYPH} "
+        tail = f" {_SUBMENU_GLYPH} "
         filler = max(1, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(tail))
         return f"{left}{item.label}{' ' * filler}{tail}"
     filler = max(0, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(right))
@@ -111,16 +111,16 @@ class _PanelWidget(Widget):
 
     def __init__(
         self,
-        hl:    HighlightGroups,
+        hl: HighlightGroups,
         panel: _PanelLayout,
-        menu:  "ContextMenu",
+        menu: "ContextMenu",
         depth: int,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self._hl    = hl
+        self._hl = hl
         self._panel = panel
-        self._menu  = menu
+        self._menu = menu
         self._depth = depth
         self.can_focus = False
 
@@ -130,16 +130,16 @@ class _PanelWidget(Widget):
         self._panel = panel
         self._depth = depth
         self.styles.offset = (abs_x, abs_y)
-        self.styles.width  = panel.width
+        self.styles.width = panel.width
         self.styles.height = panel.height
         self.refresh()
 
     def render_line(self, y: int) -> Strip:
-        panel       = self._panel
-        width       = panel.width
+        panel = self._panel
+        width = panel.width
         inner_width = panel.inner_width
         border_rich = RichStyle.parse(self._hl.style("StatusLine"))
-        sel_rich    = RichStyle.parse(self._hl.style("SelectedLineHighlight"))
+        sel_rich = RichStyle.parse(self._hl.style("SelectedLineHighlight"))
 
         if y == 0:
             line = "┌" + "─" * inner_width + "┐"
@@ -159,10 +159,10 @@ class _PanelWidget(Widget):
             return Strip([Segment(ch, border_rich) for ch in line], width)
 
         assert row.item_index is not None
-        item     = panel.items[row.item_index]
+        item = panel.items[row.item_index]
         row_rich = sel_rich if row.item_index == panel.selected_index else border_rich
-        inner    = _item_row_text(panel, item)
-        segs     = (
+        inner = _item_row_text(panel, item)
+        segs = (
             [Segment("│", border_rich)]
             + [Segment(ch, row_rich) for ch in inner]
             + [Segment("│", border_rich)]
@@ -227,13 +227,13 @@ class ContextMenu(Widget):
     }
     """
 
-    _PADDING_LEFT  = _PADDING_LEFT
+    _PADDING_LEFT = _PADDING_LEFT
     _PADDING_RIGHT = _PADDING_RIGHT
     _SUBMENU_GLYPH = _SUBMENU_GLYPH
 
     def __init__(
         self,
-        hl:    HighlightGroups,
+        hl: HighlightGroups,
         items: Optional[Sequence[ContextMenuItem]] = None,
         **kwargs,
     ) -> None:
@@ -455,10 +455,10 @@ class ContextMenu(Widget):
         self._panels = panels
 
         # Clamp the whole cascade to stay on screen
-        total_w = max((p.x + p.width  for p in panels), default=1)
+        total_w = max((p.x + p.width for p in panels), default=1)
         total_h = max((p.y + p.height for p in panels), default=1)
-        scr_w   = self.screen.size.width
-        scr_h   = self.screen.size.height
+        scr_w = self.screen.size.width
+        scr_h = self.screen.size.height
         origin_x = max(0, min(scr_w - total_w, self._requested_x))
         origin_y = max(0, min(scr_h - total_h, self._requested_y))
 
@@ -475,7 +475,7 @@ class ContextMenu(Widget):
             else:
                 pw = _PanelWidget(self.hl, panel, self, i)
                 pw.styles.offset = (abs_x, abs_y)
-                pw.styles.width  = panel.width
+                pw.styles.width = panel.width
                 pw.styles.height = panel.height
                 self.app.screen.mount(pw)
                 self._panel_widgets.append(pw)
@@ -514,7 +514,7 @@ class ContextMenu(Widget):
         items = self._entries_at_depth(depth)
         if not items:
             return
-        key  = event.key
+        key = event.key
         char = event.character or ""
         if key == "up" or char == "k":
             self._set_selection(depth, self._selection_path[depth] - 1, open_child=False)
@@ -541,7 +541,7 @@ class ContextMenuSelected(Message):
     def __init__(self, action: str) -> None:
         super().__init__()
         self.action = action
-        self.item   = action
+        self.item = action
 
 
 class ContextMenuClosed(Message):

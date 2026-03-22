@@ -11,6 +11,7 @@ def _wait_for_debugger() -> None:
     from pudb.remote import set_trace
     set_trace()
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tgdb",

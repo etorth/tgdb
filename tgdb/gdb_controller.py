@@ -102,7 +102,8 @@ class MIParser:
         if i >= len(line):
             return out
 
-        ch = line[i]; i += 1
+        ch = line[i]
+        i += 1
 
         if ch in "^*+=":
             out["type"] = ch
@@ -138,7 +139,8 @@ class MIParser:
             m = re.match(r'(\w[\w-]*)=', s[pos:])
             if not m:
                 break
-            key = m.group(1); pos += m.end()
+            key = m.group(1)
+            pos += m.end()
             val, consumed = MIParser._parse_value(s, pos)
             pos += consumed
             if key in result:
@@ -159,32 +161,47 @@ class MIParser:
         if ch == '"':
             end = pos + 1
             while end < len(s):
-                if s[end] == '\\': end += 2; continue
-                if s[end] == '"':  end += 1; break
+                if s[end] == '\\':
+                    end += 2
+                    continue
+                if s[end] == '"':
+                    end += 1
+                    break
                 end += 1
-            return (MIParser._unescape(s[pos+1:end-1]), end - pos)
+            return (MIParser._unescape(s[pos + 1:end - 1]), end - pos)
         elif ch == '{':
-            end = pos + 1; depth = 1
+            end = pos + 1
+            depth = 1
             while end < len(s) and depth > 0:
-                if s[end] == '{': depth += 1
-                elif s[end] == '}': depth -= 1
+                if s[end] == '{':
+                    depth += 1
+                elif s[end] == '}':
+                    depth -= 1
                 end += 1
-            return (MIParser._parse_results(s[pos+1:end-1]), end - pos)
+            return (MIParser._parse_results(s[pos + 1:end - 1]), end - pos)
         elif ch == '[':
-            items = []; end = pos + 1; depth = 1
+            items = []
+            end = pos + 1
+            depth = 1
             while end < len(s) and depth > 0:
-                if s[end] == '[': depth += 1
-                elif s[end] == ']': depth -= 1
+                if s[end] == '[':
+                    depth += 1
+                elif s[end] == ']':
+                    depth -= 1
                 end += 1
-            inner = s[pos+1:end-1]; p = 0
+            inner = s[pos + 1:end - 1]
+            p = 0
             while p < len(inner):
                 if re.match(r'\w[\w-]*=', inner[p:]):
                     parsed = MIParser._parse_results(inner[p:])
-                    items.append(parsed); p = len(inner)
+                    items.append(parsed)
+                    p = len(inner)
                 else:
                     val, consumed = MIParser._parse_value(inner, p)
-                    items.append(val); p += consumed
-                    if p < len(inner) and inner[p] == ',': p += 1
+                    items.append(val)
+                    p += consumed
+                    if p < len(inner) and inner[p] == ',':
+                        p += 1
             return (items, end - pos)
         else:
             end = pos
@@ -232,7 +249,7 @@ class GDBController:
 
         self._proc: Optional[ptyprocess.PtyProcess] = None
         self._mi_master_fd: int = -1
-        self._mi_slave_fd:  int = -1   # kept open to prevent master EIO
+        self._mi_slave_fd: int = -1   # kept open to prevent master EIO
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
@@ -251,18 +268,18 @@ class GDBController:
         self._inferior_running: bool = False
 
         # Callbacks
-        self.on_console: Callable[[bytes], None]              = lambda d: None
-        self.on_stopped: Callable[[Frame], None]              = lambda f: None
-        self.on_running: Callable[[], None]                   = lambda: None
+        self.on_console: Callable[[bytes], None] = lambda d: None
+        self.on_stopped: Callable[[Frame], None] = lambda f: None
+        self.on_running: Callable[[], None] = lambda: None
         self.on_breakpoints: Callable[[list[Breakpoint]], None] = lambda b: None
-        self.on_source_files: Callable[[list[str]], None]        = lambda f: None
-        self.on_source_file: Callable[[str, int], None]          = lambda f, l: None
-        self.on_locals: Callable[[list[LocalVariable]], None]    = lambda v: None
-        self.on_stack: Callable[[list[Frame]], None]             = lambda v: None
-        self.on_threads: Callable[[list[ThreadInfo]], None]      = lambda v: None
-        self.on_registers: Callable[[list[RegisterInfo]], None]  = lambda v: None
-        self.on_exit: Callable[[], None]                      = lambda: None
-        self.on_error: Callable[[str], None]                  = lambda m: None
+        self.on_source_files: Callable[[list[str]], None] = lambda f: None
+        self.on_source_file: Callable[[str, int], None] = lambda f, l: None
+        self.on_locals: Callable[[list[LocalVariable]], None] = lambda v: None
+        self.on_stack: Callable[[list[Frame]], None] = lambda v: None
+        self.on_threads: Callable[[list[ThreadInfo]], None] = lambda v: None
+        self.on_registers: Callable[[list[RegisterInfo]], None] = lambda v: None
+        self.on_exit: Callable[[], None] = lambda: None
+        self.on_error: Callable[[str], None] = lambda m: None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -348,11 +365,11 @@ class GDBController:
         # add_reader on the console fd wakes instantly when data is available,
         # matching cgdb's select()-based approach with no timeout.
         self._console_done: asyncio.Future = loop.create_future()
-        self._mi_done:      asyncio.Future = loop.create_future()
+        self._mi_done: asyncio.Future = loop.create_future()
 
         # Register readable callbacks — fires as soon as the fd has data,
         # with zero polling delay (unlike asyncio.sleep(0.02)).
-        loop.add_reader(self._proc.fd,     self._on_console_readable, loop)
+        loop.add_reader(self._proc.fd, self._on_console_readable, loop)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
 
         # Wait for GDB's console PTY to close (GDB exited)
@@ -407,7 +424,7 @@ class GDBController:
         if not line:
             return
         rec = MIParser.parse(line)
-        t   = rec["type"]
+        t = rec["type"]
         if t == "^":
             self._handle_result(rec)
         elif t in ("*", "="):
@@ -415,9 +432,9 @@ class GDBController:
         # console/target/log/prompt on MI channel are noise — ignore
 
     def _handle_result(self, rec: dict) -> None:
-        cls     = rec.get("class_", "")
+        cls = rec.get("class_", "")
         results = rec.get("results", {})
-        token   = rec.get("token")
+        token = rec.get("token")
         meta: dict[str, object] = {}
         if token is not None:
             meta = self._request_meta.pop(token, {})
@@ -605,7 +622,7 @@ class GDBController:
         self.mi_command(f"-break-disable {number}")
 
     def _handle_async(self, rec: dict) -> None:
-        cls     = rec.get("class_", "")
+        cls = rec.get("class_", "")
         results = rec.get("results", {})
 
         if cls == "stopped":
@@ -791,11 +808,11 @@ class GDBController:
         if existing is None:
             existing = Breakpoint(number=num)
             self.breakpoints.append(existing)
-        existing.file     = data.get("file", existing.file)
+        existing.file = data.get("file", existing.file)
         existing.fullname = data.get("fullname", existing.fullname)
-        existing.line     = self._safe_int(data.get("line", existing.line))
-        existing.addr     = data.get("addr", existing.addr)
-        existing.enabled  = data.get("enabled", "y") == "y"
+        existing.line = self._safe_int(data.get("line", existing.line))
+        existing.addr = data.get("addr", existing.addr)
+        existing.enabled = data.get("enabled", "y") == "y"
         existing.temporary = data.get("disp", "") == "del"
         self.on_breakpoints(list(self.breakpoints))
 
