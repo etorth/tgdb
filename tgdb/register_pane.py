@@ -8,7 +8,7 @@ from textual.widget import Widget
 
 from .gdb_controller import RegisterInfo
 from .highlight_groups import HighlightGroups
-from .pane_utils import fit_cells
+from .pane_utils import center_cells, fit_cells
 
 
 class RegisterPane(Widget):
@@ -42,7 +42,7 @@ class RegisterPane(Widget):
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
 
-        result.append(fit_cells("Registers", width), style=self.hl.style("StatusLine"))
+        result.append(center_cells("Registers", width), style=self.hl.style("StatusLine"))
 
         visible_rows = max(0, height - 1)
         for register in self._registers[:visible_rows]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 
-from rich.cells import split_graphemes
+from rich.cells import cell_len, split_graphemes
 
 from .gdb_controller import Frame
 
@@ -23,6 +23,21 @@ def fit_cells(text: str, width: int) -> str:
         parts.append(text[start:end])
         used += grapheme_width
     return "".join(parts) + (" " * max(0, width - used))
+
+
+def center_cells(text: str, width: int) -> str:
+    """Center text within a given display-cell width, clipping if needed."""
+    if width <= 0:
+        return ""
+
+    text_width = cell_len(text)
+    if text_width >= width:
+        return fit_cells(text, width)
+
+    pad = width - text_width
+    left = pad // 2
+    right = pad - left
+    return (" " * left) + text + (" " * right)
 
 
 def frame_location(frame: Frame | None) -> str:
