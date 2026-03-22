@@ -35,17 +35,18 @@ from .gdb_controller import Breakpoint
 # Pygments token → highlight group
 # ---------------------------------------------------------------------------
 _TOKEN_GROUPS: list[tuple] = [
-    (Token.Comment.Preproc,     "PreProc"),
+    (Token.Comment.Preproc, "PreProc"),
     (Token.Comment.PreprocFile, "PreProc"),
-    (Token.Comment,             "Comment"),
-    (Token.Keyword.Type,        "Type"),
-    (Token.Keyword,             "Statement"),
-    (Token.Name.Builtin,        "Statement"),
-    (Token.Literal.String,      "Constant"),
-    (Token.Literal.Number,      "Constant"),
-    (Token.Literal,             "Constant"),
-    (Token.Name.Decorator,      "PreProc"),
+    (Token.Comment, "Comment"),
+    (Token.Keyword.Type, "Type"),
+    (Token.Keyword, "Statement"),
+    (Token.Name.Builtin, "Statement"),
+    (Token.Literal.String, "Constant"),
+    (Token.Literal.Number, "Constant"),
+    (Token.Literal, "Constant"),
+    (Token.Name.Decorator, "PreProc"),
 ]
+
 
 def _token_group(ttype) -> str:
     for tok, group in _TOKEN_GROUPS:
@@ -53,13 +54,15 @@ def _token_group(ttype) -> str:
             return group
     return "Normal"
 
-BP_NONE     = 0
-BP_ENABLED  = 1
+
+BP_NONE = 0
+BP_ENABLED = 1
 BP_DISABLED = 2
 
 # ---------------------------------------------------------------------------
 # Per-file source data
 # ---------------------------------------------------------------------------
+
 
 class SourceFile:
     def __init__(self, path: str, lines: list[str]) -> None:
@@ -254,43 +257,54 @@ class SourceView(Widget):
         self._ensure_visible(self.sel_line)
         self.refresh()
 
-    def scroll_up(self, n: int = 1) -> None:   self.move_to(self.sel_line - n)
-    def scroll_down(self, n: int = 1) -> None:  self.move_to(self.sel_line + n)
+    def scroll_up(self, n: int = 1) -> None: self.move_to(self.sel_line - n)
+    def scroll_down(self, n: int = 1) -> None: self.move_to(self.sel_line + n)
+
     def scroll_col(self, delta: int) -> None:
         """Horizontal scroll — cgdb sel_col."""
         self._col_offset = max(0, self._col_offset + delta)
         self.refresh()
+
     def page_up(self) -> None:
         h = self._visible_height()
         self.sel_line = max(1, self.sel_line - h)
         self._ensure_visible(self.sel_line)
         self.refresh()
+
     def page_down(self) -> None:
         h = self._visible_height()
         n = self._line_count()
         self.sel_line = min(n if n else 1, self.sel_line + h)
         self._ensure_visible(self.sel_line)
         self.refresh()
-    def half_page_up(self) -> None:    self.scroll_up(self._visible_height() // 2)
-    def half_page_down(self) -> None:  self.scroll_down(self._visible_height() // 2)
-    def goto_top(self) -> None:        self.move_to(1)
+
+    def half_page_up(self) -> None: self.scroll_up(self._visible_height() // 2)
+    def half_page_down(self) -> None: self.scroll_down(self._visible_height() // 2)
+    def goto_top(self) -> None: self.move_to(1)
+
     def goto_bottom(self, line: Optional[int] = None) -> None:
         self.move_to(line if line is not None else self._line_count())
+
     def goto_executing(self) -> None:
         if self.exe_line > 0:
             self._last_jump_line = self.sel_line
             self.move_to(self.exe_line)
+
     def goto_last_jump(self) -> None:
         tmp = self._last_jump_line
         self._last_jump_line = self.sel_line
         self.move_to(tmp)
+
     def show_logo(self) -> None:
         """Force logo display (:logo command)."""
         self._show_logo = True
         self.refresh()
-    def goto_screen_top(self) -> None:    self.move_to(self._scroll_top + 1)
+
+    def goto_screen_top(self) -> None: self.move_to(self._scroll_top + 1)
+
     def goto_screen_middle(self) -> None:
         self.move_to(self._scroll_top + self._visible_height() // 2 + 1)
+
     def goto_screen_bottom(self) -> None:
         self.move_to(self._scroll_top + self._visible_height())
 
@@ -380,7 +394,7 @@ class SourceView(Widget):
 
         # ── Logo: shown when no file loaded or :logo was called ──
         if sf is None or self._show_logo:
-            logo  = _LOGO_LINES
+            logo = _LOGO_LINES
             v_pad = max(0, (h - len(logo)) // 2)  # rows above logo
             style = self.hl.style("Logo")
             for y in range(h):
@@ -431,12 +445,12 @@ class SourceView(Widget):
             filler.append("~│", style=self.hl.style("LineNumber"))
             return filler
 
-        line_no   = line_idx + 1
-        is_exe    = (line_no == self.exe_line)
-        is_sel    = (line_no == self.sel_line)
-        bp_flag   = sf.bp_flags[line_idx] if line_idx < len(sf.bp_flags) else BP_NONE
-        exe_disp  = self.executing_line_display
-        sel_disp  = self.selected_line_display
+        line_no = line_idx + 1
+        is_exe = (line_no == self.exe_line)
+        is_sel = (line_no == self.sel_line)
+        bp_flag = sf.bp_flags[line_idx] if line_idx < len(sf.bp_flags) else BP_NONE
+        exe_disp = self.executing_line_display
+        sel_disp = self.selected_line_display
 
         # ── Line number style (cgdb priority: breakpoint > exe > sel > normal) ──
         if bp_flag == BP_ENABLED:
@@ -456,11 +470,15 @@ class SourceView(Widget):
         if self.showmarks:
             for mk, ml in sf.marks_local.items():
                 if ml == line_no:
-                    mark_ch = mk; mark_st = self.hl.style("Mark"); break
+                    mark_ch = mk
+                    mark_st = self.hl.style("Mark")
+                    break
             if mark_ch is None:
                 for mk, (mp, ml) in self._global_marks.items():
                     if mp == sf.path and ml == line_no:
-                        mark_ch = mk; mark_st = self.hl.style("Mark"); break
+                        mark_ch = mk
+                        mark_st = self.hl.style("Mark")
+                        break
 
         # ── Separator and arrow — matches cgdb sources.cpp ──
         # cgdb: vert_bar = SWIN_SYM_LTEE (├) for arrow lines, SWIN_SYM_VLINE (│) otherwise
@@ -525,7 +543,7 @@ class SourceView(Widget):
             line_bg = ""
 
         tokens = sf.tokenize(self.tabstop)
-        spans  = tokens[line_idx] if line_idx < len(tokens) else []
+        spans = tokens[line_idx] if line_idx < len(tokens) else []
         if not spans:
             spans = [(sf.lines[line_idx], "Normal")]
 
@@ -544,9 +562,12 @@ class SourceView(Widget):
                 # (matches cgdb: uses A_BOLD/A_REVERSE only when color disabled)
                 hs = self.hl.get(group)
                 attrs = []
-                if hs.bold:    attrs.append("bold")
-                if hs.reverse: attrs.append("reverse")
-                if hs.underline: attrs.append("underline")
+                if hs.bold:
+                    attrs.append("bold")
+                if hs.reverse:
+                    attrs.append("reverse")
+                if hs.underline:
+                    attrs.append("underline")
                 st = " ".join(attrs) if attrs else ""
             styled_spans.append((tok_text, st))
 
@@ -623,7 +644,6 @@ class SourceView(Widget):
         footer.append(path.ljust(width), style=self.hl.style("StatusLine"))
         return footer
 
-
     def on_resize(self, event: events.Resize) -> None:
         self._ensure_visible(self.sel_line)
         self.refresh()
@@ -655,40 +675,59 @@ class SourceView(Widget):
         self._num_buf = ""
 
         consumed = True
-        if key in ("j", "down"):            self.scroll_down(count)
-        elif key in ("k", "up"):            self.scroll_up(count)
-        elif key in ("h", "left"):          self.scroll_col(-count)
-        elif key in ("l", "right"):         self.scroll_col(count)
-        elif key in ("ctrl+f", "pagedown"): [self.page_down() for _ in range(count)]
-        elif key in ("ctrl+b", "pageup"):   [self.page_up()   for _ in range(count)]
-        elif key == "ctrl+d":               self.half_page_down()
-        elif key == "ctrl+u":               self.half_page_up()
-        elif key == "G":                    self.goto_bottom(count if count != 1 else None)
-        elif key == "H":                    self.goto_screen_top()
-        elif key == "M":                    self.goto_screen_middle()
-        elif key == "L":                    self.goto_screen_bottom()
+        if key in ("j", "down"):
+            self.scroll_down(count)
+        elif key in ("k", "up"):
+            self.scroll_up(count)
+        elif key in ("h", "left"):
+            self.scroll_col(-count)
+        elif key in ("l", "right"):
+            self.scroll_col(count)
+        elif key in ("ctrl+f", "pagedown"):
+            [self.page_down() for _ in range(count)]
+        elif key in ("ctrl+b", "pageup"):
+            [self.page_up() for _ in range(count)]
+        elif key == "ctrl+d":
+            self.half_page_down()
+        elif key == "ctrl+u":
+            self.half_page_up()
+        elif key == "G":
+            self.goto_bottom(count if count != 1 else None)
+        elif key == "H":
+            self.goto_screen_top()
+        elif key == "M":
+            self.goto_screen_middle()
+        elif key == "L":
+            self.goto_screen_bottom()
         elif char == "g":
             self._await_g = True           # wait for second 'g'
         elif key == "slash":
-            self._search_active = True; self._search_forward = True
+            self._search_active = True
+            self._search_forward = True
             self._search_buf = ""
             self.post_message(SearchStart(forward=True))
         elif key == "question_mark":
-            self._search_active = True; self._search_forward = False
+            self._search_active = True
+            self._search_forward = False
             self._search_buf = ""
             self.post_message(SearchStart(forward=False))
         elif char == "n":
-            if not self.search_next(): self.post_message(StatusMessage("Pattern not found"))
+            if not self.search_next():
+                self.post_message(StatusMessage("Pattern not found"))
         elif char == "N":
-            if not self.search_prev(): self.post_message(StatusMessage("Pattern not found"))
-        elif key == "space":                self.post_message(ToggleBreakpoint(self.sel_line))
-        elif char == "t":                   self.post_message(ToggleBreakpoint(self.sel_line, temporary=True))
+            if not self.search_prev():
+                self.post_message(StatusMessage("Pattern not found"))
+        elif key == "space":
+            self.post_message(ToggleBreakpoint(self.sel_line))
+        elif char == "t":
+            self.post_message(ToggleBreakpoint(self.sel_line, temporary=True))
         elif char == "u":
             # cgdb source_input 'u': run until current cursor location
             sf2 = self.source_file
             if sf2:
                 self.post_message(GDBCommand(f"until {sf2.path}:{self.sel_line}"))
-        elif char == "o":                   self.post_message(OpenFileDialog())
+        elif char == "o":
+            self.post_message(OpenFileDialog())
         elif key == "colon" or char == ":":
             from .status_bar import StatusBar
 
@@ -696,22 +735,38 @@ class SourceView(Widget):
             status.start_command()
             self.app._set_mode("STATUS")
             status.focus()
-        elif key == "apostrophe":           self.post_message(AwaitMarkJump())
-        elif char == "m":                   self.post_message(AwaitMarkSet())
-        elif key == "ctrl+l":               self.app.refresh()
-        elif key == "minus":                self.post_message(ResizeSource(-1, rows=True))
-        elif key in ("equal",) or char == "=": self.post_message(ResizeSource(1,  rows=True))
-        elif key == "underscore":           self.post_message(ResizeSource(-1, jump=True))
-        elif key == "plus":                 self.post_message(ResizeSource(1,  jump=True))
-        elif key == "ctrl+w":               self.post_message(ToggleOrientation())
-        elif key == "ctrl+t":               self.post_message(OpenTTY())
-        elif key == "f1":                   self.post_message(ShowHelp())  # cgdb: if_display_help
-        elif key == "f5":                   self.post_message(GDBCommand("run"))
-        elif key == "f6":                   self.post_message(GDBCommand("continue"))
-        elif key == "f7":                   self.post_message(GDBCommand("finish"))
-        elif key == "f8":                   self.post_message(GDBCommand("next"))
-        elif key == "f10":                  self.post_message(GDBCommand("step"))
-        else:                               consumed = False
+        elif key == "apostrophe":
+            self.post_message(AwaitMarkJump())
+        elif char == "m":
+            self.post_message(AwaitMarkSet())
+        elif key == "ctrl+l":
+            self.app.refresh()
+        elif key == "minus":
+            self.post_message(ResizeSource(-1, rows=True))
+        elif key in ("equal",) or char == "=":
+            self.post_message(ResizeSource(1, rows=True))
+        elif key == "underscore":
+            self.post_message(ResizeSource(-1, jump=True))
+        elif key == "plus":
+            self.post_message(ResizeSource(1, jump=True))
+        elif key == "ctrl+w":
+            self.post_message(ToggleOrientation())
+        elif key == "ctrl+t":
+            self.post_message(OpenTTY())
+        elif key == "f1":
+            self.post_message(ShowHelp())  # cgdb: if_display_help
+        elif key == "f5":
+            self.post_message(GDBCommand("run"))
+        elif key == "f6":
+            self.post_message(GDBCommand("continue"))
+        elif key == "f7":
+            self.post_message(GDBCommand("finish"))
+        elif key == "f8":
+            self.post_message(GDBCommand("next"))
+        elif key == "f10":
+            self.post_message(GDBCommand("step"))
+        else:
+            consumed = False
 
         return consumed
 
@@ -760,33 +815,57 @@ class SourceView(Widget):
 
 class ToggleBreakpoint(Message):
     def __init__(self, line: int, temporary: bool = False) -> None:
-        super().__init__(); self.line = line; self.temporary = temporary
+        super().__init__()
+        self.line = line
+        self.temporary = temporary
 
-class OpenFileDialog(Message): pass
-class AwaitMarkJump(Message):  pass
-class AwaitMarkSet(Message):   pass
+
+class OpenFileDialog(Message):
+    pass
+
+
+class AwaitMarkJump(Message):
+    pass
+
+
+class AwaitMarkSet(Message):
+    pass
+
 
 class JumpGlobalMark(Message):
     def __init__(self, path: str, line: int) -> None:
-        super().__init__(); self.path = path; self.line = line
+        super().__init__()
+        self.path = path
+        self.line = line
+
 
 class SearchStart(Message):
     def __init__(self, forward: bool) -> None:
-        super().__init__(); self.forward = forward
+        super().__init__()
+        self.forward = forward
+
 
 class SearchUpdate(Message):
     def __init__(self, pattern: str) -> None:
-        super().__init__(); self.pattern = pattern
+        super().__init__()
+        self.pattern = pattern
+
 
 class SearchCommit(Message):
     def __init__(self, pattern: str) -> None:
-        super().__init__(); self.pattern = pattern
+        super().__init__()
+        self.pattern = pattern
 
-class SearchCancel(Message): pass
+
+class SearchCancel(Message):
+    pass
+
 
 class StatusMessage(Message):
     def __init__(self, text: str) -> None:
-        super().__init__(); self.text = text
+        super().__init__()
+        self.text = text
+
 
 class ResizeSource(Message):
     """Request to resize the source/gdb split.
@@ -794,18 +873,29 @@ class ResizeSource(Message):
     rows=True : delta is ±1 row (cgdb '=' / '-')
     jump=True : delta is ±1 quarter-mark step (cgdb '+' / '_')
     """
+
     def __init__(self, delta: int, rows: bool = False, jump: bool = False,
                  percent: bool = False) -> None:
         super().__init__()
-        self.delta   = delta
-        self.rows    = rows
-        self.jump    = jump
+        self.delta = delta
+        self.rows = rows
+        self.jump = jump
         self.percent = percent   # legacy, kept for compatibility
 
-class ToggleOrientation(Message): pass
-class OpenTTY(Message):           pass
-class ShowHelp(Message):          pass
+
+class ToggleOrientation(Message):
+    pass
+
+
+class OpenTTY(Message):
+    pass
+
+
+class ShowHelp(Message):
+    pass
+
 
 class GDBCommand(Message):
     def __init__(self, cmd: str) -> None:
-        super().__init__(); self.cmd = cmd
+        super().__init__()
+        self.cmd = cmd

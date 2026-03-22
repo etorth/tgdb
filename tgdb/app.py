@@ -519,39 +519,39 @@ class TGDBApp(App):
             self._show_status("Failed to initialize core panes")
             return
         src.executing_line_display = self.cfg.executinglinedisplay
-        src.selected_line_display  = self.cfg.selectedlinedisplay
-        src.tabstop    = self.cfg.tabstop
-        src.hlsearch   = self.cfg.hlsearch
+        src.selected_line_display = self.cfg.selectedlinedisplay
+        src.tabstop = self.cfg.tabstop
+        src.hlsearch = self.cfg.hlsearch
         src.ignorecase = self.cfg.ignorecase
-        src.wrapscan   = self.cfg.wrapscan
-        src.showmarks  = self.cfg.showmarks
+        src.wrapscan = self.cfg.wrapscan
+        src.showmarks = self.cfg.showmarks
 
         # Configure GDB widget
-        gdb_w.ignorecase        = self.cfg.ignorecase
-        gdb_w.wrapscan          = self.cfg.wrapscan
-        gdb_w.send_to_gdb       = self.gdb.send_input        # bytes → primary PTY
-        gdb_w.resize_gdb        = self.gdb.resize             # keep pyte in sync
+        gdb_w.ignorecase = self.cfg.ignorecase
+        gdb_w.wrapscan = self.cfg.wrapscan
+        gdb_w.send_to_gdb = self.gdb.send_input        # bytes → primary PTY
+        gdb_w.resize_gdb = self.gdb.resize             # keep pyte in sync
         gdb_w.on_switch_to_cgdb = self._switch_to_cgdb
 
         # Configure file dialog
         fd = self.query_one("#file-dlg", FileDialog)
         fd.ignorecase = self.cfg.ignorecase
-        fd.wrapscan   = self.cfg.wrapscan
+        fd.wrapscan = self.cfg.wrapscan
 
         # GDB callbacks — on_console now delivers raw bytes from GDB's PTY,
         # fed directly into the pyte VT100 emulator (matching cgdb's libvterm).
-        self.gdb.on_console      = lambda data: self.call_later(gdb_w.feed_bytes, data)
-        self.gdb.on_stopped      = lambda    f: self.call_later(self._ui_on_stopped, f)
-        self.gdb.on_running      = lambda     : self.call_later(self._ui_on_running)
-        self.gdb.on_breakpoints  = lambda    b: self.call_later(self._ui_set_breakpoints, b)
-        self.gdb.on_source_files = lambda    f: self.call_later(self._ui_set_source_files, f)
-        self.gdb.on_source_file  = lambda f, l: self.call_later(self._ui_load_source_file, f, l)
-        self.gdb.on_locals       = lambda    v: self.call_later(self._ui_set_locals, v)
-        self.gdb.on_registers    = lambda    v: self.call_later(self._ui_set_registers, v)
-        self.gdb.on_stack        = lambda    v: self.call_later(self._ui_set_stack, v)
-        self.gdb.on_threads      = lambda    v: self.call_later(self._ui_set_threads, v)
-        self.gdb.on_exit         = lambda     : self.call_later(self._ui_gdb_exit)
-        self.gdb.on_error        = lambda    m: self.call_later(self._show_status, f"Error: {m}")
+        self.gdb.on_console = lambda data: self.call_later(gdb_w.feed_bytes, data)
+        self.gdb.on_stopped = lambda f: self.call_later(self._ui_on_stopped, f)
+        self.gdb.on_running = lambda: self.call_later(self._ui_on_running)
+        self.gdb.on_breakpoints = lambda b: self.call_later(self._ui_set_breakpoints, b)
+        self.gdb.on_source_files = lambda f: self.call_later(self._ui_set_source_files, f)
+        self.gdb.on_source_file = lambda f, l: self.call_later(self._ui_load_source_file, f, l)
+        self.gdb.on_locals = lambda v: self.call_later(self._ui_set_locals, v)
+        self.gdb.on_registers = lambda v: self.call_later(self._ui_set_registers, v)
+        self.gdb.on_stack = lambda v: self.call_later(self._ui_set_stack, v)
+        self.gdb.on_threads = lambda v: self.call_later(self._ui_set_threads, v)
+        self.gdb.on_exit = lambda: self.call_later(self._ui_gdb_exit)
+        self.gdb.on_error = lambda m: self.call_later(self._show_status, f"Error: {m}")
 
         # Start GDB process
         try:
@@ -994,7 +994,7 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def on_key(self, event: events.Key) -> None:
-        key  = event.key
+        key = event.key
         char = event.character or ""
         menu = self._get_context_menu()
 
@@ -1005,22 +1005,26 @@ class TGDBApp(App):
             return
 
         if self._handle_pending_mark_key(char):
-            event.stop(); return
+            event.stop()
+            return
 
         # ESC / cgdb mode key → switch to CGDB from GDB/STATUS/SCROLL
         cgdb_key = self.cfg.cgdbmodekey.lower()
         if key == "escape" or key.lower() == cgdb_key:
             if self._mode in ("GDB", "STATUS", "SCROLL"):
                 self._switch_to_cgdb()
-                event.stop(); return
+                event.stop()
+                return
 
         if self._mode == "STATUS":
             status = self.query_one("#status", StatusBar)
             if status.feed_key(key, char):
-                event.stop(); return
+                event.stop()
+                return
 
         if self._handle_cgdb_mode_key(key, char):
-            event.stop(); return
+            event.stop()
+            return
 
         # Ctrl-C always interrupts GDB
         if key == "ctrl+c":
@@ -1058,9 +1062,10 @@ class TGDBApp(App):
         if src is None:
             self._show_status("No source pane available")
             return
-        sf  = src.source_file
+        sf = src.source_file
         if not sf:
-            self._show_status("No source file loaded"); return
+            self._show_status("No source file loaded")
+            return
         existing = next(
             (b for b in self.gdb.breakpoints
              if b.line == msg.line and
@@ -1498,29 +1503,29 @@ class TGDBApp(App):
             return lambda a: self._send_gdb_cli(c) or None
 
         cmds = {
-            "bang":    self._cmd_bang,
-            "quit":    self._cmd_quit,    "q":    self._cmd_quit,
-            "help":    self._cmd_help,
-            "edit":    self._cmd_edit,    "e":    self._cmd_edit,
-            "focus":   self._cmd_focus,
-            "insert":  lambda a: self._switch_to_gdb() or None,
-            "noh":     self._cmd_noh,
-            "shell":   self._cmd_shell,   "sh":   self._cmd_shell,
-            "logo":    self._cmd_logo,
-            "syntax":  self._cmd_syntax,
+            "bang": self._cmd_bang,
+            "quit": self._cmd_quit, "q": self._cmd_quit,
+            "help": self._cmd_help,
+            "edit": self._cmd_edit, "e": self._cmd_edit,
+            "focus": self._cmd_focus,
+            "insert": lambda a: self._switch_to_gdb() or None,
+            "noh": self._cmd_noh,
+            "shell": self._cmd_shell, "sh": self._cmd_shell,
+            "logo": self._cmd_logo,
+            "syntax": self._cmd_syntax,
             "capturescreen": self._cmd_capturescreen, "cs": self._cmd_capturescreen,
-            "continue": gdb_cmd("continue"), "c":   gdb_cmd("continue"),
-            "next":     gdb_cmd("next"),     "n":   gdb_cmd("next"),
-            "nexti":    gdb_cmd("nexti"),
-            "step":     gdb_cmd("step"),     "s":   gdb_cmd("step"),
-            "stepi":    gdb_cmd("stepi"),
-            "finish":   gdb_cmd("finish"),   "f":   gdb_cmd("finish"),
-            "run":      gdb_cmd("run"),      "r":   gdb_cmd("run"),
-            "start":    gdb_cmd("start"),
-            "kill":     gdb_cmd("kill"),     "k":   gdb_cmd("kill"),
-            "until":    gdb_cmd("until"),    "u":   gdb_cmd("until"),
-            "up":       gdb_cmd("up"),
-            "down":     gdb_cmd("down"),
+            "continue": gdb_cmd("continue"), "c": gdb_cmd("continue"),
+            "next": gdb_cmd("next"), "n": gdb_cmd("next"),
+            "nexti": gdb_cmd("nexti"),
+            "step": gdb_cmd("step"), "s": gdb_cmd("step"),
+            "stepi": gdb_cmd("stepi"),
+            "finish": gdb_cmd("finish"), "f": gdb_cmd("finish"),
+            "run": gdb_cmd("run"), "r": gdb_cmd("run"),
+            "start": gdb_cmd("start"),
+            "kill": gdb_cmd("kill"), "k": gdb_cmd("kill"),
+            "until": gdb_cmd("until"), "u": gdb_cmd("until"),
+            "up": gdb_cmd("up"),
+            "down": gdb_cmd("down"),
         }
         for name, fn in cmds.items():
             self.cp.register_handler(name, fn)
@@ -1670,7 +1675,7 @@ class TGDBApp(App):
 
         try:
             container = self.query_one("#split-container")
-            splitter  = self.query_one("#splitter", Splitter)
+            splitter = self.query_one("#splitter", Splitter)
             src = self._get_source_view(mounted_only=True)
             gdb = self._get_gdb_widget(mounted_only=True)
             if src is None or gdb is None:
@@ -1682,18 +1687,18 @@ class TGDBApp(App):
                 container.styles.layout = "horizontal"
                 src.styles.display = "none" if src_size <= 0 else "block"
                 gdb.styles.display = "none" if gdb_size <= 0 else "block"
-                src.styles.width  = src_size
+                src.styles.width = src_size
                 src.styles.height = "1fr"
-                gdb.styles.width  = gdb_size
+                gdb.styles.width = gdb_size
                 gdb.styles.height = "1fr"
             else:
                 # Vertical container: source on top, GDB below.
                 container.styles.layout = "vertical"
                 src.styles.display = "none" if src_size <= 0 else "block"
                 gdb.styles.display = "none" if gdb_size <= 0 else "block"
-                src.styles.width  = "1fr"
+                src.styles.width = "1fr"
                 src.styles.height = src_size
-                gdb.styles.width  = "1fr"
+                gdb.styles.width = "1fr"
                 gdb.styles.height = gdb_size
         except NoMatches:
             pass
@@ -1751,13 +1756,13 @@ class TGDBApp(App):
         if src is not None:
             old_tabstop = src.tabstop
             src.executing_line_display = cfg.executinglinedisplay
-            src.selected_line_display  = cfg.selectedlinedisplay
-            src.tabstop    = cfg.tabstop
-            src.hlsearch   = cfg.hlsearch
+            src.selected_line_display = cfg.selectedlinedisplay
+            src.tabstop = cfg.tabstop
+            src.hlsearch = cfg.hlsearch
             src.ignorecase = cfg.ignorecase
-            src.wrapscan   = cfg.wrapscan
-            src.showmarks  = cfg.showmarks
-            src.color      = cfg.color
+            src.wrapscan = cfg.wrapscan
+            src.showmarks = cfg.showmarks
+            src.color = cfg.color
             # If tabstop changed, reload the current file so tabs are re-expanded
             # and the token cache is rebuilt with the new width.
             if cfg.tabstop != old_tabstop and src.source_file and src.source_file.path:
@@ -1766,16 +1771,16 @@ class TGDBApp(App):
                 src.refresh()
         gdb_w = self._get_gdb_widget()
         if gdb_w is not None:
-            gdb_w.ignorecase     = cfg.ignorecase
-            gdb_w.wrapscan       = cfg.wrapscan
+            gdb_w.ignorecase = cfg.ignorecase
+            gdb_w.wrapscan = cfg.wrapscan
             gdb_w.max_scrollback = cfg.scrollbackbuffersize
-            gdb_w.debugwincolor  = cfg.debugwincolor
+            gdb_w.debugwincolor = cfg.debugwincolor
             if gdb_w._screen:
                 gdb_w._screen.use_color = cfg.debugwincolor
             gdb_w.refresh()
-        self.km.timeout_ms       = cfg.timeoutlen
-        self.km.ttimeout_ms      = cfg.ttimeoutlen
-        self.km.timeout_enabled  = cfg.timeout
+        self.km.timeout_ms = cfg.timeoutlen
+        self.km.ttimeout_ms = cfg.ttimeoutlen
+        self.km.timeout_enabled = cfg.timeout
         self.km.ttimeout_enabled = cfg.ttimeout
         if not self._workspace_dynamic and cfg.winsplitorientation != self._last_orientation:
             self._set_window_shift_from_ratio(

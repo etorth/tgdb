@@ -95,40 +95,40 @@ DEFAULT_GROUPS: dict[str, HighlightStyle] = {
     # HLG_COMMENT:   NORMAL, COLOR_YELLOW → yellow (no bold)
     # HLG_DIRECTIVE: BOLD, COLOR_CYAN   → bold bright_cyan
     # HLG_TEXT:      NORMAL, -1         → no style
-    "Statement":            HighlightStyle(fg="bright_blue",   bold=True),
-    "Type":                 HighlightStyle(fg="bright_green",  bold=True),
-    "Constant":             HighlightStyle(fg="bright_red",    bold=True),
-    "Comment":              HighlightStyle(fg="yellow"),
-    "PreProc":              HighlightStyle(fg="bright_cyan",   bold=True),
-    "Normal":               HighlightStyle(),
+    "Statement": HighlightStyle(fg="bright_blue", bold=True),
+    "Type": HighlightStyle(fg="bright_green", bold=True),
+    "Constant": HighlightStyle(fg="bright_red", bold=True),
+    "Comment": HighlightStyle(fg="yellow"),
+    "PreProc": HighlightStyle(fg="bright_cyan", bold=True),
+    "Normal": HighlightStyle(),
     # UI — cgdb: HLG_STATUS_BAR=REVERSE, HLG_SEARCH=black on yellow,
     #           HLG_INCSEARCH=REVERSE
-    "StatusLine":           HighlightStyle(reverse=True),
-    "Search":               HighlightStyle(fg="black",         bg="yellow"),
-    "IncSearch":            HighlightStyle(reverse=True),
+    "StatusLine": HighlightStyle(reverse=True),
+    "Search": HighlightStyle(fg="black", bg="yellow"),
+    "IncSearch": HighlightStyle(reverse=True),
     # Selected line — cgdb: HLG_SELECTED_LINE_ARROW=bold white,
     #   HLG_SELECTED_LINE_HIGHLIGHT=bold black on white,
     #   HLG_SELECTED_LINE_BLOCK=reverse+white fg (bg becomes white when reversed)
-    "SelectedLineArrow":    HighlightStyle(fg="bright_white",  bold=True),
-    "SelectedLineHighlight":HighlightStyle(fg="black",         bg="white",   bold=True),
-    "SelectedLineBlock":    HighlightStyle(fg="white",         reverse=True),
-    "SelectedLineNr":       HighlightStyle(fg="bright_white",  bold=True),
+    "SelectedLineArrow": HighlightStyle(fg="bright_white", bold=True),
+    "SelectedLineHighlight": HighlightStyle(fg="black", bg="white", bold=True),
+    "SelectedLineBlock": HighlightStyle(fg="white", reverse=True),
+    "SelectedLineNr": HighlightStyle(fg="bright_white", bold=True),
     # Executing line — cgdb: HLG_EXECUTING_LINE_ARROW=bold green,
     #   HLG_EXECUTING_LINE_HIGHLIGHT=bold black on green,
     #   HLG_EXECUTING_LINE_BLOCK=reverse+green fg (bg becomes green when reversed)
-    "ExecutingLineArrow":   HighlightStyle(fg="bright_green",  bold=True),
-    "ExecutingLineHighlight":HighlightStyle(fg="black",        bg="green",   bold=True),
-    "ExecutingLineBlock":   HighlightStyle(fg="green",         reverse=True),
-    "ExecutingLineNr":      HighlightStyle(fg="bright_green",  bold=True),
+    "ExecutingLineArrow": HighlightStyle(fg="bright_green", bold=True),
+    "ExecutingLineHighlight": HighlightStyle(fg="black", bg="green", bold=True),
+    "ExecutingLineBlock": HighlightStyle(fg="green", reverse=True),
+    "ExecutingLineNr": HighlightStyle(fg="bright_green", bold=True),
     # Breakpoints — cgdb: both BOLD; enabled=red, disabled=yellow
-    "Breakpoint":           HighlightStyle(fg="bright_red",    bold=True),
-    "DisabledBreakpoint":   HighlightStyle(fg="bright_yellow", bold=True),
+    "Breakpoint": HighlightStyle(fg="bright_red", bold=True),
+    "DisabledBreakpoint": HighlightStyle(fg="bright_yellow", bold=True),
     # Misc — cgdb: Logo=bold blue, Mark=bold white, ScrollModeStatus=bold (no color)
-    "Logo":                 HighlightStyle(fg="bright_blue",   bold=True),
-    "Mark":                 HighlightStyle(fg="bright_white",  bold=True),
-    "ScrollModeStatus":     HighlightStyle(bold=True),
+    "Logo": HighlightStyle(fg="bright_blue", bold=True),
+    "Mark": HighlightStyle(fg="bright_white", bold=True),
+    "ScrollModeStatus": HighlightStyle(bold=True),
     # tgdb-only (cgdb doesn't have a separate LineNumber group)
-    "LineNumber":           HighlightStyle(fg="bright_black"),
+    "LineNumber": HighlightStyle(fg="bright_black"),
 }
 
 
@@ -142,8 +142,8 @@ class HighlightGroups:
 
     # Legacy cgdb aliases — accepted in :highlight command
     _ALIASES: dict[str, str] = {
-        "arrow":          "ExecutingLineArrow",
-        "linehighlight":  "ExecutingLineHighlight",
+        "arrow": "ExecutingLineArrow",
+        "linehighlight": "ExecutingLineHighlight",
     }
 
     def _resolve_name(self, name: str) -> str:

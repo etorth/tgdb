@@ -58,24 +58,24 @@ class Config:
 _ALIASES: dict[str, str] = {
     "asr": "autosourcereload",
     "arrowstyle": "executinglinedisplay",  # deprecated alias (cgdb cgdbrc.cpp)
-    "as":  "executinglinedisplay",         # short form of arrowstyle
+    "as": "executinglinedisplay",         # short form of arrowstyle
     "dwc": "debugwincolor",
     "dis": "disasm",
     "eld": "executinglinedisplay",
     "hls": "hlsearch",
-    "ic":  "ignorecase",
+    "ic": "ignorecase",
     "sbbs": "scrollbackbuffersize",
     "sld": "selectedlinedisplay",
     "sdc": "showdebugcommands",
     "syn": "syntax",
-    "to":  "timeout",
-    "tm":  "timeoutlen",
+    "to": "timeout",
+    "tm": "timeoutlen",
     "ttm": "ttimeoutlen",
-    "ts":  "tabstop",
+    "ts": "tabstop",
     "wmh": "winminheight",
     "wmw": "winminwidth",
     "wso": "winsplitorientation",
-    "ws":  "wrapscan",
+    "ws": "wrapscan",
 }
 
 _BOOL_OPTIONS = {
@@ -297,7 +297,7 @@ class ConfigParser:
             if s[i] == "<":
                 end = s.find(">", i)
                 if end != -1:
-                    token = s[i+1:end].lower()
+                    token = s[i + 1:end].lower()
                     result.append(self._keyname(token))
                     i = end + 1
                     continue

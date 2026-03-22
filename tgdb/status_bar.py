@@ -46,16 +46,16 @@ class StatusBar(Widget):
         self.refresh()
 
     def start_command(self) -> None:
-        self._input_active  = True
+        self._input_active = True
         self._search_active = False
-        self._input_buf     = ""
+        self._input_buf = ""
         self.refresh()
 
     def start_search(self, forward: bool) -> None:
-        self._search_active  = True
+        self._search_active = True
         self._search_forward = forward
-        self._search_buf     = ""
-        self._input_active   = False
+        self._search_buf = ""
+        self._input_active = False
         self.refresh()
 
     def update_search(self, pattern: str) -> None:
@@ -63,9 +63,9 @@ class StatusBar(Widget):
         self.refresh()
 
     def cancel_input(self) -> None:
-        self._input_active  = False
+        self._input_active = False
         self._search_active = False
-        self._message       = ""
+        self._message = ""
         self.refresh()
 
     def feed_key(self, key: str, char: str) -> bool:
@@ -136,6 +136,7 @@ class CommandSubmit(Message):
     def __init__(self, command: str) -> None:
         super().__init__()
         self.command = command
+
 
 class CommandCancel(Message):
     pass

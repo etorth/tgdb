@@ -51,15 +51,15 @@ class FileDialog(Widget):
         self._files: list[str] = []
         self._sel: int = 0          # 0-based selected index into _files
         self._sel_col: int = 0      # horizontal scroll (matches filedlg sel_col)
-        self._search_active: bool  = False
-        self._search_buf: str      = ""
+        self._search_active: bool = False
+        self._search_buf: str = ""
         self._search_forward: bool = True
-        self._search_pattern: str  = ""
-        self._search_origin: int   = 0   # cgdb sel_rline: fixed start while typing
+        self._search_pattern: str = ""
+        self._search_origin: int = 0   # cgdb sel_rline: fixed start while typing
         self.ignorecase: bool = False
-        self.wrapscan:   bool = True
-        self._num_buf:   str  = ""
-        self._await_g:   bool = False
+        self.wrapscan: bool = True
+        self._num_buf: str = ""
+        self._await_g: bool = False
         self._query_pending: bool = False
         self._body_message: Optional[str] = None
         self.can_focus = True
@@ -163,7 +163,7 @@ class FileDialog(Widget):
 
     def _scroll_start(self) -> int:
         """First file index to show (centres selected line, cgdb style)."""
-        count  = len(self._files)
+        count = len(self._files)
         height = self._list_height()
         if count == 0:
             return 0
@@ -230,16 +230,16 @@ class FileDialog(Widget):
     # ------------------------------------------------------------------
 
     def render(self) -> Text:
-        w      = self._w()
-        h      = self._h()
-        lh     = self._list_height()
+        w = self._w()
+        h = self._h()
+        lh = self._list_height()
         lwidth = self._lwidth()
-        count  = len(self._files)
+        count = len(self._files)
         result = Text(no_wrap=True, overflow="crop")
 
         # ── Row 0: centred label (cgdb print_in_middle) ──
-        label  = self._LABEL
-        pad    = max(0, (w - len(label)) // 2)
+        label = self._LABEL
+        pad = max(0, (w - len(label)) // 2)
         result.append(" " * pad + label, style=self.hl.style("StatusLine"))
         result.append(" " * max(0, w - pad - len(label)),
                       style=self.hl.style("StatusLine"))
@@ -278,8 +278,8 @@ class FileDialog(Widget):
             if file_idx < 0 or file_idx >= count:
                 # Filler: "   ~│" (cgdb draws spaces then '~' then VLINE)
                 result.append(" " * lwidth, style=self.hl.style("LineNumber"))
-                result.append("~",          style=self.hl.style("LineNumber"))
-                result.append("│",          style="bold")
+                result.append("~", style=self.hl.style("LineNumber"))
+                result.append("│", style="bold")
                 continue
 
             filename = self._files[file_idx]
@@ -289,15 +289,15 @@ class FileDialog(Widget):
             if file_idx == self._sel:
                 # Selected line: bold number + "→" arrow (cgdb uses '->')
                 result.append(f"{file_idx + 1:{lwidth}d}",
-                               style="bold " + self.hl.style("SelectedLineNr"))
+                              style="bold " + self.hl.style("SelectedLineNr"))
                 result.append("->",
-                               style="bold " + self.hl.style("SelectedLineArrow"))
+                              style="bold " + self.hl.style("SelectedLineArrow"))
                 result.append(display_name,
-                               style=self.hl.style("SelectedLineHighlight"))
+                              style=self.hl.style("SelectedLineHighlight"))
             else:
                 # Normal line: number + bold "│" + space + filename
                 result.append(f"{file_idx + 1:{lwidth}d}",
-                               style=self.hl.style("LineNumber"))
+                              style=self.hl.style("LineNumber"))
                 result.append("│", style="bold")
                 result.append(" " + display_name)
 
@@ -319,7 +319,7 @@ class FileDialog(Widget):
     # ------------------------------------------------------------------
 
     def on_key(self, event: events.Key) -> None:
-        key  = event.key
+        key = event.key
         char = event.character or ""
 
         if self._query_pending:
@@ -337,8 +337,11 @@ class FileDialog(Widget):
         if self._await_g:
             self._await_g = False
             if char == "g":
-                self._sel = 0; self._num_buf = ""; self.refresh()
-                event.stop(); return
+                self._sel = 0
+                self._num_buf = ""
+                self.refresh()
+                event.stop()
+                return
             self._num_buf = ""
 
         if char.isdigit() and char != "0":
@@ -374,16 +377,16 @@ class FileDialog(Widget):
         elif char == "g":
             self._await_g = True
         elif key == "slash":
-            self._search_active  = True
+            self._search_active = True
             self._search_forward = True
-            self._search_buf     = ""
-            self._search_origin  = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
+            self._search_buf = ""
+            self._search_origin = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
             self.refresh()
         elif key == "question_mark":
-            self._search_active  = True
+            self._search_active = True
             self._search_forward = False
-            self._search_buf     = ""
-            self._search_origin  = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
+            self._search_buf = ""
+            self._search_origin = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
             self.refresh()
         elif char == "n":
             self._search(self._search_pattern, self._search_forward)
@@ -402,10 +405,10 @@ class FileDialog(Widget):
             self.refresh()
         elif key in ("enter", "return"):
             # Confirm: update origin to current match (cgdb: sel_rline = sel_line, opt==2)
-            self._search_active  = False
+            self._search_active = False
             self._search_pattern = self._search_buf
             self._search(self._search_pattern, self._search_forward, origin=self._search_origin)
-            self._search_origin  = self._sel   # update for subsequent n/N
+            self._search_origin = self._sel   # update for subsequent n/N
         elif key in ("backspace", "ctrl+h"):
             self._search_buf = self._search_buf[:-1]
             # Re-search from origin so shorter pattern finds first match again
@@ -426,6 +429,7 @@ class FileSelected(Message):
     def __init__(self, path: str) -> None:
         super().__init__()
         self.path = path
+
 
 class FileDialogClosed(Message):
     pass
