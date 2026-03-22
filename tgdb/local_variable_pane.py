@@ -8,7 +8,7 @@ from textual.widget import Widget
 
 from .gdb_controller import LocalVariable
 from .highlight_groups import HighlightGroups
-from .pane_utils import fit_cells
+from .pane_utils import center_cells, fit_cells
 
 
 class LocalVariablePane(Widget):
@@ -45,7 +45,7 @@ class LocalVariablePane(Widget):
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
 
-        header = fit_cells("Local Variables", width)
+        header = center_cells("Local Variables", width)
         result.append(header, style=self.hl.style("StatusLine"))
 
         visible_rows = max(0, height - 1)
