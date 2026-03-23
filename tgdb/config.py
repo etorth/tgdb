@@ -173,18 +173,47 @@ class ConfigParser:
     def load_file(self, path: str) -> Optional[str]:
         """Load and execute every non-blank, non-comment line in *path*.
 
+        Supports heredoc blocks (``python << MARKER`` … ``MARKER``) so that
+        multi-line Python function definitions work just like typing them
+        manually in the status bar.
+
         Returns an error string if the file cannot be opened, None on success.
-        Errors from individual lines are silently ignored (same as startup behaviour).
+        Errors from individual lines are silently ignored (same as startup
+        behaviour).
         """
         try:
             with open(path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    self.execute(line)
+                raw_lines = f.readlines()
         except OSError as e:
             return f"source: cannot open '{path}': {e}"
+
+        i = 0
+        while i < len(raw_lines):
+            line = raw_lines[i].rstrip("\n")
+            stripped = line.strip()
+            i += 1
+
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            # Detect heredoc: [:]python << MARKER
+            check = stripped.lstrip(":")
+            m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', check, re.IGNORECASE)
+            if m:
+                cmd_name = m.group(1).lower()
+                marker = m.group(2)
+                code_lines: list[str] = []
+                while i < len(raw_lines):
+                    code_line = raw_lines[i].rstrip("\n")
+                    i += 1
+                    if code_line.strip() == marker:
+                        break
+                    code_lines.append(code_line)
+                self.execute(f"{cmd_name}\n" + "\n".join(code_lines))
+                continue
+
+            self.execute(stripped)
+
         return None
 
     # ------------------------------------------------------------------
@@ -220,6 +249,18 @@ class ConfigParser:
         if _cmd_m:
             return self._cmd_command(_cmd_m.group(1))
 
+        # :map / :imap need raw handling so spaces in the RHS are preserved.
+        _map_m = re.match(r'^(imap|im|map)\b\s*(\S+)\s*(.*)', line, re.DOTALL | re.IGNORECASE)
+        if _map_m:
+            _mcmd = _map_m.group(1).lower()
+            _mode = "gdb" if _mcmd in ("imap", "im") else "cgdb"
+            _lhs = self._decode_keyseq_tokens(_map_m.group(2))
+            _rhs = self._decode_keyseq_tokens(_map_m.group(3))
+            if not _lhs:
+                return "map: empty lhs"
+            self.km.map(_mode, _lhs, _rhs)
+            return None
+
         try:
             parts = shlex.split(line)
         except ValueError:
@@ -240,10 +281,6 @@ class ConfigParser:
             return self._cmd_set(args)
         elif cmd in ("highlight", "hi"):
             return self._cmd_highlight(args)
-        elif cmd in ("map",):
-            return self._cmd_map("cgdb", args)
-        elif cmd in ("imap", "im"):
-            return self._cmd_map("gdb", args)
         elif cmd in ("unmap", "unm"):
             return self._cmd_unmap("cgdb", args)
         elif cmd in ("iunmap", "iu"):
@@ -578,71 +615,90 @@ class ConfigParser:
     # :map / :imap
     # ------------------------------------------------------------------
 
-    def _cmd_map(self, mode: str, args: list[str]) -> Optional[str]:
-        if len(args) < 2:
-            return "map: requires lhs and rhs"
-        lhs = self._decode_keyseq(args[0])
-        rhs = self._decode_keyseq(args[1])
-        self.km.map(mode, lhs, rhs)
-        return None
+    # ------------------------------------------------------------------
+    # :unmap / :iunmap
+    # ------------------------------------------------------------------
 
     def _cmd_unmap(self, mode: str, args: list[str]) -> Optional[str]:
         if not args:
             return "unmap: requires lhs"
-        lhs = self._decode_keyseq(args[0])
-        self.km.unmap(mode, lhs)
+        lhs = self._decode_keyseq_tokens(args[0])
+        if not lhs:
+            return "unmap: empty lhs"
+        found = self.km.unmap(mode, lhs)
+        if not found:
+            return f"unmap: no such mapping"
         return None
 
-    def _decode_keyseq(self, s: str) -> str:
+    # ------------------------------------------------------------------
+    # Key sequence decoding — cgdb notation → Textual key-name token list
+    # ------------------------------------------------------------------
+
+    # Maps lower-cased cgdb <Name> identifiers to Textual event.key strings
+    _KEY_TOKENS: dict[str, str] = {
+        "space": "space",
+        "enter": "enter", "return": "enter", "cr": "enter",
+        "nl": "ctrl+j",
+        "tab": "tab",
+        "esc": "escape", "escape": "escape",
+        "bs": "backspace", "backspace": "backspace",
+        "del": "delete", "delete": "delete",
+        "insert": "insert",
+        "nul": "ctrl+@",
+        "lt": "<",
+        "bslash": "\\",
+        "bar": "|",
+        "up": "up", "down": "down", "left": "left", "right": "right",
+        "pageup": "pageup", "pagedown": "pagedown",
+        "home": "home", "end": "end",
+        "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4",
+        "f5": "f5", "f6": "f6", "f7": "f7", "f8": "f8",
+        "f9": "f9", "f10": "f10", "f11": "f11", "f12": "f12",
+    }
+
+    def _decode_keyseq_tokens(self, s: str) -> list[str]:
         """
-        Decode cgdb key notation: <F5>, <C-w>, <Space>, <Enter>, etc.
-        Returns a single string of "logical" key characters.
+        Decode a cgdb key-notation string into a list of Textual key-name
+        tokens.  Examples::
+
+            "<Esc>"        → ["escape"]
+            "<C-w>"        → ["ctrl+w"]
+            "<Space>:"     → ["space", ":"]
+            "ab"           → ["a", "b"]
+            "<CR>"         → ["enter"]
+            "<F5>"         → ["f5"]
         """
-        result = []
+        tokens: list[str] = []
         i = 0
         while i < len(s):
             if s[i] == "<":
                 end = s.find(">", i)
                 if end != -1:
-                    token = s[i + 1:end].lower()
-                    result.append(self._keyname(token))
+                    name = s[i + 1:end].lower()
+                    tokens.append(self._key_token(name))
                     i = end + 1
                     continue
-            result.append(s[i])
+            ch = s[i]
+            if ch == " ":
+                tokens.append("space")
+            else:
+                tokens.append(ch)
             i += 1
-        return "".join(result)
+        return tokens
 
-    _KEY_NAMES = {
-        "space": " ", "enter": "\r", "return": "\r", "cr": "\r",
-        "nl": "\n", "tab": "\t", "esc": "\x1b", "escape": "\x1b",
-        "bs": "\x08", "backspace": "\x08",
-        "del": "\x7f", "delete": "\x7f",
-        "insert": "\x1b[2~",
-        "nul": "\x00",
-        "ff": "\x0c",           # formfeed
-        "lt": "<",              # less-than
-        "bslash": "\\",         # backslash
-        "bar": "|",             # vertical bar
-        "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
-        "pageup": "\x1b[5~", "pagedown": "\x1b[6~",
-        "home": "\x1b[H", "end": "\x1b[F",
-        "f1": "\x1bOP", "f2": "\x1bOQ", "f3": "\x1bOR", "f4": "\x1bOS",
-        "f5": "\x1b[15~", "f6": "\x1b[17~", "f7": "\x1b[18~",
-        "f8": "\x1b[19~", "f9": "\x1b[20~", "f10": "\x1b[21~",
-        "f11": "\x1b[23~", "f12": "\x1b[24~",
-    }
+    def _key_token(self, name: str) -> str:
+        """Map a lower-cased key name (the part between < >) to a Textual key name."""
+        if name in self._KEY_TOKENS:
+            return self._KEY_TOKENS[name]
+        # <C-x> → ctrl+x
+        if name.startswith("c-") and len(name) == 3:
+            return f"ctrl+{name[2].lower()}"
+        # <S-x> → uppercase char (shift)
+        if name.startswith("s-") and len(name) == 3:
+            return name[2].upper()
+        # <M-x> / <A-x> → meta: treat as Alt sequence; Textual rarely uses these natively
+        if (name.startswith("m-") or name.startswith("a-")) and len(name) == 3:
+            return f"escape+{name[2]}"
+        # Unknown <Name> — return verbatim
+        return f"<{name}>"
 
-    def _keyname(self, token: str) -> str:
-        if token in self._KEY_NAMES:
-            return self._KEY_NAMES[token]
-        # C-x → Ctrl char (e.g. <C-a> → 0x01)
-        if token.startswith("c-") and len(token) == 3:
-            ch = token[2]
-            return chr(ord(ch.upper()) - 64)
-        # S-x → shifted char (e.g. <S-a> → 'A')  cgdb: shift keys
-        if token.startswith("s-") and len(token) == 3:
-            return token[2].upper()
-        # M-x → Alt (ESC + char)
-        if token.startswith("m-") and len(token) == 3:
-            return "\x1b" + token[2]
-        return token
