@@ -1,0 +1,175 @@
+It is possible to define your own commands.  A user-defined command can act just like a built-in command (it can have a range or arguments, arguments can be completed as filenames or buffer names, etc), except that when the command is executed, it is transformed into a normal Ex command and then executed.
+
+All user defined commands must start with an uppercase letter, to avoid confusion with builtin commands.
+
+The other characters of the user command can be uppercase letters, lowercase letters or digits.
+
+When using a user-defined command, the command can be abbreviated.  However, if an abbreviation is not unique, an error will be issued.  Furthermore, a built-in command will always take precedence.
+
+Example: >
+	:command Rename ...
+	:command Renumber ...
+	:Rena				" Means "Rename"
+	:Renu				" Means "Renumber"
+	:Ren				" Error - ambiguous
+	:command Paste ...
+
+It is recommended that full names for user-defined commands are used in scripts.
+
+:command                If ":command" is used without any argument, it list all User-defined commands
+
+
+:command {cmd}	        List the user-defined commands that start with {cmd}
+
+:command [{attr}...] {cmd} {repl}
+			Define a user command.  The name of the command is
+			{cmd} and its replacement text is {repl}.  The
+			command's attributes (see below) are {attr}.  If the
+			command already exists, an error is reported,
+
+Command attributes
+
+User-defined commands are treated by just like any other tgdb commands.  They can have arguments, Arguments are subject to completion as filenames, Exactly how this works depends upon the
+command's attributes, which are specified when the command is defined.
+
+There are a number of attributes, split into 3 categories: argument handling, completion behavior,  and special cases.  The attributes are described below, by category.
+
+
+Argument handling
+
+By default, a user defined command will take no arguments (and an error is reported if any are supplied).  However, it is possible to specify that the command can take arguments, using the -nargs attribute.  Valid cases are:
+
+	-nargs=0    No arguments are allowed (the default)
+	-nargs=1    Exactly one argument is required, it includes spaces
+	-nargs=*    Any number of arguments are allowed (0, 1, or many), separated by white space
+	-nargs=?    0 or 1 arguments are allowed
+	-nargs=+    Arguments must be supplied, but any number are allowed
+
+Arguments are considered to be separated by (unescaped) spaces or tabs in this context, except when there is one argument, then the white space is part of the argument.
+Note that arguments are used as text
+
+Completion behavior
+
+By default, the arguments of user defined commands do not undergo completion. However, argument completion can be enabled:
+
+    -complete={func}
+
+If you specify completion while there is nothing to complete (-nargs=0, the default) then you get error
+Here {func} is a python function defined by user, the {func} part should be a function with the following signature:
+
+	def {func}(ArgLead: str, CmdLine: str, CursorPos: int):
+
+The function need not use all these arguments. The function should provide the completion candidates as the return value, the function should return the completion candidates as a list of strings.
+The function arguments are:
+	ArgLead		the leading portion of the argument currently being completed on
+	CmdLine		the entire command line
+	CursorPos	the cursor position in it (character index)
+
+The function may use these for determining context.
+
+The following example lists user names to a Finger command >
+    :com -complete=ListUsers -nargs=1 Finger python print(<args>)
+
+the python definition:
+
+    def ListUsers(A,L,P):
+        return system("cut -d: -f1 /etc/passwd")
+
+The following example completes filenames from the directories specified in the 'path' option:
+    :com -nargs=1 -bang -complete=EditPyFileComplete EditPyFile python print(<args>)
+
+the python definition:
+
+    def EditFileComplete(A,L,P):
+        import glob
+        return glob.glob(f"{A}/*.py", recursive=True)
+
+Replacement text
+
+The replacement text {repl} for a user defined command is scanned for special
+escape sequences, using <...> notation.  Escape sequences are replaced with
+values from the entered command line, and all other text is copied unchanged.
+The resulting string is executed as an command.  To avoid the replacement
+use <lt> in place of the initial <.  Thus to include "<abc>" literally use "<lt>bang>".
+
+<args>
+The command arguments, exactly as supplied
+
+<lt>
+A single '<' (Less-Than) character.  This is needed if you want to get a literal copy of one of these escape sequences into the expansion - for example, to get <bang>, use <lt>bang>.
+
+<q-args>
+the value is quoted in such a way as to make it a valid value for use in an expression. This uses the argument as one single value. When there is no argument <q-args> is an empty string.
+See the |q-args-example| below.
+
+<f-args>
+To allow commands to pass their arguments on to a user-defined function, there is a special form <f-args> ("function args").
+This splits the command arguments at spaces and tabs, quotes each argument individually, and the <f-args> sequence is replaced by the comma-separated list of quoted arguments.
+
+See the Mycmd example below. If no arguments are given <f-args> is removed. To embed whitespace into an argument of <f-args>, prepend a backslash.
+<f-args> replaces every pair of backslashes (\\) with one backslash.
+A backslash followed by a character other than white space or a backslash remains unmodified.
+Also see |f-args-example| below.  Overview:
+
+	command		   <f-args>
+	XX ab		   "ab"
+	XX a\b		   'a\b'
+	XX a\ b		   'a b'
+	XX a\  b	   'a ', 'b'
+	XX a\\b		   'a\b'
+	XX a\\ b	   'a\', 'b'
+	XX a\\\b	   'a\\b'
+	XX a\\\ b	   'a\ b'
+	XX a\\\\b	   'a\\b'
+	XX a\\\\ b	   'a\\', 'b'
+	XX		   [nothing]
+
+
+Note that if the "no arguments" situation is to be handled, you have to make sure that the function can be called without arguments.
+
+Examples for user commands:
+
+   " Delete everything after here to the end
+   :com Ddel +,$d
+
+   " Rename the current buffer
+   :com -nargs=1 -bang -complete=file Ren f <args>|w<bang>
+
+   " Replace a range with the contents of a file
+   " (Enter this all as one line)
+   :com -range -nargs=1 -complete=file
+	 Replace <line1>-pu_|<line1>,<line2>d|r <args>|<line1>d
+
+   " Count the number of lines in the range
+   :com! -range -nargs=0 Lines  echo <line2> - <line1> + 1 "lines"
+
+<						*f-args-example*
+Call a user function (example of <f-args>) >
+   :com -nargs=* Mycmd call Myfunc(<f-args>)
+
+When executed as: >
+	:Mycmd arg1 arg2
+This will invoke: >
+	:call Myfunc("arg1","arg2")
+
+<						*q-args-example*
+A more substantial example: >
+   :function Allargs(command)
+   :   let i = 0
+   :   while i < argc()
+   :	  if filereadable(argv(i))
+   :	     execute "e " .. argv(i)
+   :	     execute a:command
+   :      endif
+   :      let i = i + 1
+   :   endwhile
+   :endfunction
+   :command -nargs=+ -complete=command Allargs call Allargs(<q-args>)
+
+The command Allargs takes any Vim command(s) as argument and executes it on all
+files in the argument list.  Usage example (note use of the "e" flag to ignore
+errors and the "update" command to write modified buffers): >
+	:Allargs %s/foo/bar/ge|update
+This will invoke: >
+	:call Allargs("%s/foo/bar/ge|update")
+<
