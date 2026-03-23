@@ -131,6 +131,7 @@ class TGDBApp(App):
         self.cp = ConfigParser(self.cfg, self.hl, self.km)
         self._initial_source_pending = bool(gdb_args)
         self._register_commands()
+        self.cp.set_py_globals({"app": self})
         if rc_file:
             self.cp.load_file(rc_file)
         else:

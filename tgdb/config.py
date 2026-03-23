@@ -6,9 +6,13 @@ Supports all :set options, :highlight, :map, :imap, :unmap, :iunmap.
 """
 from __future__ import annotations
 
+import builtins
+import contextlib
+import io
 import os
 import re
 import shlex
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
@@ -109,11 +113,26 @@ class ConfigParser:
         self.km = key_mapper
         # Additional command handlers registered by the app
         self._handlers: dict[str, Callable[[list[str]], Optional[str]]] = {}
+        # Persistent namespace shared across all :python / :pyfile calls
+        self._py_namespace: dict = {
+            "__builtins__": builtins,
+            "config": self.config,
+            "hl": self.hl,
+            "km": self.km,
+        }
 
     def register_handler(self, name: str,
                          fn: Callable[[list[str]], Optional[str]]) -> None:
         """Register an extra command handler (e.g., GDB debug commands)."""
         self._handlers[name] = fn
+
+    def set_py_globals(self, d: dict) -> None:
+        """Merge *d* into the persistent Python namespace used by :python/:pyfile.
+
+        Call this after constructing ConfigParser to inject live objects (e.g.
+        the TGDBApp instance as ``app``) that scripts can reference.
+        """
+        self._py_namespace.update(d)
 
     # ------------------------------------------------------------------
     # File loading
@@ -166,6 +185,16 @@ class ConfigParser:
         if not line:
             return None
 
+        # :python / :py and :pyfile / :pyf take a raw (un-tokenised) argument,
+        # so handle them before shlex to preserve spaces inside code strings.
+        _raw = re.match(r'^(python|pyfile|pyf|py)\s*(.*)', line, re.DOTALL | re.IGNORECASE)
+        if _raw:
+            _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
+            if _cmd in ("python", "py"):
+                return self._cmd_python(_raw_arg)
+            else:
+                return self._cmd_pyfile(_raw_arg.strip())
+
         try:
             parts = shlex.split(line)
         except ValueError:
@@ -204,6 +233,38 @@ class ConfigParser:
                 return "source: missing filename"
             return self.load_file(os.path.expanduser(args[0]))
         return f"Unknown command: {cmd}"
+
+    # ------------------------------------------------------------------
+    # :python / :pyfile
+    # ------------------------------------------------------------------
+
+    def _exec_py(self, code: str, source_label: str) -> Optional[str]:
+        """Execute *code* in the persistent namespace; return captured output or error."""
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                exec(compile(code, source_label, "exec"), self._py_namespace)  # noqa: S102
+        except Exception:
+            return traceback.format_exc().strip()
+        output = buf.getvalue()
+        return output.rstrip("\n") or None
+
+    def _cmd_python(self, code: str) -> Optional[str]:
+        """Execute a Python code string in the persistent tgdb namespace."""
+        if not code.strip():
+            return None
+        return self._exec_py(code, "<tgdb:python>")
+
+    def _cmd_pyfile(self, path: str) -> Optional[str]:
+        """Execute a Python file in the persistent tgdb namespace."""
+        if not path:
+            return "pyfile: missing filename"
+        path = os.path.expanduser(path)
+        try:
+            code = Path(path).read_text(encoding="utf-8")
+        except OSError as e:
+            return f"pyfile: cannot open '{path}': {e}"
+        return self._exec_py(code, path)
 
     # ------------------------------------------------------------------
     # :set
