@@ -169,6 +169,7 @@ class TGDBApp(App):
         self._current_threads: list[ThreadInfo] = []
         self._register_pane: Optional[RegisterPane] = None
         self._current_registers: list[RegisterInfo] = []
+        self._in_map_replay: bool = False
         self._pane_descriptors: dict[str, PaneDescriptor] = {
             "source": PaneDescriptor("Source", self._make_source_pane, lambda: self._source_view),
             "gdb": PaneDescriptor("GDB", self._make_gdb_pane, lambda: self._gdb_widget),
@@ -689,6 +690,18 @@ class TGDBApp(App):
         if self._mode != "CGDB":
             return False
 
+        # Consult the CGDB-mode key mapper (unless we're already replaying a map)
+        if not self._in_map_replay:
+            result = self.km.feed("cgdb", key)
+            if result is None or result == []:
+                # Buffering — key consumed but no action yet
+                return True
+            if result != [key]:
+                # The map fired — replay the expansion
+                self._replay_key_sequence(result)
+                return True
+            # result == [key]: no map matched, fall through to normal handling
+
         src = self._get_source_view(mounted_only=True)
 
         if src is not None and src.handle_cgdb_key(key, char):
@@ -705,6 +718,72 @@ class TGDBApp(App):
             return True
 
         return False
+
+    def _replay_key_sequence(self, tokens: list[str]) -> None:
+        """Dispatch a list of key-name tokens as if the user typed them."""
+        self._in_map_replay = True
+        try:
+            for token in tokens:
+                self._dispatch_key_internal(token)
+        finally:
+            self._in_map_replay = False
+
+    def _dispatch_key_internal(self, key: str) -> None:
+        """
+        Route a single key-name token through the mode-aware dispatch stack.
+        Used when replaying a key map expansion.
+        """
+        # Derive character: a single printable char is its own character
+        if len(key) == 1 and key.isprintable():
+            char = key
+        elif key == "space":
+            char = " "
+            key = "space"
+        else:
+            char = ""
+
+        # ESC / cgdb-mode key → switch to CGDB
+        cgdb_key = self.cfg.cgdbmodekey.lower()
+        if key == "escape" or key.lower() == cgdb_key:
+            if self._mode in ("GDB", "STATUS", "SCROLL", "MESSAGE"):
+                self._switch_to_cgdb()
+            return
+
+        if self._mode == "MESSAGE":
+            try:
+                status = self.query_one("#status", StatusBar)
+                if not status.feed_key(key, char):
+                    status.dismiss_message()
+                    self._switch_to_cgdb()
+            except NoMatches:
+                pass
+            return
+
+        if self._mode == "STATUS":
+            try:
+                self.query_one("#status", StatusBar).feed_key(key, char)
+            except NoMatches:
+                pass
+            return
+
+        if self._mode == "CGDB":
+            src = self._get_source_view(mounted_only=True)
+            if src is not None and src.handle_cgdb_key(key, char):
+                return
+            if key == "i":
+                self._switch_to_gdb()
+                return
+            if key == "s":
+                self._switch_to_gdb()
+                gdb_w = self._get_gdb_widget(mounted_only=True)
+                if gdb_w is not None:
+                    gdb_w.enter_scroll_mode()
+                return
+
+        # GDB mode — send char to the terminal
+        if self._mode == "GDB" and char:
+            self.gdb.write(char.encode())
+
 
     def _handle_non_gdb_focus_key(self, key: str, char: str) -> bool:
         """Absorb keys that arrive at GDB during focus handoff to CGDB/STATUS."""
