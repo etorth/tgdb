@@ -131,7 +131,12 @@ class ConfigParser:
                 self.load_file(str(path))
                 return
 
-    def load_file(self, path: str) -> None:
+    def load_file(self, path: str) -> Optional[str]:
+        """Load and execute every non-blank, non-comment line in *path*.
+
+        Returns an error string if the file cannot be opened, None on success.
+        Errors from individual lines are silently ignored (same as startup behaviour).
+        """
         try:
             with open(path) as f:
                 for line in f:
@@ -139,8 +144,9 @@ class ConfigParser:
                     if not line or line.startswith("#"):
                         continue
                     self.execute(line)
-        except OSError:
-            pass
+        except OSError as e:
+            return f"source: cannot open '{path}': {e}"
+        return None
 
     # ------------------------------------------------------------------
     # Command execution
@@ -193,6 +199,10 @@ class ConfigParser:
         elif cmd == "syntax":
             if args:
                 return self._set_option("syntax", args[0])
+        elif cmd in ("source", "so"):
+            if not args:
+                return "source: missing filename"
+            return self.load_file(os.path.expanduser(args[0]))
         return f"Unknown command: {cmd}"
 
     # ------------------------------------------------------------------
