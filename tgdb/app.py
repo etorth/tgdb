@@ -319,11 +319,25 @@ class TGDBApp(App):
             return
         self._focus_widget(self._first_workspace_leaf())
 
-    def _show_status(self, msg: str) -> None:
+    def _show_status(self, msg: str) -> bool:
+        """Show *msg* in the status bar.
+
+        If the message spans multiple lines the bar expands and the app enters
+        MESSAGE mode (waiting for user to dismiss).  Returns True in that case
+        so the caller knows not to switch focus away.
+        """
         try:
-            self.query_one("#status", StatusBar).show_message(msg)
+            status = self.query_one("#status", StatusBar)
+            if "\n" in msg:
+                status.show_multiline_message(msg)
+                self._set_mode("MESSAGE")
+                status.focus()
+                return True
+            else:
+                status.show_message(msg)
+                return False
         except NoMatches:
-            pass
+            return False
 
     @staticmethod
     def _widget_attached(widget: Optional[Widget]) -> bool:
@@ -704,6 +718,16 @@ class TGDBApp(App):
                 pass
             return True
 
+        if self._mode == "MESSAGE":
+            try:
+                status = self.query_one("#status", StatusBar)
+                if not status.feed_key(key, char):
+                    status.dismiss_message()
+                    self._switch_to_cgdb()
+            except NoMatches:
+                pass
+            return True
+
         if self._mode == "CGDB":
             self._handle_cgdb_mode_key(key, char)
             return True
@@ -729,13 +753,26 @@ class TGDBApp(App):
             event.stop()
             return
 
-        # ESC / cgdb mode key → switch to CGDB from GDB/STATUS/SCROLL
+        # ESC / cgdb mode key → switch to CGDB from GDB/STATUS/SCROLL/MESSAGE
         cgdb_key = self.cfg.cgdbmodekey.lower()
         if key == "escape" or key.lower() == cgdb_key:
             if self._mode in ("GDB", "STATUS", "SCROLL"):
                 self._switch_to_cgdb()
                 event.stop()
                 return
+
+        if self._mode == "MESSAGE":
+            try:
+                status = self.query_one("#status", StatusBar)
+                consumed = status.feed_key(key, char)
+                event.stop()
+                if not consumed:
+                    # Any key not handled by the bar (i.e. not Enter/ESC) dismisses
+                    status.dismiss_message()
+                    self._switch_to_cgdb()
+            except NoMatches:
+                pass
+            return
 
         if self._mode == "STATUS":
             status = self.query_one("#status", StatusBar)
@@ -1019,9 +1056,10 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
-        err = self.cp.execute(msg.command)
-        if err:
-            self._show_status(err)
+        result = self.cp.execute(msg.command)
+        if result:
+            if self._show_status(result):
+                return      # MESSAGE mode: stay until user dismisses
         else:
             self._sync_config()
         self._switch_to_cgdb()
