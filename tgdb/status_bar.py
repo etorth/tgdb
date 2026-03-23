@@ -42,7 +42,7 @@ class StatusBar(Widget):
     }
     """
 
-    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, completion_provider=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
         self._mode: str = "GDB"
@@ -65,6 +65,12 @@ class StatusBar(Widget):
         self._msg_scroll: int = 0       # index of first visible line
         self._msg_visible_rows: int = 0 # how many content rows are shown
 
+        # ── Tab completion state ──────────────────────────────────────
+        self._completion_provider = completion_provider  # Callable or None
+        self._completions: list[str] = []
+        self._completion_idx: int = 0
+        self._completion_arg_start: int = 0
+
     # ------------------------------------------------------------------
     # Height management
     # ------------------------------------------------------------------
@@ -84,7 +90,8 @@ class StatusBar(Widget):
         """Show a single-line status message (collapses any multiline display)."""
         self._message = msg
         self._msg_lines = []
-        self._msg_has_more = False
+        self._msg_scroll = 0
+        self._msg_visible_rows = 0
         self._set_height(1)
         self.refresh()
 
@@ -154,6 +161,10 @@ class StatusBar(Widget):
     # Key dispatch
     # ------------------------------------------------------------------
 
+    def set_completion_provider(self, provider) -> None:
+        """Set callable for Tab completion: (arg_lead, cmd_line, cursor_pos) -> list[str]."""
+        self._completion_provider = provider
+
     def feed_key(self, key: str, char: str) -> bool:
         """Handle one keystroke.  Returns True if the key was consumed."""
 
@@ -210,6 +221,15 @@ class StatusBar(Widget):
         # ── Normal single-line command input ──────────────────────────
         if not self._input_active:
             return False
+
+        if key == "tab":
+            self._handle_tab()
+            return True
+
+        # Any non-Tab key clears the active completion cycle
+        if self._completions:
+            self._completions = []
+            self._completion_idx = 0
 
         if key == "escape":
             self._input_active = False
@@ -275,6 +295,47 @@ class StatusBar(Widget):
         if self._msg_scroll > 0:
             self._msg_scroll -= 1
             self.refresh()
+
+    def _handle_tab(self) -> None:
+        if self._completions:
+            self._completion_idx = (self._completion_idx + 1) % len(self._completions)
+            self._apply_completion()
+        else:
+            self._trigger_completion()
+
+    def _trigger_completion(self) -> None:
+        if not self._completion_provider:
+            return
+        buf = self._input_buf
+        stripped = buf.rstrip()
+        if len(stripped) < len(buf):
+            arg_lead = ""
+            arg_lead_start = len(buf)
+        else:
+            last_space = buf.rfind(" ")
+            if last_space == -1:
+                arg_lead = buf
+                arg_lead_start = 0
+            else:
+                arg_lead = buf[last_space + 1:]
+                arg_lead_start = last_space + 1
+        try:
+            candidates = self._completion_provider(arg_lead, buf, len(buf))
+        except Exception:
+            return
+        if not candidates:
+            return
+        self._completions = candidates
+        self._completion_idx = 0
+        self._completion_arg_start = arg_lead_start
+        self._apply_completion()
+
+    def _apply_completion(self) -> None:
+        if not self._completions:
+            return
+        cand = self._completions[self._completion_idx]
+        self._input_buf = self._input_buf[:self._completion_arg_start] + cand
+        self.refresh()
 
     # ------------------------------------------------------------------
     # Rendering

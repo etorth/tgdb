@@ -224,7 +224,7 @@ class TGDBApp(App):
                 yield self._source_view
                 yield Splitter(self.hl, id="splitter")
                 yield self._gdb_widget
-            yield StatusBar(self.hl, id="status")
+            yield StatusBar(self.hl, completion_provider=self.cp.get_completions, id="status")
         yield FileDialog(self.hl, id="file-dlg")
         yield ContextMenu(self.hl, id="context-menu")
 
