@@ -92,7 +92,10 @@ ul.no-bullet {list-style: none}
     <li><a name="toc-Commands-available-during-GDB-mode" href="#GDB-Mode">3.2 Commands available during GDB mode</a></li>
     <li><a name="toc-Commands-available-during-the-file-dialog-mode" href="#File-Dialog-Mode">3.3 Commands available during the file dialog mode</a></li>
   </ul></li>
-  <li><a name="toc-TGDB-configuration-commands" href="#Configuring-TGDB">4 TGDB configuration commands</a></li>
+  <li><a name="toc-TGDB-configuration-commands" href="#Configuring-TGDB">4 TGDB configuration commands</a>
+  <ul class="no-bullet">
+    <li><a name="toc-User-Defined-Commands" href="#User-Defined-Commands">4.1 User-Defined Commands</a></li>
+  </ul></li>
   <li><a name="toc-TGDB-highlighting-groups" href="#Highlighting-Groups">5 TGDB highlighting groups</a>
   <ul class="no-bullet">
     <li><a name="toc-The-different-highlighting-groups" href="#Available-Highlighting-Groups">5.1 The different highlighting groups</a></li>
@@ -1209,6 +1212,201 @@ the user typed <code>:imap a&lt;Space&gt;b foo</code> then the user could delete
 existing mapping with <code>:iunmap a&lt;Space&gt;b</code>.
 </p></dd>
 </dl>
+
+<hr>
+<a name="User-Defined-Commands"></a>
+<div class="header">
+<p>
+Next: <a href="#Highlighting-Groups" accesskey="n" rel="next">Highlighting Groups</a>, Previous: <a href="#Configuring-TGDB" accesskey="p" rel="prev">Configuring TGDB</a>, Up: <a href="#Top" accesskey="u" rel="up">Top</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<a name="TGDB-user-defined-commands"></a>
+<h2 class="chapter">4.1 User-Defined Commands</h2>
+<a name="index-user-defined-commands"></a>
+<a name="index-command"></a>
+
+<p>TGDB lets you define your own commands that work just like built-in ones.
+A user-defined command is a name with optional attributes and a
+<em>replacement template</em>: when the command is invoked the template is
+expanded and the resulting string is executed as a normal TGDB command.
+</p>
+
+<p>All user-defined command names must begin with an <strong>uppercase</strong> letter.
+The remaining characters may be uppercase letters, lowercase letters, or
+digits (e.g. <code>Rename</code>, <code>Setcmd</code>, <code>PyLog2</code>).
+Built-in commands are all lowercase so there is never a collision.
+</p>
+
+<p>When invoking a user-defined command you may abbreviate it as long as
+the abbreviation is <strong>unambiguous</strong>.  If two user commands share a common
+prefix, typing that prefix results in an &ldquo;Ambiguous command&rdquo; error.
+</p>
+
+<div class="example">
+<pre class="example">:command Rename ...
+:command Renumber ...
+:Rena                  <span class="roman">Means &ldquo;Rename&rdquo;</span>
+:Renu                  <span class="roman">Means &ldquo;Renumber&rdquo;</span>
+:Ren                   <span class="roman">Error &mdash; ambiguous</span>
+</pre></div>
+
+<dl compact="compact">
+<dt><kbd>:command</kbd></dt>
+<dd><p>List all user-defined commands in a table showing name, <code>-nargs</code>,
+completion function, and replacement template.
+</p></dd>
+
+<dt><kbd>:command <var>prefix</var></kbd></dt>
+<dd><p>List user-defined commands whose name begins with <var>prefix</var>.
+</p></dd>
+
+<dt><kbd>:command [<var>attr</var>&hellip;] <var>Name</var> <var>repl</var></kbd></dt>
+<dd><p>Define a new user command.  <var>Name</var> must start with an uppercase letter.
+<var>repl</var> is the replacement template (see <a href="#Replacement-Text">Replacement Text</a>).
+If a command with the same name already exists an error is reported.
+</p></dd>
+</dl>
+
+<h3 class="subsection">Attributes</h3>
+
+<h4 class="subsubsection">Argument handling (<code>-nargs</code>)</h4>
+
+<p>By default a user command takes no arguments.  Use <code>-nargs</code> to change
+this:
+</p>
+<dl compact="compact">
+<dt><code>-nargs=0</code></dt>
+<dd><p>No arguments are allowed (the default).
+</p></dd>
+<dt><code>-nargs=1</code></dt>
+<dd><p>Exactly one argument is required.  The entire text after the command name
+(including spaces) is treated as the single argument.
+</p></dd>
+<dt><code>-nargs=*</code></dt>
+<dd><p>Any number of arguments are allowed (0, 1, or many), separated by
+whitespace.
+</p></dd>
+<dt><code>-nargs=?</code></dt>
+<dd><p>Zero or one argument.
+</p></dd>
+<dt><code>-nargs=+</code></dt>
+<dd><p>One or more arguments (at least one is required).
+</p></dd>
+</dl>
+
+<h4 class="subsubsection">Completion (<code>-complete</code>)</h4>
+
+<p>Argument completion can be enabled for a user command:
+</p>
+<div class="example">
+<pre class="example">-complete=<var>FuncName</var>
+</pre></div>
+
+<p><var>FuncName</var> must be the name of a Python function that has been defined
+in TGDB&rsquo;s Python namespace (via <code>:python</code> or <code>:pyfile</code>) with the
+following signature:
+</p>
+<div class="example">
+<pre class="example">def <var>FuncName</var>(ArgLead: str, CmdLine: str, CursorPos: int) -&gt; list[str]:
+    ...
+</pre></div>
+
+<p><code>ArgLead</code> is the leading portion of the argument currently being
+completed.  <code>CmdLine</code> is the full command-line string.
+<code>CursorPos</code> is the cursor position (character index).
+The function should return a list of candidate strings.
+</p>
+<p>Pressing <kbd>Tab</kbd> in the status bar while typing a user command invokes the
+completion function.  Subsequent <kbd>Tab</kbd> presses cycle through the
+candidates; any other key accepts the current candidate and clears the cycle.
+</p>
+<p>Specifying <code>-complete</code> when <code>-nargs=0</code> is an error.
+</p>
+
+<div class="example">
+<pre class="example"><span class="roman">Complete user names for a Finger command:</span>
+:command -nargs=1 -complete=ListUsers Finger python print(<var>args</var>)
+
+def ListUsers(A, L, P):
+    import subprocess
+    return subprocess.check_output(["cut","-d:","f1","/etc/passwd"]).decode().splitlines()
+
+<span class="roman">Complete Python source files:</span>
+:command -nargs=1 -complete=PyFiles EditPy python print(<var>args</var>)
+
+def PyFiles(A, L, P):
+    import glob
+    return glob.glob(f"{A}*.py")
+</pre></div>
+
+<hr>
+<a name="Replacement-Text"></a>
+<h3 class="subsection">Replacement Text</h3>
+<a name="index-replacement-text"></a>
+
+<p>The replacement template <var>repl</var> is scanned for <code>&lt;&hellip;&gt;</code> escape
+sequences.  All other text is copied unchanged.  The expanded string is
+then executed as a TGDB command.  To include a literal <code>&lt;</code> use
+<code>&lt;lt&gt;</code>.
+</p>
+
+<dl compact="compact">
+<dt><code>&lt;args&gt;</code></dt>
+<dd><p>The command arguments exactly as supplied (raw text, spaces preserved).
+</p></dd>
+
+<dt><code>&lt;q-args&gt;</code></dt>
+<dd><p>All arguments joined as a single JSON-quoted Python string.  Suitable
+for passing to a Python function or for string concatenation.
+When there are no arguments this expands to <code>&quot;&quot;</code>.
+</p></dd>
+
+<dt><code>&lt;f-args&gt;</code></dt>
+<dd><p>Arguments split on whitespace, each individually JSON-quoted and
+joined with commas, suitable for use as a Python function argument list.
+A backslash before a space prevents splitting at that space.
+A double backslash <code>\\</code> produces a single backslash.
+A backslash before any other character is left unchanged.
+When there are no arguments this expands to nothing (empty string).
+</p></dd>
+
+<dt><code>&lt;lt&gt;</code></dt>
+<dd><p>A literal <code>&lt;</code> character.  Use this to include a literal escape
+sequence in the output, e.g. write <code>&lt;lt&gt;args&gt;</code> to get the text
+<code>&lt;args&gt;</code> rather than the argument expansion.
+</p></dd>
+</dl>
+
+<p>Summary table (command <code>:MyCmd one two</code>):
+</p>
+<table>
+<thead><tr><th>Escape</th><th>Expands to</th><th>Typical use</th></tr></thead>
+<tbody>
+<tr><td><code>&lt;args&gt;</code></td><td><code>one two</code></td><td>Pass raw text to a built-in command</td></tr>
+<tr><td><code>&lt;q-args&gt;</code></td><td><code>&quot;one two&quot;</code></td><td>Pass as a single Python string argument</td></tr>
+<tr><td><code>&lt;f-args&gt;</code></td><td><code>&quot;one&quot;,&quot;two&quot;</code></td><td>Pass as separate Python function arguments</td></tr>
+<tr><td><code>&lt;lt&gt;</code></td><td><code>&lt;</code></td><td>Literal <code>&lt;</code></td></tr>
+</tbody>
+</table>
+
+<h3 class="subsection">Examples</h3>
+
+<div class="example">
+<pre class="example"><span class="roman">Alias :Setcmd to :set</span>
+:command -nargs=1 Setcmd set &lt;args&gt;
+:Setcmd tabstop=4            <span class="roman">executes: set tabstop=4</span>
+
+<span class="roman">Call a Python function with multiple separate arguments (<code>&lt;f-args&gt;</code>):</span>
+:command -nargs=* Mycmd python Myfunc(&lt;f-args&gt;)
+:Mycmd arg1 arg2             <span class="roman">executes: python Myfunc(&quot;arg1&quot;,&quot;arg2&quot;)</span>
+
+<span class="roman">Pass all arguments as a single quoted string (<code>&lt;q-args&gt;</code>):</span>
+:command -nargs=* PyLog python print("tgdb sent: " + &lt;q-args&gt;)
+:PyLog one two               <span class="roman">executes: python print("tgdb sent: " + &quot;one two&quot;)</span>
+
+<span class="roman">Use <code>&lt;lt&gt;</code> to include a literal escape in the output:</span>
+:command -nargs=1 ShowTag python print("&lt;lt&gt;args&gt;")
+:ShowTag foo                 <span class="roman">executes: python print("&lt;args&gt;")</span>
+</pre></div>
 
 <hr>
 <a name="Highlighting-Groups"></a>
