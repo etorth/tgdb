@@ -62,7 +62,8 @@ class StatusBar(Widget):
 
         # ── Multiline message display state ──────────────────────────
         self._msg_lines: list[str] = []
-        self._msg_has_more: bool = False    # True when output was truncated
+        self._msg_scroll: int = 0       # index of first visible line
+        self._msg_visible_rows: int = 0 # how many content rows are shown
 
     # ------------------------------------------------------------------
     # Height management
@@ -88,36 +89,34 @@ class StatusBar(Widget):
         self.refresh()
 
     def show_multiline_message(self, msg: str) -> None:
-        """Expand the status bar to display a multi-line message.
+        """Expand the status bar to display a scrollable multi-line message.
 
-        At most half the screen height is used; excess lines are summarised.
-        The bar stays expanded until the user presses Enter / Escape / any key.
+        All lines are stored; the bar height is capped at half the terminal
+        height.  j/k scroll the window; Enter/ESC/q dismiss.
         """
         try:
-            max_rows = max(3, self.app.size.height // 2)
+            max_rows = max(5, self.app.size.height // 2)
         except Exception:
             max_rows = 12
 
         all_lines = msg.splitlines()
-        max_content = max_rows - 1    # reserve 1 row for the dismiss hint
+        # Actual bar height: content rows + 1 hint row, capped at max_rows
+        actual_height = min(len(all_lines) + 1, max_rows)
+        actual_height = max(2, actual_height)
 
-        if len(all_lines) <= max_content:
-            self._msg_lines = all_lines
-            self._msg_has_more = False
-            n = len(all_lines) + 1
-        else:
-            self._msg_lines = all_lines[:max_content]
-            self._msg_has_more = True
-            n = max_rows
+        self._msg_lines = all_lines
+        self._msg_scroll = 0
+        self._msg_visible_rows = actual_height - 1   # rows for content
 
         self._message = ""
-        self._set_height(n)
+        self._set_height(actual_height)
         self.refresh()
 
     def dismiss_message(self) -> None:
         """Collapse the multi-line message and restore the bar to 1 row."""
         self._msg_lines = []
-        self._msg_has_more = False
+        self._msg_scroll = 0
+        self._msg_visible_rows = 0
         self._message = ""
         self._set_height(1)
         self.refresh()
@@ -146,6 +145,8 @@ class StatusBar(Widget):
         self._ml_buf = []
         self._message = ""
         self._msg_lines = []
+        self._msg_scroll = 0
+        self._msg_visible_rows = 0
         self._set_height(1)
         self.refresh()
 
@@ -158,11 +159,17 @@ class StatusBar(Widget):
 
         # ── Multiline message dismiss ─────────────────────────────────
         if self._msg_lines:
-            if key in ("enter", "return", "escape"):
+            if key in ("j", "down"):
+                self._msg_scroll_down()
+                return True
+            if key in ("k", "up"):
+                self._msg_scroll_up()
+                return True
+            if key in ("enter", "return", "escape", "q"):
                 self.dismiss_message()
                 self.post_message(CommandCancel())
                 return True
-            # Other keys are not consumed here; the app will dismiss.
+            # Any other key: not consumed — app will dismiss
             return False
 
         # ── Heredoc continuation input ────────────────────────────────
@@ -258,6 +265,17 @@ class StatusBar(Widget):
         self._set_height(1)
         self.refresh()
 
+    def _msg_scroll_down(self) -> None:
+        max_scroll = max(0, len(self._msg_lines) - self._msg_visible_rows)
+        if self._msg_scroll < max_scroll:
+            self._msg_scroll += 1
+            self.refresh()
+
+    def _msg_scroll_up(self) -> None:
+        if self._msg_scroll > 0:
+            self._msg_scroll -= 1
+            self.refresh()
+
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
@@ -303,13 +321,22 @@ class StatusBar(Widget):
         return t
 
     def _render_msg(self, w: int, style: str) -> Text:
-        """Render the multiline message display (multi-row)."""
-        lines = [_pad_crop(ln, w) for ln in self._msg_lines]
-        if self._msg_has_more:
-            hint = "-- (output truncated) Press ENTER or any key --"
+        """Render the visible window of the scrollable message display."""
+        visible = max(1, self._msg_visible_rows)
+        window = self._msg_lines[self._msg_scroll: self._msg_scroll + visible]
+        lines = [_pad_crop(ln, w) for ln in window]
+
+        # Pad blank rows if the window is taller than remaining content
+        while len(lines) < visible:
+            lines.append(" " * w)
+
+        at_end = self._msg_scroll + visible >= len(self._msg_lines)
+        if at_end:
+            hint = "-- Press ENTER or type command to continue --"
         else:
-            hint = "-- Press ENTER or any key to continue --"
+            hint = "-- Use j/k to scroll more lines --"
         lines.append(_pad_crop(hint, w))
+
         t = Text("\n".join(lines))
         t.stylize(style)
         return t
