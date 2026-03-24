@@ -561,7 +561,7 @@ class CommandLineBar(Widget):
             base = Style.parse(style)
         except Exception:
             base = Style()
-        cursor_style = base + Style(reverse=True, blink=True)
+        cursor_style = base + Style(reverse=True)
 
         t = Text(no_wrap=True, overflow="crop")
         if cursor_col > 0:
