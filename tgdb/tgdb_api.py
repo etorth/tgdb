@@ -146,7 +146,7 @@ class TGDBScreen:
         await self._do_close_all()
 
     async def split(self, pane: list[int] | None = None,
-              mode: SplitMode = SplitMode.HORIZONTAL) -> None:
+                    mode: SplitMode = SplitMode.HORIZONTAL) -> None:
         """Add a new empty cell relative to the cell at *pane*.
 
         If *pane* is ``[]`` (or omitted), the new cell is added to the root

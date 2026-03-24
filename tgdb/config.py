@@ -430,7 +430,7 @@ class ConfigParser:
         return self.execute(stripped)
 
     async def _exec_py_async(self, code: str, source_label: str,
-                              print_fn: Optional[Callable] = None) -> Optional[str]:
+                             print_fn: Optional[Callable] = None) -> Optional[str]:
         """Compile *code* as ``async def _tgdb_script()`` and await it.
 
         This lets scripts use ``await tgdb.screen.split(...)`` etc.
@@ -457,10 +457,12 @@ class ConfigParser:
         class _Writer:
             def __init__(self, fn: Callable) -> None:
                 self._fn = fn
+
             def write(self, s: str) -> int:
                 if s:
                     self._fn(s)
                 return len(s)
+
             def flush(self) -> None:
                 pass
 
@@ -468,7 +470,7 @@ class ConfigParser:
             writer: Any = _Writer(print_fn)
 
             def _custom_print(*args, sep: str = " ", end: str = "\n",
-                               file=None, flush: bool = False) -> None:
+                              file=None, flush: bool = False) -> None:
                 print_fn(sep.join(str(a) for a in args) + end)
 
             ns["print"] = _custom_print
@@ -497,7 +499,7 @@ class ConfigParser:
         return None
 
     async def _exec_pyfile_async(self, path: str,
-                                  print_fn: Optional[Callable] = None) -> Optional[str]:
+                                 print_fn: Optional[Callable] = None) -> Optional[str]:
         """Execute a Python file as an async coroutine."""
         if not path:
             return "pyfile: missing filename"
@@ -921,4 +923,3 @@ class ConfigParser:
             return f"escape+{name[2]}"
         # Unknown <Name> — return verbatim
         return f"<{name}>"
-
