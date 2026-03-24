@@ -442,9 +442,20 @@ class ConfigParser:
             return None
 
         # Indent and wrap in an async def so the user can use await freely.
+        # Inject a 'finally' block that copies function-local names back to
+        # globals (== ns) so that top-level 'def foo', 'import x', 'x = 1'
+        # survive into the persistent namespace — same as the sync exec() path.
         try:
-            indented = textwrap.indent(code, "    ")
-            wrapper = f"async def _tgdb_script():\n{indented}\n"
+            user_lines = textwrap.indent(code, "    ")
+            wrapper = (
+                "async def _tgdb_script():\n"
+                "    try:\n"
+                + textwrap.indent(user_lines, "    ")
+                + "\n    finally:\n"
+                "        globals().update(\n"
+                "            {_k: _v for _k, _v in locals().items()\n"
+                "             if not _k.startswith('_tgdb_')})\n"
+            )
             compiled = compile(wrapper, source_label, "exec")
         except SyntaxError:
             return traceback.format_exc().strip()
@@ -465,6 +476,18 @@ class ConfigParser:
 
             def flush(self) -> None:
                 pass
+
+            def isatty(self) -> bool:
+                return False
+
+            def readable(self) -> bool:
+                return False
+
+            def writable(self) -> bool:
+                return True
+
+            def seekable(self) -> bool:
+                return False
 
         if print_fn is not None:
             writer: Any = _Writer(print_fn)
@@ -492,12 +515,18 @@ class ConfigParser:
                 print_fn(err)
                 return None
             return err
+        finally:
+            # Propagate any new/modified names back to the persistent namespace
+            # so that 'def foo', 'import mod', 'x = 1' survive across commands.
+            self._py_namespace.update(
+                {k: v for k, v in ns.items()
+                 if k not in ("_tgdb_script", "print")}
+            )
 
         if isinstance(writer, io.StringIO):
             out = writer.getvalue().rstrip("\n")
             return out or None
         return None
-
     async def _exec_pyfile_async(self, path: str,
                                  print_fn: Optional[Callable] = None) -> Optional[str]:
         """Execute a Python file as an async coroutine."""

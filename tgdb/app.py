@@ -951,6 +951,18 @@ class TGDBApp(App):
             event.stop()
             return
 
+        # Ctrl-C: cancel running command task first; otherwise interrupt GDB.
+        # Must be checked before the CMD-mode block because feed_key() swallows
+        # all keys while _task_running is True.
+        if key == "ctrl+c":
+            if self._cmd_task is not None and not self._cmd_task.done():
+                self._cmd_task.cancel()
+                event.stop()
+                return
+            self.gdb.send_interrupt()
+            event.stop()
+            return
+
         # ESC / cgdb mode key → switch to CGDB from GDB/STATUS/SCROLL/MESSAGE
         cgdb_key = self.cfg.cgdbmodekey.lower()
         if key == "escape" or key.lower() == cgdb_key:
@@ -981,15 +993,6 @@ class TGDBApp(App):
         if self._handle_tgdb_mode_key(key, char):
             event.stop()
             return
-
-        # Ctrl-C: cancel running command task first; otherwise interrupt GDB
-        if key == "ctrl+c":
-            if self._cmd_task is not None and not self._cmd_task.done():
-                self._cmd_task.cancel()
-                event.stop()
-                return
-            self.gdb.send_interrupt()
-            event.stop()
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         menu = self._get_context_menu()
@@ -1082,17 +1085,29 @@ class TGDBApp(App):
             src.move_to(msg.line)
 
     def on_search_start(self, msg: SearchStart) -> None:
-        self.query_one("#cmdline", CommandLineBar).start_search(msg.forward)
+        try:
+            self.query_one("#cmdline", CommandLineBar).start_search(msg.forward)
+        except NoMatches:
+            pass
 
     def on_search_update(self, msg: SearchUpdate) -> None:
-        self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
+        try:
+            self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
+        except NoMatches:
+            pass
 
     def on_search_commit(self, msg: SearchCommit) -> None:
-        self.query_one("#cmdline", CommandLineBar).cancel_input()
+        try:
+            self.query_one("#cmdline", CommandLineBar).cancel_input()
+        except NoMatches:
+            pass
         self._set_mode("TGDB")
 
     def on_search_cancel(self, msg: SearchCancel) -> None:
-        self.query_one("#cmdline", CommandLineBar).cancel_input()
+        try:
+            self.query_one("#cmdline", CommandLineBar).cancel_input()
+        except NoMatches:
+            pass
         self._set_mode("TGDB")
 
     def on_status_message(self, msg: StatusMessage) -> None:
@@ -1242,16 +1257,30 @@ class TGDBApp(App):
         self._set_mode("SCROLL" if msg.active else "GDB")
 
     def on_scroll_search_start(self, msg: ScrollSearchStart) -> None:
-        self.query_one("#cmdline", CommandLineBar).start_search(msg.forward)
+        try:
+            self.query_one("#cmdline", CommandLineBar).start_search(msg.forward)
+        except NoMatches:
+            pass
 
     def on_scroll_search_update(self, msg: ScrollSearchUpdate) -> None:
-        self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
+        try:
+            self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
+        except NoMatches:
+            pass
 
     def on_scroll_search_commit(self, msg: ScrollSearchCommit) -> None:
-        self.query_one("#cmdline", CommandLineBar).cancel_input()
+        try:
+            self.query_one("#cmdline", CommandLineBar).cancel_input()
+        except NoMatches:
+            pass
+        self._set_mode("SCROLL")
 
     def on_scroll_search_cancel(self, msg: ScrollSearchCancel) -> None:
-        self.query_one("#cmdline", CommandLineBar).cancel_input()
+        try:
+            self.query_one("#cmdline", CommandLineBar).cancel_input()
+        except NoMatches:
+            pass
+        self._set_mode("SCROLL")
 
     # ------------------------------------------------------------------
     # Status bar command handling

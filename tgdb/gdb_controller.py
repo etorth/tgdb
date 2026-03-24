@@ -666,8 +666,9 @@ class GDBController:
         elif cls == "breakpoint-modified":
             bkpt = results.get("bkpt", {})
             if bkpt:
+                # _update_breakpoint_from_mi already calls on_breakpoints(); no
+                # second call needed here.
                 self._update_breakpoint_from_mi(bkpt)
-                self.on_breakpoints(list(self.breakpoints))
         elif cls == "breakpoint-deleted":
             try:
                 num = int(results.get("id", ""))
