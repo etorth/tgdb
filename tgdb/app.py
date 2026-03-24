@@ -343,6 +343,17 @@ class TGDBApp(App):
             return
         self._focus_widget(self._first_workspace_leaf())
 
+    def _enter_cmd_mode(self) -> bool:
+        """Activate the command-line bar (CMD mode).  Returns True on success."""
+        try:
+            bar = self.query_one("#cmdline", CommandLineBar)
+            bar.start_command()
+            self._set_mode("CMD")
+            bar.focus()
+            return True
+        except NoMatches:
+            return False
+
     def _show_status(self, msg: str) -> bool:
         """Show *msg* in the status bar.
 
@@ -739,6 +750,11 @@ class TGDBApp(App):
         if src is not None and src.handle_cgdb_key(key, char):
             return True
 
+        # ":" enters CMD mode even when source pane is absent
+        if key == "colon" or char == ":":
+            self._enter_cmd_mode()
+            return True
+
         if key == "i":
             self._switch_to_gdb()
             return True
@@ -869,6 +885,10 @@ class TGDBApp(App):
         if self._mode == "TGDB":
             src = self._get_source_view(mounted_only=True)
             if src is not None and src.handle_cgdb_key(key, char):
+                return
+            # ":" enters CMD mode even when source pane is absent
+            if key == "colon" or char == ":":
+                self._enter_cmd_mode()
                 return
             if key == "i":
                 self._switch_to_gdb()

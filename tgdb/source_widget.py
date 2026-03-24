@@ -729,12 +729,7 @@ class SourceView(Widget):
         elif char == "o":
             self.post_message(OpenFileDialog())
         elif key == "colon" or char == ":":
-            from .command_line_bar import CommandLineBar
-
-            status = self.app.query_one("#cmdline", CommandLineBar)
-            status.start_command()
-            self.app._set_mode("CMD")
-            status.focus()
+            getattr(self.app, "_enter_cmd_mode", lambda: None)()
         elif key == "apostrophe":
             self.post_message(AwaitMarkJump())
         elif char == "m":
