@@ -861,23 +861,19 @@ class TGDBApp(App):
                 bar = self.query_one("#cmdline", CommandLineBar)
             except NoMatches:
                 return
-            # During replay: intercept Enter to execute the command synchronously
-            # so that mode switches (e.g. _switch_to_gdb inside _send_gdb_cli)
-            # take effect before the next token is dispatched.
             if key in ("enter", "return"):
                 cmd = bar._input_buf
                 bar._reset_history_browse()
                 bar._input_active = False
                 bar._input_buf = ""
                 bar.refresh()
+                # Post CommandSubmit so the command goes through the async
+                # task path (_run_cmd_task / execute_async) — same as if the
+                # user pressed Enter manually.  This is important for :python
+                # blocks which need to run as async def so 'await' works.
                 if cmd.strip():
-                    result = self.cp.execute(cmd)
-                    if result:
-                        self._show_status(result)
-                    else:
-                        self._sync_config()
-                # Only return to TGDB if a GDB command didn't already switch mode
-                if self._mode == "CMD":
+                    self.post_message(CommandSubmit(cmd))
+                elif self._mode == "CMD":
                     self._switch_to_tgdb()
             else:
                 bar.feed_key(key, char)
