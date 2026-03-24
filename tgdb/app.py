@@ -813,9 +813,9 @@ class TGDBApp(App):
         # GDB mode — send char or Enter to the terminal
         if self._mode == "GDB":
             if char:
-                self.gdb.write(char.encode())
+                self.gdb.send_input(char.encode())
             elif key == "enter":
-                self.gdb.write(b"\n")
+                self.gdb.send_input(b"\n")
 
 
     def _handle_non_gdb_focus_key(self, key: str, char: str) -> bool:
