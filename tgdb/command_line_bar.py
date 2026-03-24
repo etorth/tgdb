@@ -91,6 +91,12 @@ class CommandLineBar(Widget):
         # ── Cursor position (within _input_buf) ──────────────────────
         self._cursor_pos: int = 0           # 0 = before first char; len(buf) = after last
 
+        # ── Async task state ─────────────────────────────────────────
+        # While a command task is running the bar is locked; all key input
+        # is blocked and streaming output from the task is shown.
+        self._task_running: bool = False
+        self._streaming_buf: str = ""       # accumulated output from running task
+
     # ------------------------------------------------------------------
     # Height management
     # ------------------------------------------------------------------
@@ -189,6 +195,35 @@ class CommandLineBar(Widget):
         self.refresh()
 
     # ------------------------------------------------------------------
+    # Async task support — lock bar and stream output while task runs
+    # ------------------------------------------------------------------
+
+    def lock_for_task(self) -> None:
+        """Called by the app when a command task starts.  Locks the bar."""
+        self._task_running = True
+        self._streaming_buf = ""
+        self._input_active = False
+        self._message = ""
+        self._msg_lines = []
+        self._msg_scroll = 0
+        self._msg_visible_rows = 0
+        self._set_height(1)
+        self.refresh()
+
+    def append_output(self, chunk: str) -> None:
+        """Append streaming output from a running task and trigger a repaint."""
+        if not chunk:
+            return
+        self._streaming_buf += chunk
+        self.refresh()
+
+    def finish_task(self) -> None:
+        """Called by the app when the task ends; resets running state."""
+        self._task_running = False
+        self._streaming_buf = ""
+        self.refresh()
+
+    # ------------------------------------------------------------------
     # Command history — public API
     # ------------------------------------------------------------------
 
@@ -241,6 +276,11 @@ class CommandLineBar(Widget):
 
     def feed_key(self, key: str, char: str) -> bool:
         """Handle one keystroke.  Returns True if the key was consumed."""
+
+        # While a command task is running all keyboard input is blocked.
+        # Ctrl+C cancellation is handled at the app level before feed_key.
+        if self._task_running:
+            return True
 
         # ── Multiline message dismiss ─────────────────────────────────
         if self._msg_lines:
@@ -513,6 +553,9 @@ class CommandLineBar(Widget):
         w = max(10, self.size.width or 80)
         style = self.hl.style("CommandLine")
 
+        if self._task_running:
+            return self._render_streaming(w, style)
+
         if self._ml_active:
             return self._render_ml_input(w, style)
 
@@ -580,6 +623,16 @@ class CommandLineBar(Widget):
         if after_col < len(visible):
             t.append(visible[after_col:], style)
         return t
+
+    def _render_streaming(self, w: int, style: str) -> Text:
+        """Render task-running state: show the last output line plus an indicator."""
+        buf = self._streaming_buf
+        if buf:
+            last_line = buf.rstrip("\n").rsplit("\n", 1)[-1]
+            text = _pad_crop(f"\u25b6 {last_line}", w)
+        else:
+            text = _pad_crop("\u25b6 Running\u2026", w)
+        return Text(text, style=style, no_wrap=True, overflow="crop")
 
     def _render_ml_input(self, w: int, style: str) -> Text:
         """Render the heredoc continuation prompt (multi-row)."""

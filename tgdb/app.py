@@ -150,6 +150,7 @@ class TGDBApp(App):
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: Optional[asyncio.Task] = None
+        self._cmd_task: Optional[asyncio.Task] = None   # running CommandLineBar command
 
         self._mode: str = "GDB"
         self._await_mark_jump: bool = False
@@ -307,7 +308,7 @@ class TGDBApp(App):
 
         # Start async read loop
         self._gdb_task = asyncio.create_task(self.gdb.run_async())
-        asyncio.ensure_future(self._request_initial_location())
+        asyncio.create_task(self._request_initial_location())
 
         # Initial mode: GDB focused
         self._set_mode("GDB")
@@ -986,8 +987,12 @@ class TGDBApp(App):
             event.stop()
             return
 
-        # Ctrl-C always interrupts GDB
+        # Ctrl-C: cancel running command task first; otherwise interrupt GDB
         if key == "ctrl+c":
+            if self._cmd_task is not None and not self._cmd_task.done():
+                self._cmd_task.cancel()
+                event.stop()
+                return
             self.gdb.send_interrupt()
             event.stop()
 
@@ -1258,28 +1263,53 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
-        # Record non-empty commands in history before executing
-        cmd_text = msg.command.strip()
-        if cmd_text:
-            try:
-                cmdline = self.query_one("#cmdline", CommandLineBar)
-                max_size = self.cfg.historysize
-                save_now = self.cfg.history
-                cmdline._add_to_history(
-                    cmd_text,
-                    save=save_now,
-                    max_size=max_size,
-                )
-            except NoMatches:
-                pass
+        # If a command task is already running, reject new submissions.
+        if self._cmd_task is not None and not self._cmd_task.done():
+            self._show_status("Command still running (Ctrl+C to cancel)")
+            return
+        self._cmd_task = asyncio.create_task(self._run_cmd_task(msg.command))
 
-        result = self.cp.execute(msg.command)
-        if result:
-            if self._show_status(result):
-                return      # MESSAGE mode: stay until user dismisses
+    async def _run_cmd_task(self, cmd: str) -> None:
+        """Run one CommandLineBar command as an async task (one-at-a-time)."""
+        try:
+            cmdline = self.query_one("#cmdline", CommandLineBar)
+        except NoMatches:
+            return
+
+        # Record in history before execution.
+        cmd_text = cmd.strip()
+        if cmd_text:
+            max_size = self.cfg.historysize
+            save_now = self.cfg.history
+            cmdline._add_to_history(cmd_text, save=save_now, max_size=max_size)
+
+        cmdline.lock_for_task()
+        captured_output: Optional[str] = None
+        try:
+            result = await self.cp.execute_async(cmd, print_fn=cmdline.append_output)
+            streaming = cmdline._streaming_buf.rstrip("\n")
+            if streaming and result:
+                captured_output = streaming + "\n" + result
+            elif streaming:
+                captured_output = streaming
+            else:
+                captured_output = result
+        except asyncio.CancelledError:
+            streaming = cmdline._streaming_buf.rstrip("\n")
+            captured_output = (streaming + "\n[Interrupted]").strip() if streaming else "[Interrupted]"
+        except Exception as exc:
+            captured_output = f"Internal error: {exc}"
+        finally:
+            cmdline.finish_task()
+            self._cmd_task = None
+
+        if captured_output:
+            if self._show_status(captured_output):
+                return  # MESSAGE mode — stay until user dismisses
         else:
             self._sync_config()
-        self._switch_to_tgdb()
+        if self._mode == "CMD":
+            self._switch_to_tgdb()
 
     def on_command_cancel(self, msg: CommandCancel) -> None:
         self._switch_to_tgdb()
@@ -1394,7 +1424,7 @@ class TGDBApp(App):
         # long enough to make the console look hung after commands like `start`.
         if self._file_dialog_pending:
             self.gdb.request_source_files()
-        asyncio.ensure_future(self._refresh_breakpoints_async())
+        asyncio.create_task(self._refresh_breakpoints_async())
 
     async def _refresh_breakpoints_async(self) -> None:
         await asyncio.sleep(0.15)
