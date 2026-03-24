@@ -5,12 +5,12 @@ Global layout:
   ┌──────────────────────────┐
   │    Source / GDB area     │
   ├──────────────────────────┤
-  │    dedicated status bar  │  1 line
+  │    command-line bar  │  1 line
   └──────────────────────────┘
 
 The source pane itself reserves its bottom row for the current file path.
 
-Modes: CGDB | GDB | SCROLL | STATUS | FILEDLG
+Modes: TGDB | GDB | SCROLL | CMD | MESSAGE | FILEDLG
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from rich.text import Text
 
 from .highlight_groups import HighlightGroups
 from .key_mapper import KeyMapper
-from .config import Config, ConfigParser
+from .config import Config, ConfigParser, tgdb_history_file
 from .gdb_controller import (
     GDBController,
     Breakpoint,
@@ -49,7 +49,7 @@ from .gdb_widget import (
     GDBWidget, ScrollModeChange,
     ScrollSearchStart, ScrollSearchUpdate, ScrollSearchCommit, ScrollSearchCancel,
 )
-from .status_bar import StatusBar, CommandSubmit, CommandCancel
+from .command_line_bar import CommandLineBar, CommandSubmit, CommandCancel
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 from .context_menu import (
     ContextMenu,
@@ -89,7 +89,7 @@ class TGDBApp(App):
         min-height: 2;
         min-width: 4;
     }
-    #status {
+    #cmdline {
         height: 1;
         width: 1fr;
     }
@@ -225,7 +225,7 @@ class TGDBApp(App):
                 yield self._source_view
                 yield Splitter(self.hl, id="splitter")
                 yield self._gdb_widget
-            yield StatusBar(self.hl, completion_provider=self.cp.get_completions, id="status")
+            yield CommandLineBar(self.hl, completion_provider=self.cp.get_completions, id="cmdline")
         yield FileDialog(self.hl, id="file-dlg")
         yield ContextMenu(self.hl, id="context-menu")
 
@@ -253,12 +253,22 @@ class TGDBApp(App):
         gdb_w.wrapscan = self.cfg.wrapscan
         gdb_w.send_to_gdb = self.gdb.send_input        # bytes → primary PTY
         gdb_w.resize_gdb = self.gdb.resize             # keep pyte in sync
-        gdb_w.on_switch_to_cgdb = self._switch_to_cgdb
+        gdb_w.on_switch_to_tgdb = self._switch_to_tgdb
 
         # Configure file dialog
         fd = self.query_one("#file-dlg", FileDialog)
         fd.ignorecase = self.cfg.ignorecase
         fd.wrapscan = self.cfg.wrapscan
+
+        # Configure command-line bar — history
+        try:
+            cmdline = self.query_one("#cmdline", CommandLineBar)
+            cmdline._history_file = tgdb_history_file()
+            self.cp.set_cmdline_bar(cmdline)
+            if self.cfg.history:
+                cmdline.load_history()
+        except NoMatches:
+            pass
 
         # GDB callbacks — on_console now delivers raw bytes from GDB's PTY,
         # fed directly into the pyte VT100 emulator (matching cgdb's libvterm).
@@ -297,7 +307,7 @@ class TGDBApp(App):
     def _set_mode(self, mode: str) -> None:
         self._mode = mode
         try:
-            status = self.query_one("#status", StatusBar)
+            status = self.query_one("#cmdline", CommandLineBar)
             status.set_mode(mode)
             self._update_status_file_info()
         except NoMatches:
@@ -308,8 +318,8 @@ class TGDBApp(App):
             gdb_w.gdb_focused = (mode in ("GDB", "SCROLL"))
             gdb_w.refresh()
 
-    def _switch_to_cgdb(self) -> None:
-        self._set_mode("CGDB")
+    def _switch_to_tgdb(self) -> None:
+        self._set_mode("TGDB")
         if self._focus_widget(self._get_source_view(mounted_only=True)):
             return
         self._focus_widget(self._first_workspace_leaf())
@@ -328,7 +338,7 @@ class TGDBApp(App):
         so the caller knows not to switch focus away.
         """
         try:
-            status = self.query_one("#status", StatusBar)
+            status = self.query_one("#cmdline", CommandLineBar)
             if "\n" in msg:
                 status.show_multiline_message(msg)
                 self._set_mode("MESSAGE")
@@ -505,9 +515,9 @@ class TGDBApp(App):
                 return
             except NoMatches:
                 return
-        if self._mode == "STATUS":
+        if self._mode == "CMD":
             try:
-                self.query_one("#status", StatusBar).focus()
+                self.query_one("#cmdline", CommandLineBar).focus()
                 return
             except NoMatches:
                 return
@@ -557,7 +567,7 @@ class TGDBApp(App):
         try:
             old_root = self.query_one("#split-container")
             global_container = self.query_one("#global-container")
-            status = self.query_one("#status")
+            status = self.query_one("#cmdline")
             splitter = self.query_one("#splitter", Splitter)
         except NoMatches:
             return None
@@ -686,13 +696,13 @@ class TGDBApp(App):
 
         return False
 
-    def _handle_cgdb_mode_key(self, key: str, char: str) -> bool:
-        if self._mode != "CGDB":
+    def _handle_tgdb_mode_key(self, key: str, char: str) -> bool:
+        if self._mode != "TGDB":
             return False
 
-        # Consult the CGDB-mode key mapper (unless we're already replaying a map)
+        # Consult the TGDB-mode key mapper (unless we're already replaying a map)
         if not self._in_map_replay:
-            result = self.km.feed("cgdb", key)
+            result = self.km.feed("tgdb", key)
             if result is None or result == []:
                 # Buffering — key consumed but no action yet
                 return True
@@ -742,31 +752,51 @@ class TGDBApp(App):
         else:
             char = ""
 
-        # ESC / cgdb-mode key → switch to CGDB
-        cgdb_key = self.cfg.cgdbmodekey.lower()
-        if key == "escape" or key.lower() == cgdb_key:
-            if self._mode in ("GDB", "STATUS", "SCROLL", "MESSAGE"):
-                self._switch_to_cgdb()
-            return
+        # ESC / tgdb-mode key → switch to TGDB (already in TGDB = no-op)
+        tgdb_key = self.cfg.cgdbmodekey.lower()
+        if key == "escape" or key.lower() == tgdb_key:
+            if self._mode in ("GDB", "CMD", "SCROLL", "MESSAGE"):
+                self._switch_to_tgdb()
+            return      # no-op when already in TGDB
 
         if self._mode == "MESSAGE":
             try:
-                status = self.query_one("#status", StatusBar)
-                if not status.feed_key(key, char):
-                    status.dismiss_message()
-                    self._switch_to_cgdb()
+                bar = self.query_one("#cmdline", CommandLineBar)
+                if not bar.feed_key(key, char):
+                    bar.dismiss_message()
+                    self._switch_to_tgdb()
             except NoMatches:
                 pass
             return
 
-        if self._mode == "STATUS":
+        if self._mode == "CMD":
             try:
-                self.query_one("#status", StatusBar).feed_key(key, char)
+                bar = self.query_one("#cmdline", CommandLineBar)
             except NoMatches:
-                pass
+                return
+            # During replay: intercept Enter to execute the command synchronously
+            # so that mode switches (e.g. _switch_to_gdb inside _send_gdb_cli)
+            # take effect before the next token is dispatched.
+            if key in ("enter", "return"):
+                cmd = bar._input_buf
+                bar._reset_history_browse()
+                bar._input_active = False
+                bar._input_buf = ""
+                bar.refresh()
+                if cmd.strip():
+                    result = self.cp.execute(cmd)
+                    if result:
+                        self._show_status(result)
+                    else:
+                        self._sync_config()
+                # Only return to TGDB if a GDB command didn't already switch mode
+                if self._mode == "CMD":
+                    self._switch_to_tgdb()
+            else:
+                bar.feed_key(key, char)
             return
 
-        if self._mode == "CGDB":
+        if self._mode == "TGDB":
             src = self._get_source_view(mounted_only=True)
             if src is not None and src.handle_cgdb_key(key, char):
                 return
@@ -780,9 +810,12 @@ class TGDBApp(App):
                     gdb_w.enter_scroll_mode()
                 return
 
-        # GDB mode — send char to the terminal
-        if self._mode == "GDB" and char:
-            self.gdb.write(char.encode())
+        # GDB mode — send char or Enter to the terminal
+        if self._mode == "GDB":
+            if char:
+                self.gdb.write(char.encode())
+            elif key == "enter":
+                self.gdb.write(b"\n")
 
 
     def _handle_non_gdb_focus_key(self, key: str, char: str) -> bool:
@@ -790,25 +823,25 @@ class TGDBApp(App):
         if self._handle_pending_mark_key(char):
             return True
 
-        if self._mode == "STATUS":
+        if self._mode == "CMD":
             try:
-                self.query_one("#status", StatusBar).feed_key(key, char)
+                self.query_one("#cmdline", CommandLineBar).feed_key(key, char)
             except NoMatches:
                 pass
             return True
 
         if self._mode == "MESSAGE":
             try:
-                status = self.query_one("#status", StatusBar)
+                status = self.query_one("#cmdline", CommandLineBar)
                 if not status.feed_key(key, char):
                     status.dismiss_message()
-                    self._switch_to_cgdb()
+                    self._switch_to_tgdb()
             except NoMatches:
                 pass
             return True
 
-        if self._mode == "CGDB":
-            self._handle_cgdb_mode_key(key, char)
+        if self._mode == "TGDB":
+            self._handle_tgdb_mode_key(key, char)
             return True
 
         return False
@@ -835,31 +868,31 @@ class TGDBApp(App):
         # ESC / cgdb mode key → switch to CGDB from GDB/STATUS/SCROLL/MESSAGE
         cgdb_key = self.cfg.cgdbmodekey.lower()
         if key == "escape" or key.lower() == cgdb_key:
-            if self._mode in ("GDB", "STATUS", "SCROLL"):
-                self._switch_to_cgdb()
+            if self._mode in ("GDB", "CMD", "SCROLL"):
+                self._switch_to_tgdb()
                 event.stop()
                 return
 
         if self._mode == "MESSAGE":
             try:
-                status = self.query_one("#status", StatusBar)
+                status = self.query_one("#cmdline", CommandLineBar)
                 consumed = status.feed_key(key, char)
                 event.stop()
                 if not consumed:
                     # Any key not handled by the bar (i.e. not Enter/ESC) dismisses
                     status.dismiss_message()
-                    self._switch_to_cgdb()
+                    self._switch_to_tgdb()
             except NoMatches:
                 pass
             return
 
-        if self._mode == "STATUS":
-            status = self.query_one("#status", StatusBar)
+        if self._mode == "CMD":
+            status = self.query_one("#cmdline", CommandLineBar)
             if status.feed_key(key, char):
                 event.stop()
                 return
 
-        if self._handle_cgdb_mode_key(key, char):
+        if self._handle_tgdb_mode_key(key, char):
             event.stop()
             return
 
@@ -959,18 +992,18 @@ class TGDBApp(App):
             src.move_to(msg.line)
 
     def on_search_start(self, msg: SearchStart) -> None:
-        self.query_one("#status", StatusBar).start_search(msg.forward)
+        self.query_one("#cmdline", CommandLineBar).start_search(msg.forward)
 
     def on_search_update(self, msg: SearchUpdate) -> None:
-        self.query_one("#status", StatusBar).update_search(msg.pattern)
+        self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
 
     def on_search_commit(self, msg: SearchCommit) -> None:
-        self.query_one("#status", StatusBar).cancel_input()
-        self._set_mode("CGDB")
+        self.query_one("#cmdline", CommandLineBar).cancel_input()
+        self._set_mode("TGDB")
 
     def on_search_cancel(self, msg: SearchCancel) -> None:
-        self.query_one("#status", StatusBar).cancel_input()
-        self._set_mode("CGDB")
+        self.query_one("#cmdline", CommandLineBar).cancel_input()
+        self._set_mode("TGDB")
 
     def on_status_message(self, msg: StatusMessage) -> None:
         self._show_status(msg.text)
@@ -1119,32 +1152,47 @@ class TGDBApp(App):
         self._set_mode("SCROLL" if msg.active else "GDB")
 
     def on_scroll_search_start(self, msg: ScrollSearchStart) -> None:
-        self.query_one("#status", StatusBar).start_search(msg.forward)
+        self.query_one("#cmdline", CommandLineBar).start_search(msg.forward)
 
     def on_scroll_search_update(self, msg: ScrollSearchUpdate) -> None:
-        self.query_one("#status", StatusBar).update_search(msg.pattern)
+        self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
 
     def on_scroll_search_commit(self, msg: ScrollSearchCommit) -> None:
-        self.query_one("#status", StatusBar).cancel_input()
+        self.query_one("#cmdline", CommandLineBar).cancel_input()
 
     def on_scroll_search_cancel(self, msg: ScrollSearchCancel) -> None:
-        self.query_one("#status", StatusBar).cancel_input()
+        self.query_one("#cmdline", CommandLineBar).cancel_input()
 
     # ------------------------------------------------------------------
     # Status bar command handling
     # ------------------------------------------------------------------
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
+        # Record non-empty commands in history before executing
+        cmd_text = msg.command.strip()
+        if cmd_text:
+            try:
+                cmdline = self.query_one("#cmdline", CommandLineBar)
+                max_size = self.cfg.historysize
+                save_now = self.cfg.history
+                cmdline._add_to_history(
+                    cmd_text,
+                    save=save_now,
+                    max_size=max_size,
+                )
+            except NoMatches:
+                pass
+
         result = self.cp.execute(msg.command)
         if result:
             if self._show_status(result):
                 return      # MESSAGE mode: stay until user dismisses
         else:
             self._sync_config()
-        self._switch_to_cgdb()
+        self._switch_to_tgdb()
 
     def on_command_cancel(self, msg: CommandCancel) -> None:
-        self._switch_to_cgdb()
+        self._switch_to_tgdb()
 
     # ------------------------------------------------------------------
     # File dialog
@@ -1157,12 +1205,12 @@ class TGDBApp(App):
         if src is not None:
             src.load_file(msg.path)
             self._update_status_file_info()
-        self._switch_to_cgdb()
+        self._switch_to_tgdb()
 
     def on_file_dialog_closed(self, _: FileDialogClosed) -> None:
         self._file_dialog_pending = False
         self.query_one("#file-dlg", FileDialog).close()
-        self._switch_to_cgdb()
+        self._switch_to_tgdb()
 
     async def on_context_menu_selected(self, msg: ContextMenuSelected) -> None:
         target = self._context_menu_target
@@ -1397,7 +1445,7 @@ class TGDBApp(App):
             self._switch_to_gdb()
             return None
         if args[0].lower() == "cgdb":
-            self._switch_to_cgdb()
+            self._switch_to_tgdb()
             return None
         return "focus: requires cgdb or gdb"
 
@@ -1643,13 +1691,13 @@ class TGDBApp(App):
                 if src.load_file(str(candidate)):
                     src.exe_line = 0
                     src.move_to(1)
-                    self._switch_to_cgdb()
+                    self._switch_to_tgdb()
                     return
 
         lines = [
             "tgdb — Python reimplementation of cgdb",
             "",
-            "CGDB mode (source window, press ESC):",
+            "TGDB mode (source window, press ESC):",
             "  j/k      down/up lines           G/gg  bottom/top",
             "  Ctrl-f/b page down/up             H/M/L screen positions",
             "  Ctrl-d/u half page down/up",
@@ -1664,17 +1712,17 @@ class TGDBApp(App):
             "  F5=run  F6=continue  F7=finish  F8=next  F10=step",
             "  i        switch to GDB mode",
             "  s        switch to GDB scroll mode",
-            "  :        command mode",
+            "  :        command-line (CMD) mode",
             "",
             "GDB mode (GDB console, press i):",
-            "  ESC      back to CGDB mode        PageUp  scroll mode",
+            "  ESC      back to TGDB mode        PageUp  scroll mode",
             "  All keys forwarded to GDB (readline, history, etc.)",
             "",
             "Scroll mode (PageUp in GDB window):",
             "  j/k/PageUp/Dn  scroll             G/gg  end/beginning",
             "  //?/n/N  search                   q/i/Enter  exit scroll",
             "",
-            "Commands (type : in CGDB mode):",
+            "Commands (type : in TGDB mode):",
             "  :set tabstop=4          :set hlsearch",
             "  :set winsplit=even      :set executinglinedisplay=longarrow",
             "  :highlight Statement ctermfg=Yellow cterm=bold",
@@ -1686,4 +1734,4 @@ class TGDBApp(App):
         src.source_file = sf
         src.exe_line = 0
         src.move_to(1)
-        self._switch_to_cgdb()
+        self._switch_to_tgdb()

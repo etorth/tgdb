@@ -206,7 +206,7 @@ class GDBWidget(Widget):
         # Callbacks set by app
         self.send_to_gdb: Callable[[bytes], None] = lambda b: None
         self.resize_gdb: Callable[[int, int], None] = lambda r, c: None
-        self.on_switch_to_cgdb: Callable[[], None] = lambda: None
+        self.on_switch_to_tgdb: Callable[[], None] = lambda: None
 
         self.ignorecase: bool = False
         self.wrapscan: bool = True
@@ -650,7 +650,7 @@ class GDBWidget(Widget):
 
         burst_key = self._maybe_escape_burst_key(key, char)
         if burst_key is not None:
-            self.on_switch_to_cgdb()
+            self.on_switch_to_tgdb()
             if callable(handler):
                 handler(*burst_key)
             event.stop()
@@ -658,7 +658,7 @@ class GDBWidget(Widget):
 
         # Normal mode — ESC switches to CGDB source pane
         if key == "escape":
-            self.on_switch_to_cgdb()
+            self.on_switch_to_tgdb()
             event.stop()
             return
         # PageUp enters scroll mode
@@ -684,7 +684,7 @@ class GDBWidget(Widget):
         self._num_buf = ""
 
         if key == "escape":
-            self.on_switch_to_cgdb()
+            self.on_switch_to_tgdb()
             self.exit_scroll_mode()
         elif key in ("q", "i", "enter", "return"):
             self.exit_scroll_mode()

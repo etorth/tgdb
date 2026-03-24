@@ -1,7 +1,8 @@
 """
 Configuration parser — mirrors cgdb's cgdbrc.cpp.
 
-Parses ~/.cgdb/cgdbrc (or $CGDB_DIR/cgdbrc).
+Supports $CGDB_DIR/cgdbrc, $XDG_CONFIG_HOME/tgdb/tgdbrc, ~/.config/tgdb/tgdbrc,
+and ~/.cgdb/cgdbrc (legacy) as initialization files.
 Supports all :set options, :highlight, :map, :imap, :unmap, :iunmap.
 """
 from __future__ import annotations
@@ -24,6 +25,46 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# XDG base-directory helpers
+# ---------------------------------------------------------------------------
+
+def xdg_config_home() -> Path:
+    """Return $XDG_CONFIG_HOME or its default (~/.config)."""
+    v = os.environ.get("XDG_CONFIG_HOME", "")
+    return Path(v) if v else Path.home() / ".config"
+
+
+def xdg_data_home() -> Path:
+    """Return $XDG_DATA_HOME or its default (~/.local/share)."""
+    v = os.environ.get("XDG_DATA_HOME", "")
+    return Path(v) if v else Path.home() / ".local" / "share"
+
+
+def xdg_cache_home() -> Path:
+    """Return $XDG_CACHE_HOME or its default (~/.cache)."""
+    v = os.environ.get("XDG_CACHE_HOME", "")
+    return Path(v) if v else Path.home() / ".cache"
+
+
+def xdg_state_home() -> Path:
+    """Return $XDG_STATE_HOME or its default (~/.local/state)."""
+    v = os.environ.get("XDG_STATE_HOME", "")
+    return Path(v) if v else Path.home() / ".local" / "state"
+
+
+def tgdb_config_dir() -> Path:
+    return xdg_config_home() / "tgdb"
+
+
+def tgdb_state_dir() -> Path:
+    return xdg_state_home() / "tgdb"
+
+
+def tgdb_history_file() -> Path:
+    return tgdb_state_dir() / "history"
+
+
+# ---------------------------------------------------------------------------
 # Config state
 # ---------------------------------------------------------------------------
 
@@ -41,6 +82,10 @@ class Config:
     timeout: bool = True
     ttimeout: bool = True
     wrapscan: bool = True
+
+    # History options
+    history: bool = True            # set history on|off
+    historysize: int = 1024         # set history size N  (-1 = unlimited)
 
     # Integer options
     scrollbackbuffersize: int = 10000
@@ -85,12 +130,12 @@ _ALIASES: dict[str, str] = {
 
 _BOOL_OPTIONS = {
     "autosourcereload", "color", "debugwincolor", "disasm", "hlsearch",
-    "ignorecase", "showmarks", "showdebugcommands", "timeout", "ttimeout",
-    "wrapscan",
+    "history", "ignorecase", "showmarks", "showdebugcommands", "timeout",
+    "ttimeout", "wrapscan",
 }
 _INT_OPTIONS = {
-    "scrollbackbuffersize", "tabstop", "timeoutlen", "ttimeoutlen",
-    "winminheight", "winminwidth",
+    "historysize", "scrollbackbuffersize", "tabstop", "timeoutlen",
+    "ttimeoutlen", "winminheight", "winminwidth",
 }
 _STR_OPTIONS = {
     "cgdbmodekey", "executinglinedisplay", "selectedlinedisplay",
@@ -140,6 +185,13 @@ class ConfigParser:
         self._user_commands: dict[str, UserCommandDef] = {}
         # Recursion depth guard for user command expansion
         self._exec_depth: int = 0
+        # Reference to the CommandLineBar — set by TGDBApp so that
+        # "save history" and history-size changes can reach the widget.
+        self._cmdline_bar = None
+
+    def set_cmdline_bar(self, bar) -> None:
+        """Inject a reference to the CommandLineBar for history operations."""
+        self._cmdline_bar = bar
 
     def register_handler(self, name: str,
                          fn: Callable[[list[str]], Optional[str]]) -> None:
@@ -159,12 +211,18 @@ class ConfigParser:
     # ------------------------------------------------------------------
 
     def load_default_rc(self) -> None:
-        cgdb_dir = os.environ.get("CGDB_DIR", "")
+        """Load the first existing initialization file, in priority order:
+
+        1. ``$CGDB_DIR/cgdbrc``          (legacy CGDB_DIR env-var)
+        2. ``$XDG_CONFIG_HOME/tgdb/tgdbrc`` (XDG; default ``~/.config/tgdb/tgdbrc``)
+        3. ``~/.cgdb/cgdbrc``             (legacy cgdb location, kept for compatibility)
+        """
         candidates = []
+        cgdb_dir = os.environ.get("CGDB_DIR", "")
         if cgdb_dir:
             candidates.append(Path(cgdb_dir) / "cgdbrc")
-        home = Path.home()
-        candidates.append(home / ".cgdb" / "cgdbrc")
+        candidates.append(tgdb_config_dir() / "tgdbrc")
+        candidates.append(Path.home() / ".cgdb" / "cgdbrc")
         for path in candidates:
             if path.exists():
                 self.load_file(str(path))
@@ -253,7 +311,7 @@ class ConfigParser:
         _map_m = re.match(r'^(imap|im|map)\b\s*(\S+)\s*(.*)', line, re.DOTALL | re.IGNORECASE)
         if _map_m:
             _mcmd = _map_m.group(1).lower()
-            _mode = "gdb" if _mcmd in ("imap", "im") else "cgdb"
+            _mode = "gdb" if _mcmd in ("imap", "im") else "tgdb"
             _lhs = self._decode_keyseq_tokens(_map_m.group(2))
             _rhs = self._decode_keyseq_tokens(_map_m.group(3))
             if not _lhs:
@@ -282,7 +340,7 @@ class ConfigParser:
         elif cmd in ("highlight", "hi"):
             return self._cmd_highlight(args)
         elif cmd in ("unmap", "unm"):
-            return self._cmd_unmap("cgdb", args)
+            return self._cmd_unmap("tgdb", args)
         elif cmd in ("iunmap", "iu"):
             return self._cmd_unmap("gdb", args)
         elif cmd == "noh":
@@ -295,6 +353,8 @@ class ConfigParser:
             if not args:
                 return "source: missing filename"
             return self.load_file(os.path.expanduser(args[0]))
+        elif cmd == "save":
+            return self._cmd_save(args)
 
         # User-defined commands (must start with an uppercase letter)
         if raw_cmd[:1].isupper():
@@ -546,6 +606,11 @@ class ConfigParser:
     def _cmd_set(self, args: list[str]) -> Optional[str]:
         if not args:
             return "set: missing argument"
+
+        # Special compound forms: "set history on|off" and "set history size N|unlimited"
+        if args[0].lower() == "history":
+            return self._cmd_set_history(args[1:])
+
         expr = args[0]
         # Boolean negation: noXXX
         if expr.startswith("no"):
@@ -564,6 +629,36 @@ class ConfigParser:
             setattr(self.config, name, True)
             return None
         return f"set: unknown option '{expr}'"
+
+    def _cmd_set_history(self, args: list[str]) -> Optional[str]:
+        """Handle: set history on|off  |  set history size N|unlimited"""
+        if not args:
+            # Show current state
+            size = "unlimited" if self.config.historysize < 0 else str(self.config.historysize)
+            return (
+                f"history is {'on' if self.config.history else 'off'}, "
+                f"size is {size}"
+            )
+        sub = args[0].lower()
+        if sub in ("on", "off"):
+            self.config.history = (sub == "on")
+            return None
+        if sub == "size":
+            if len(args) < 2:
+                return "set history size: missing value"
+            val = args[1].lower()
+            if val == "unlimited":
+                self.config.historysize = -1
+                return None
+            try:
+                n = int(val)
+            except ValueError:
+                return f"set history size: invalid value '{args[1]}'"
+            if n < 0:
+                return "set history size: value must be non-negative or 'unlimited'"
+            self.config.historysize = n
+            return None
+        return f"set history: unknown sub-command '{args[0]}'"
 
     def _set_option(self, name: str, value: str) -> Optional[str]:
         name = self._resolve_name(name)
@@ -588,6 +683,23 @@ class ConfigParser:
 
     def _resolve_name(self, name: str) -> str:
         return _ALIASES.get(name.lower(), name.lower())
+
+    # ------------------------------------------------------------------
+    # :save
+    # ------------------------------------------------------------------
+
+    def _cmd_save(self, args: list[str]) -> Optional[str]:
+        """Handle: save history [filename]"""
+        if not args or args[0].lower() != "history":
+            return f"save: unknown sub-command '{args[0] if args else ''}'"
+        if not self.config.history:
+            return "save history: history is disabled (set history on)"
+        bar = self._cmdline_bar
+        if bar is None:
+            return "save history: command-line bar not available"
+        path = Path(os.path.expanduser(args[1])) if len(args) >= 2 else None
+        max_size = self.config.historysize
+        return bar.save_history(path, max_size=max_size)
 
     # ------------------------------------------------------------------
     # :highlight / :hi

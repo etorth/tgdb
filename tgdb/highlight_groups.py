@@ -103,7 +103,8 @@ DEFAULT_GROUPS: dict[str, HighlightStyle] = {
     "Normal": HighlightStyle(),
     # UI — cgdb: HLG_STATUS_BAR=REVERSE, HLG_SEARCH=black on yellow,
     #           HLG_INCSEARCH=REVERSE
-    "StatusLine": HighlightStyle(reverse=True),
+    # Formerly "StatusLine"; kept as alias for cgdb config-file compatibility.
+    "CommandLine": HighlightStyle(reverse=True),
     "Search": HighlightStyle(fg="black", bg="yellow"),
     "IncSearch": HighlightStyle(reverse=True),
     # Selected line — cgdb: HLG_SELECTED_LINE_ARROW=bold white,
@@ -144,6 +145,8 @@ class HighlightGroups:
     _ALIASES: dict[str, str] = {
         "arrow": "ExecutingLineArrow",
         "linehighlight": "ExecutingLineHighlight",
+        # cgdb config files use "StatusLine"; map to the new name
+        "statusline": "CommandLine",
     }
 
     def _resolve_name(self, name: str) -> str:

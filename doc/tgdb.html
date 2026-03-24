@@ -83,7 +83,7 @@ ul.no-bullet {list-style: none}
     <li><a name="toc-Understanding-the-source-window_002e" href="#Source-Window">2.1 Understanding the source window.</a></li>
     <li><a name="toc-Understanding-the-GDB-window_002e" href="#GDB-Window">2.2 Understanding the GDB window.</a></li>
     <li><a name="toc-Understanding-the-file-dialog-window_002e" href="#File-Dialog-Window">2.3 Understanding the file dialog window.</a></li>
-    <li><a name="toc-Understanding-the-status-bar_002e" href="#Status-Bar">2.4 Understanding the status bar.</a></li>
+    <li><a name="toc-Understanding-the-command-line-bar_002e" href="#Status-Bar">2.4 Understanding the command-line bar.</a></li>
     <li><a name="toc-Switch-between-windows" href="#Switching-Windows">2.5 Switch between windows</a></li>
   </ul></li>
   <li><a name="toc-TGDB-commands" href="#Controlling-TGDB">3 TGDB commands</a>
@@ -94,7 +94,8 @@ ul.no-bullet {list-style: none}
   </ul></li>
   <li><a name="toc-TGDB-configuration-commands" href="#Configuring-TGDB">4 TGDB configuration commands</a>
   <ul class="no-bullet">
-    <li><a name="toc-User-Defined-Commands" href="#User-Defined-Commands">4.1 User-Defined Commands</a></li>
+    <li><a name="toc-Command-History" href="#Command-History">4.1 Command History</a></li>
+    <li><a name="toc-User-Defined-Commands" href="#User-Defined-Commands">4.2 User-Defined Commands</a></li>
   </ul></li>
   <li><a name="toc-TGDB-highlighting-groups" href="#Highlighting-Groups">5 TGDB highlighting groups</a>
   <ul class="no-bullet">
@@ -395,11 +396,11 @@ lot of time as the number of files grow.
 Next: <a href="#Switching-Windows" accesskey="n" rel="next">Switching Windows</a>, Previous: <a href="#File-Dialog-Window" accesskey="p" rel="prev">File Dialog Window</a>, Up: <a href="#Understanding-TGDB" accesskey="u" rel="up">Understanding TGDB</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
 </div>
 <a name="Understanding-the-status-bar_002e"></a>
-<h3 class="section">2.4 Understanding the status bar.</h3>
-<a name="index-status-bar-1"></a>
+<h3 class="section">2.4 Understanding the command-line bar.</h3>
+<a name="index-command-line-bar"></a>
 
-<a name="index-status-bar-2"></a>
-<p>The <em>status bar</em> is the general purpose way for TGDB to show the user 
+<a name="index-command-line-bar-1"></a>
+<p>The <em>command-line bar</em> is the general purpose way for TGDB to show the user 
 which commands they are currently typing or report errors to the user when 
 they occur.  TGDB does not use popup&rsquo;s or other forms of I/O to alert the 
 user of information or problems.
@@ -407,7 +408,7 @@ user of information or problems.
 <p>While TGDB is running, you can configure it with any of the commands that 
 are valid in TGDB&rsquo;s configuration file.  Simply type <kbd>:</kbd> in the source 
 window, and you will see the colon, and the rest of the command you type 
-appear in the status bar.  When you are finished typing the command that 
+appear in the command-line bar.  When you are finished typing the command that 
 you are interested in, type <code>enter</code>.  This will alert TGDB to execute 
 the command.  If at any point you would like to cancel the current
 command typed so far, type the tgdb mode key.  This will put you back
@@ -842,19 +843,28 @@ Next: <a href="#Highlighting-Groups" accesskey="n" rel="next">Highlighting Group
 <h2 class="chapter">4 TGDB configuration commands</h2>
 <a name="index-configuring-TGDB"></a>
 
-<p>By default, TGDB stores its user-specific files (such as command history,
-program logs, and config files) in the <samp>~/.tgdb/</samp> directory.  This
-location is configurable; if the environment variable <code>TGDB_DIR</code> is set
-to a directory name, TGDB will use the specified directory instead of
-<samp>~/.tgdb/</samp>. 
-</p>
-<p>There may be several features that you find useful in TGDB.  TGDB is capable
-of automating any of these commands through the use of the config file called
-<samp>tgdbrc</samp>.  It looks in <code>$TGDB_DIR</code> for that file, or in
-<code>HOME</code><samp>/.tgdb/</samp> if the <code>TGDB_DIR</code> environment variable is not
-set.  If the <samp>tgdbrc</samp> file exists, TGDB executes each one of its lines
-in order.  It is as if the user typed in all the commands into the status bar
-after the tui was initialized.
+<p>By default, TGDB stores its user-specific files following the
+<a href="https://specifications.freedesktop.org/basedir-spec/latest/">XDG Base Directory Specification</a>.
+The initialization file is looked for in the following order:</p>
+<ol>
+<li><samp>$CGDB_DIR/cgdbrc</samp> — if the <code>CGDB_DIR</code> environment variable is set (legacy).</li>
+<li><samp>$XDG_CONFIG_HOME/tgdb/tgdbrc</samp> — defaults to <samp>~/.config/tgdb/tgdbrc</samp>.</li>
+<li><samp>~/.cgdb/cgdbrc</samp> — legacy cgdb location, kept for backward compatibility.</li>
+</ol>
+<p>The XDG directories used by TGDB are:</p>
+<dl compact="compact">
+<dt>Config (<code>$XDG_CONFIG_HOME</code>, default <samp>~/.config</samp>)</dt>
+<dd><p>Initialization scripts: <samp>tgdb/tgdbrc</samp>.</p></dd>
+<dt>Data (<code>$XDG_DATA_HOME</code>, default <samp>~/.local/share</samp>)</dt>
+<dd><p>Plugin files, static assets.</p></dd>
+<dt>Cache (<code>$XDG_CACHE_HOME</code>, default <samp>~/.cache</samp>)</dt>
+<dd><p>Compiled Python bytecode, temporary logs.</p></dd>
+<dt>State (<code>$XDG_STATE_HOME</code>, default <samp>~/.local/state</samp>)</dt>
+<dd><p>Command history: <samp>tgdb/history</samp>.</p></dd>
+</dl>
+<p>If the <samp>tgdbrc</samp> file exists, TGDB executes each one of its lines
+in order.  It is as if the user typed in all the commands into the command-line bar
+after the TUI was initialized.
 </p>
 <p>The following variables change the behavior of some aspect of TGDB.  Many
 of these commands may be abbreviated in some way, and all boolean commands
@@ -874,6 +884,19 @@ this case will be updated to show the new version.  Note, TGDB only looks at
 the timestamp of the source file to determine if it has changed. So if 
 you modify the source file, and didn&rsquo;t recompile yet, TGDB will still 
 pick up on the changes.
+</p>
+</dd>
+<dt><kbd>:set history on</kbd></dt>
+<dt><kbd>:set history off</kbd></dt>
+<dd><p>Enable or disable saving command history to disk (default: on).
+The history is stored in <samp>$XDG_STATE_HOME/tgdb/history</samp>.
+See <a href="#Command-History">Command History</a> for full details.
+</p>
+</dd>
+<dt><kbd>:set history size <var>N</var></kbd></dt>
+<dt><kbd>:set history size unlimited</kbd></dt>
+<dd><p>Limit the command history to <var>N</var> entries (default: 1024).
+Use <code>unlimited</code> to keep all entries.
 </p>
 </dd>
 <dt><kbd>:set tgdbmodekey=<var>key</var></kbd></dt>
@@ -1219,8 +1242,58 @@ existing mapping with <code>:iunmap a&lt;Space&gt;b</code>.
 <p>
 Next: <a href="#Highlighting-Groups" accesskey="n" rel="next">Highlighting Groups</a>, Previous: <a href="#Configuring-TGDB" accesskey="p" rel="prev">Configuring TGDB</a>, Up: <a href="#Top" accesskey="u" rel="up">Top</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
 </div>
+
+<a name="Command-History"></a>
+<h2 class="chapter">4.1 Command History</h2>
+<a name="index-command-history"></a>
+
+<p>TGDB keeps track of every command you type into the command-line bar during
+your debugging session so that you can recall or replay them later.  History
+is saved to and loaded from
+<samp>$XDG_STATE_HOME/tgdb/history</samp> (default: <samp>~/.local/state/tgdb/history</samp>).
+</p>
+
+<h4 class="subsubsection">Navigating history</h4>
+
+<p>While the command-line bar is open (after pressing <kbd>:</kbd>), use:</p>
+<dl compact="compact">
+<dt><kbd>Up</kbd></dt>
+<dd><p>Go to the previous command in the history list.  If you have already typed
+some text before pressing <kbd>Up</kbd>, only commands whose text starts with
+that prefix are shown (prefix-search mode).</p></dd>
+<dt><kbd>Down</kbd></dt>
+<dd><p>Go to the next command in the history list (matching the same prefix).
+Pressing <kbd>Down</kbd> past the last matching entry restores the original
+input.</p></dd>
+</dl>
+
+<h4 class="subsubsection">History commands</h4>
+
+<dl compact="compact">
+<dt><kbd>:set history on</kbd></dt>
+<dt><kbd>:set history off</kbd></dt>
+<dd><p>Enable or disable command history saving.  When enabled (the default),
+each command you type is appended to the history file automatically.
+When disabled, commands are still available for in-session recall with
+<kbd>Up</kbd>/<kbd>Down</kbd>, but nothing is saved to disk.</p></dd>
+
+<dt><kbd>:set history size <var>N</var></kbd></dt>
+<dt><kbd>:set history size unlimited</kbd></dt>
+<dd><p>Set the maximum number of entries kept in the history list.  The default
+is <code>1024</code>.  Use <code>unlimited</code> (or any negative number) to keep
+all entries.  A value of <code>0</code> disables history storage entirely.
+Negative values are rejected with an error.</p></dd>
+
+<dt><kbd>:save history</kbd></dt>
+<dt><kbd>:save history <var>filename</var></kbd></dt>
+<dd><p>Save the commands recorded in the current session to the history file
+(or to <var>filename</var> if given).  Note that the <code>save history</code>
+command itself appears at the end of the saved file; you may want to
+edit the file before using <kbd>:source</kbd> to replay it.</p></dd>
+</dl>
+
 <a name="TGDB-user-defined-commands"></a>
-<h2 class="chapter">4.1 User-Defined Commands</h2>
+<h2 class="chapter">4.2 User-Defined Commands</h2>
 <a name="index-user-defined-commands"></a>
 <a name="index-command"></a>
 
@@ -1487,9 +1560,11 @@ highlighting source files.
 displaying it&rsquo;s User Interface.
 </p>
 <dl compact="compact">
-<dt><code>StatusLine</code></dt>
-<dd><p>This represents the <em>status bar</em> in TGDB.  The file dialog&rsquo;s status 
-bar also uses this group.
+<dt><code>CommandLine</code></dt>
+<dd><p>This represents the <em>command-line bar</em> at the bottom of TGDB.  The file
+dialog&rsquo;s prompt bar also uses this group.  The legacy name
+<code>StatusLine</code> is accepted as an alias for backward compatibility with
+<samp>cgdbrc</samp> files.
 </p></dd>
 <dt><code>Search</code></dt>
 <dd><p>This represents the group used when displaying the previous search in
