@@ -351,7 +351,7 @@ class CommandLineBar(Widget):
                 self.post_message(CommandSubmit(cmd))
 
         elif key in ("backspace", "ctrl+h"):
-            self._reset_history_browse()
+            self._commit_history_browse()  # adopt retrieved entry, don't revert
             if self._cursor_pos > 0:
                 self._input_buf = (
                     self._input_buf[: self._cursor_pos - 1]
@@ -364,9 +364,7 @@ class CommandLineBar(Widget):
             self.refresh()
 
         elif char and char.isprintable():
-            # Typing a new char resets history navigation
-            if self._history_idx != -1:
-                self._reset_history_browse()
+            self._commit_history_browse()  # adopt retrieved entry, don't revert
             self._input_buf = (
                 self._input_buf[: self._cursor_pos]
                 + char
@@ -419,11 +417,17 @@ class CommandLineBar(Widget):
         self.refresh()
 
     def _reset_history_browse(self) -> None:
+        """Abort browsing: revert _input_buf to the original prefix."""
         if self._history_idx != -1:
             self._input_buf = self._history_prefix
             self._cursor_pos = len(self._input_buf)
             self._history_idx = -1
             self._history_prefix = ""
+
+    def _commit_history_browse(self) -> None:
+        """Stop browsing but KEEP the current retrieved entry as _input_buf."""
+        self._history_idx = -1
+        self._history_prefix = ""
 
     # ------------------------------------------------------------------
     # Private helpers
