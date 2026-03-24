@@ -143,14 +143,11 @@ class TGDBApp(App):
             self.cp.load_file(rc_file)
         else:
             self.cp.load_default_rc()
-        if rc_file:
-            self.cp.load_file(rc_file)
-        else:
-            self.cp.load_default_rc()
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: Optional[asyncio.Task] = None
         self._cmd_task: Optional[asyncio.Task] = None   # running CommandLineBar command
+        self._pending_replay_tokens: list[str] = []     # map tokens queued after async <CR>
 
         self._mode: str = "GDB"
         self._await_mark_jump: bool = False
@@ -772,10 +769,21 @@ class TGDBApp(App):
         """Dispatch a list of key-name tokens as if the user typed them."""
         self._in_map_replay = True
         try:
-            for token in tokens:
-                self._dispatch_key_internal(token)
+            for i, token in enumerate(tokens):
+                if self._dispatch_key_internal(token):
+                    remaining = tokens[i + 1:]
+                    if remaining:
+                        self._pending_replay_tokens.extend(remaining)
+                    break
         finally:
             self._in_map_replay = False
+
+    def _resume_pending_replay(self) -> None:
+        if not self._pending_replay_tokens:
+            return
+        tokens = self._pending_replay_tokens
+        self._pending_replay_tokens = []
+        self._replay_key_sequence(tokens)
 
     # ------------------------------------------------------------------
     # imap support — GDB-mode key mapper
@@ -825,10 +833,13 @@ class TGDBApp(App):
                 if char:
                     self.gdb.send_input(char.encode())
 
-    def _dispatch_key_internal(self, key: str) -> None:
+    def _dispatch_key_internal(self, key: str) -> bool:
         """
         Route a single key-name token through the mode-aware dispatch stack.
         Used when replaying a key map expansion.
+
+        Returns True when replay should pause and queue the remaining tokens
+        (used for replayed <CR> that submits an async command task).
         """
         # Derive character: a single printable char is its own character
         if len(key) == 1 and key.isprintable():
@@ -844,7 +855,7 @@ class TGDBApp(App):
         if key == "escape" or key.lower() == tgdb_key:
             if self._mode in ("GDB", "CMD", "SCROLL", "MESSAGE"):
                 self._switch_to_tgdb()
-            return      # no-op when already in TGDB
+            return False      # no-op when already in TGDB
 
         if self._mode == "MESSAGE":
             try:
@@ -854,13 +865,13 @@ class TGDBApp(App):
                     self._switch_to_tgdb()
             except NoMatches:
                 pass
-            return
+            return False
 
         if self._mode == "CMD":
             try:
                 bar = self.query_one("#cmdline", CommandLineBar)
             except NoMatches:
-                return
+                return False
             if key in ("enter", "return"):
                 cmd = bar._input_buf
                 bar._reset_history_browse()
@@ -873,29 +884,30 @@ class TGDBApp(App):
                 # blocks which need to run as async def so 'await' works.
                 if cmd.strip():
                     self.post_message(CommandSubmit(cmd))
+                    return True
                 elif self._mode == "CMD":
                     self._switch_to_tgdb()
             else:
                 bar.feed_key(key, char)
-            return
+            return False
 
         if self._mode == "TGDB":
             src = self._get_source_view(mounted_only=True)
             if src is not None and src.handle_cgdb_key(key, char):
-                return
+                return False
             # ":" enters CMD mode even when source pane is absent
             if key == "colon" or char == ":":
                 self._enter_cmd_mode()
-                return
+                return False
             if key == "i":
                 self._switch_to_gdb()
-                return
+                return False
             if key == "s":
                 self._switch_to_gdb()
                 gdb_w = self._get_gdb_widget(mounted_only=True)
                 if gdb_w is not None:
                     gdb_w.enter_scroll_mode()
-                return
+                return False
 
         # GDB mode — send char or Enter to the terminal
         if self._mode == "GDB":
@@ -903,6 +915,7 @@ class TGDBApp(App):
                 self.gdb.send_input(char.encode())
             elif key == "enter":
                 self.gdb.send_input(b"\n")
+        return False
 
     def _handle_non_gdb_focus_key(self, key: str, char: str) -> bool:
         """Absorb keys that arrive at GDB during focus handoff to CGDB/STATUS."""
@@ -1329,11 +1342,13 @@ class TGDBApp(App):
 
         if captured_output:
             if self._show_status(captured_output):
+                self._resume_pending_replay()
                 return  # MESSAGE mode — stay until user dismisses
         else:
             self._sync_config()
         if self._mode == "CMD":
             self._switch_to_tgdb()
+        self._resume_pending_replay()
 
     def on_command_cancel(self, msg: CommandCancel) -> None:
         self._switch_to_tgdb()
