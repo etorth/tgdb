@@ -17,6 +17,7 @@ from typing import Callable, Optional
 from textual.widget import Widget
 from textual.message import Message
 from textual import events
+from rich.style import Style
 from rich.text import Text
 
 from .highlight_groups import HighlightGroups
@@ -88,6 +89,9 @@ class CommandLineBar(Widget):
         self._history_prefix: str = ""      # prefix typed before Up was pressed
         self._history_file: Optional[Path] = history_file
 
+        # ── Cursor position (within _input_buf) ──────────────────────
+        self._cursor_pos: int = 0           # 0 = before first char; len(buf) = after last
+
     # ------------------------------------------------------------------
     # Height management
     # ------------------------------------------------------------------
@@ -154,6 +158,7 @@ class CommandLineBar(Widget):
         self._input_active = True
         self._search_active = False
         self._input_buf = ""
+        self._cursor_pos = 0
         # Reset history browsing
         self._history_idx = -1
         self._history_prefix = ""
@@ -296,6 +301,26 @@ class CommandLineBar(Widget):
             self._handle_tab()
             return True
 
+        # Cursor movement (readline-style)
+        if key in ("left", "ctrl+b"):
+            if self._cursor_pos > 0:
+                self._cursor_pos -= 1
+                self.refresh()
+            return True
+        if key in ("right", "ctrl+f"):
+            if self._cursor_pos < len(self._input_buf):
+                self._cursor_pos += 1
+                self.refresh()
+            return True
+        if key in ("home", "ctrl+a"):
+            self._cursor_pos = 0
+            self.refresh()
+            return True
+        if key in ("end", "ctrl+e"):
+            self._cursor_pos = len(self._input_buf)
+            self.refresh()
+            return True
+
         # History navigation — Up/Down arrows with prefix matching
         if key == "up":
             self._history_up()
@@ -328,7 +353,12 @@ class CommandLineBar(Widget):
 
         elif key in ("backspace", "ctrl+h"):
             self._reset_history_browse()
-            self._input_buf = self._input_buf[:-1]
+            if self._cursor_pos > 0:
+                self._input_buf = (
+                    self._input_buf[: self._cursor_pos - 1]
+                    + self._input_buf[self._cursor_pos :]
+                )
+                self._cursor_pos -= 1
             if not self._input_buf:
                 self._input_active = False
                 self.post_message(CommandCancel())
@@ -338,7 +368,12 @@ class CommandLineBar(Widget):
             # Typing a new char resets history navigation
             if self._history_idx != -1:
                 self._reset_history_browse()
-            self._input_buf += char
+            self._input_buf = (
+                self._input_buf[: self._cursor_pos]
+                + char
+                + self._input_buf[self._cursor_pos :]
+            )
+            self._cursor_pos += 1
             self.refresh()
 
         else:
@@ -365,6 +400,7 @@ class CommandLineBar(Widget):
             if self._history[i].startswith(self._history_prefix):
                 self._history_idx = i
                 self._input_buf = self._history[i]
+                self._cursor_pos = len(self._input_buf)
                 self.refresh()
                 return
 
@@ -376,6 +412,7 @@ class CommandLineBar(Widget):
             if self._history[i].startswith(self._history_prefix):
                 self._history_idx = i
                 self._input_buf = self._history[i]
+                self._cursor_pos = len(self._input_buf)
                 self.refresh()
                 return
         # Past the end — restore original input
@@ -385,6 +422,7 @@ class CommandLineBar(Widget):
     def _reset_history_browse(self) -> None:
         if self._history_idx != -1:
             self._input_buf = self._history_prefix
+            self._cursor_pos = len(self._input_buf)
             self._history_idx = -1
             self._history_prefix = ""
 
@@ -461,6 +499,7 @@ class CommandLineBar(Widget):
             return
         cand = self._completions[self._completion_idx]
         self._input_buf = self._input_buf[:self._completion_arg_start] + cand
+        self._cursor_pos = len(self._input_buf)
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -479,9 +518,7 @@ class CommandLineBar(Widget):
 
         # ── Single-line modes ─────────────────────────────────────────
         if self._input_active:
-            t = Text(_pad_crop(f":{self._input_buf}", w), no_wrap=True, overflow="crop")
-            t.stylize(style)
-            return t
+            return self._render_input(w, style)
 
         if self._search_active:
             pfx = "/" if self._search_forward else "?"
@@ -494,6 +531,47 @@ class CommandLineBar(Widget):
             return t
 
         return Text(" " * w, style=style, no_wrap=True, overflow="crop")
+
+    def _render_input(self, w: int, style: str) -> Text:
+        """Render the active command-input line with a blinking block cursor."""
+        prefix = ":"
+        buf = self._input_buf
+        cursor = max(0, min(self._cursor_pos, len(buf)))
+
+        full = prefix + buf
+        cursor_in_full = len(prefix) + cursor
+
+        # Scroll the view so the cursor is always visible
+        if cursor_in_full >= w:
+            start = cursor_in_full - w + 1
+        else:
+            start = 0
+
+        # Visible slice, padded to exactly w chars
+        visible = full[start:]
+        if len(visible) < w:
+            visible += " " * (w - len(visible))
+        else:
+            visible = visible[:w]
+
+        cursor_col = cursor_in_full - start  # column of cursor in visible slice
+
+        # Build cursor style: base + reverse + blink
+        try:
+            base = Style.parse(style)
+        except Exception:
+            base = Style()
+        cursor_style = base + Style(reverse=True, blink=True)
+
+        t = Text(no_wrap=True, overflow="crop")
+        if cursor_col > 0:
+            t.append(visible[:cursor_col], style)
+        ch = visible[cursor_col] if cursor_col < len(visible) else " "
+        t.append(ch, cursor_style)
+        after_col = cursor_col + 1
+        if after_col < len(visible):
+            t.append(visible[after_col:], style)
+        return t
 
     def _render_ml_input(self, w: int, style: str) -> Text:
         """Render the heredoc continuation prompt (multi-row)."""
