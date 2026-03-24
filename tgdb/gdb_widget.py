@@ -207,6 +207,12 @@ class GDBWidget(Widget):
         self.send_to_gdb: Callable[[bytes], None] = lambda b: None
         self.resize_gdb: Callable[[int, int], None] = lambda r, c: None
         self.on_switch_to_tgdb: Callable[[], None] = lambda: None
+        # Called with a key token; returns the list of tokens to actually send
+        # (the imap expansion), or None to send the key normally.
+        # Signature: (key: str) -> list[str] | None
+        self.imap_feed: Callable[[str], "list[str] | None"] = lambda k: None
+        # Called to replay an imap expansion token by token.
+        self.imap_replay: Callable[["list[str]"], None] = lambda tokens: None
 
         self.ignorecase: bool = False
         self.wrapscan: bool = True
@@ -656,7 +662,7 @@ class GDBWidget(Widget):
             event.stop()
             return
 
-        # Normal mode — ESC switches to CGDB source pane
+        # Normal mode — ESC switches to TGDB source pane
         if key == "escape":
             self.on_switch_to_tgdb()
             event.stop()
@@ -668,7 +674,19 @@ class GDBWidget(Widget):
             event.stop()
             return
 
-        # All other keys forwarded directly to GDB's PTY
+        # Check imap before forwarding to GDB's PTY
+        imap_result = self.imap_feed(key)
+        if imap_result is None:
+            # Buffering — consumed but not yet resolved
+            event.stop()
+            return
+        if imap_result != [key]:
+            # An imap fired — replay the expansion
+            self.imap_replay(imap_result)
+            event.stop()
+            return
+
+        # No imap matched — forward key directly to GDB's PTY
         raw = self._KEY_BYTES.get(key)
         if raw:
             self.send_to_gdb(raw)
