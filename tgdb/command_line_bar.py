@@ -17,7 +17,6 @@ from typing import Callable, Optional
 from textual.widget import Widget
 from textual.message import Message
 from textual import events
-from rich.style import Style
 from rich.text import Text
 
 from .highlight_groups import HighlightGroups
@@ -556,12 +555,17 @@ class CommandLineBar(Widget):
 
         cursor_col = cursor_in_full - start  # column of cursor in visible slice
 
-        # Build cursor style: base + reverse + blink
-        try:
-            base = Style.parse(style)
-        except Exception:
-            base = Style()
-        cursor_style = base + Style(reverse=True)
+        # Build cursor style: toggle 'reverse' so the cursor always contrasts
+        # with the surrounding text. If the bar style already uses 'reverse'
+        # (the default), removing it from the cursor makes it stand out as a
+        # "normal" cell against the reversed background.  If the bar style does
+        # not use reverse, adding it creates the same contrast.
+        style_tokens = style.lower().split()
+        if "reverse" in style_tokens:
+            other_tokens = [t for t in style_tokens if t != "reverse"]
+            cursor_style = " ".join(other_tokens) if other_tokens else "default"
+        else:
+            cursor_style = f"reverse {style}" if style and style != "default" else "reverse"
 
         t = Text(no_wrap=True, overflow="crop")
         if cursor_col > 0:
