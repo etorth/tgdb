@@ -24,7 +24,7 @@ class KeyMapper:
     Usage::
         km = KeyMapper()
         km.map("cgdb", ["s"], ["escape", ":", "s", "t", "e", "p", "enter"])
-        tokens = km.feed("cgdb", key_token)   # returns [] while buffering,
+        tokens = km.feed("tgdb", key_token)   # returns [] while buffering,
                                                # or list of tokens to dispatch
     """
 
