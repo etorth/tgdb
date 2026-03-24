@@ -131,7 +131,18 @@ class TGDBApp(App):
         self.cp = ConfigParser(self.cfg, self.hl, self.km)
         self._initial_source_pending = bool(gdb_args)
         self._register_commands()
-        self.cp.set_py_globals({"app": self})
+
+        # Wire the tgdb stdlib singleton to this app instance.
+        # This makes ``import tgdb; tgdb.screen.split(...)`` work inside
+        # :python blocks without exposing any internal tgdb classes.
+        import tgdb as _tgdb_pkg
+        _tgdb_pkg.screen._set_app(self)
+        self.cp.set_py_globals({"app": self, "tgdb": _tgdb_pkg})
+
+        if rc_file:
+            self.cp.load_file(rc_file)
+        else:
+            self.cp.load_default_rc()
         if rc_file:
             self.cp.load_file(rc_file)
         else:
