@@ -276,6 +276,51 @@ class ConfigParser:
 
         return None
 
+    async def load_file_async(self, path: str,
+                              print_fn: Optional[Callable] = None) -> Optional[str]:
+        """Async version of load_file() used by execute_async().
+
+        This preserves the same heredoc parsing and "ignore per-line errors"
+        behaviour as load_file(), but routes each command through execute_async()
+        so sourced files can use top-level await inside :python blocks.
+        """
+        try:
+            with open(path) as f:
+                raw_lines = f.readlines()
+        except OSError as e:
+            return f"source: cannot open '{path}': {e}"
+
+        i = 0
+        while i < len(raw_lines):
+            line = raw_lines[i].rstrip("\n")
+            stripped = line.strip()
+            i += 1
+
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            check = stripped.lstrip(":")
+            m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', check, re.IGNORECASE)
+            if m:
+                cmd_name = m.group(1).lower()
+                marker = m.group(2)
+                code_lines: list[str] = []
+                while i < len(raw_lines):
+                    code_line = raw_lines[i].rstrip("\n")
+                    i += 1
+                    if code_line.strip() == marker:
+                        break
+                    code_lines.append(code_line)
+                await self.execute_async(
+                    f"{cmd_name}\n" + "\n".join(code_lines),
+                    print_fn=print_fn,
+                )
+                continue
+
+            await self.execute_async(stripped, print_fn=print_fn)
+
+        return None
+
     # ------------------------------------------------------------------
     # Command execution
     # ------------------------------------------------------------------
@@ -410,8 +455,9 @@ class ConfigParser:
         """Async version of execute() for use from the command task.
 
         :python and :pyfile run as real coroutines so ``await tgdb.screen.xxx()``
-        works inside scripts.  All other commands delegate to the synchronous
-        execute() (they are fast config mutations, no awaiting needed).
+        works inside scripts.  ``:source`` and user-defined commands recurse
+        through execute_async() as well, so awaited Python also works when
+        reached indirectly from a sourced file or command expansion.
         """
         stripped = line.strip()
         if not stripped:
@@ -426,7 +472,38 @@ class ConfigParser:
             else:
                 return await self._exec_pyfile_async(_raw_arg.strip(), print_fn)
 
-        # All other commands are synchronous config operations.
+        try:
+            parts = shlex.split(check)
+        except ValueError:
+            parts = check.split()
+        if not parts:
+            return None
+
+        raw_cmd = parts[0]
+        cmd = raw_cmd.lower()
+        args = parts[1:]
+
+        if cmd in ("source", "so"):
+            if not args:
+                return "source: missing filename"
+            return await self.load_file_async(
+                os.path.expanduser(args[0]),
+                print_fn=print_fn,
+            )
+
+        if raw_cmd[:1].isupper():
+            ucmd, amb_err = self._lookup_user_command(raw_cmd)
+            if amb_err:
+                return amb_err
+            if ucmd is not None:
+                m = re.match(r'\S+\s*(.*)', check, re.DOTALL)
+                raw_args = m.group(1) if m else ""
+                return await self._exec_user_command_async(
+                    ucmd,
+                    raw_args,
+                    print_fn=print_fn,
+                )
+
         return self.execute(stripped)
 
     async def _exec_py_async(self, code: str, source_label: str,
@@ -496,7 +573,13 @@ class ConfigParser:
                               file=None, flush: bool = False) -> None:
                 print_fn(sep.join(str(a) for a in args) + end)
 
-            ns["print"] = _custom_print
+            raw_builtins = ns.get("__builtins__", builtins)
+            if isinstance(raw_builtins, dict):
+                builtins_proxy = dict(raw_builtins)
+            else:
+                builtins_proxy = dict(vars(raw_builtins))
+            builtins_proxy["print"] = _custom_print
+            ns["__builtins__"] = builtins_proxy
         else:
             writer = io.StringIO()
 
@@ -520,7 +603,7 @@ class ConfigParser:
             # so that 'def foo', 'import mod', 'x = 1' survive across commands.
             self._py_namespace.update(
                 {k: v for k, v in ns.items()
-                 if k not in ("_tgdb_script", "print")}
+                 if k not in ("_tgdb_script", "__builtins__")}
             )
 
         if isinstance(writer, io.StringIO):
@@ -638,6 +721,27 @@ class ConfigParser:
         self._exec_depth += 1
         try:
             return self.execute(expanded)
+        finally:
+            self._exec_depth -= 1
+
+    async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str,
+                                       print_fn: Optional[Callable] = None) -> Optional[str]:
+        if self._exec_depth >= 20:
+            return f"{ucmd.name}: maximum command recursion depth exceeded"
+        try:
+            shlex_args = shlex.split(raw_args)
+        except ValueError:
+            shlex_args = raw_args.split()
+        err = self._validate_nargs(ucmd.nargs, shlex_args, raw_args)
+        if err:
+            return f"{ucmd.name}: {err}"
+        try:
+            expanded = self._expand_replacement(ucmd.replacement, shlex_args, raw_args)
+        except Exception as e:
+            return f"{ucmd.name}: error expanding replacement: {e}"
+        self._exec_depth += 1
+        try:
+            return await self.execute_async(expanded, print_fn=print_fn)
         finally:
             self._exec_depth -= 1
 
