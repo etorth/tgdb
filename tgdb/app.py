@@ -254,6 +254,8 @@ class TGDBApp(App):
         gdb_w.send_to_gdb = self.gdb.send_input        # bytes → primary PTY
         gdb_w.resize_gdb = self.gdb.resize             # keep pyte in sync
         gdb_w.on_switch_to_tgdb = self._switch_to_tgdb
+        gdb_w.imap_feed = self._imap_feed
+        gdb_w.imap_replay = self._replay_gdb_key_sequence
 
         # Configure file dialog
         fd = self.query_one("#file-dlg", FileDialog)
@@ -737,6 +739,54 @@ class TGDBApp(App):
                 self._dispatch_key_internal(token)
         finally:
             self._in_map_replay = False
+
+    # ------------------------------------------------------------------
+    # imap support — GDB-mode key mapper
+    # ------------------------------------------------------------------
+
+    def _imap_feed(self, key: str) -> "list[str] | None":
+        """Feed one key token to the GDB-mode mapper.
+
+        Returns:
+        - ``None``  : token buffered (no result yet)
+        - ``[key]`` : no imap matched — send key as-is
+        - other list: imap expansion — replay instead of forwarding
+        """
+        if self._in_map_replay:
+            return [key]
+        result = self.km.feed("gdb", key)
+        if result == []:
+            return None     # still buffering
+        return result
+
+    def _replay_gdb_key_sequence(self, tokens: list[str]) -> None:
+        """Replay an imap expansion directly into the GDB PTY."""
+        gdb_w = self._get_gdb_widget(mounted_only=True)
+        for token in tokens:
+            # Special tokens that need escape sequences
+            raw = gdb_w._KEY_BYTES.get(token) if gdb_w else None
+            if raw:
+                self.gdb.send_input(raw)
+            else:
+                # Derive char from token
+                if len(token) == 1 and token.isprintable():
+                    char = token
+                elif token == "space":
+                    char = " "
+                elif token == "enter":
+                    char = "\n"
+                elif token == "tab":
+                    char = "\t"
+                elif token == "backspace":
+                    char = "\x08"
+                elif token == "escape":
+                    char = "\x1b"
+                elif token.startswith("ctrl+") and len(token) == 6:
+                    char = chr(ord(token[5].upper()) - 64)
+                else:
+                    char = ""
+                if char:
+                    self.gdb.send_input(char.encode())
 
     def _dispatch_key_internal(self, key: str) -> None:
         """
