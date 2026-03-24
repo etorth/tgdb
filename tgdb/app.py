@@ -583,10 +583,12 @@ class TGDBApp(App):
             status = self.query_one("#cmdline")
             splitter = self.query_one("#splitter", Splitter)
         except NoMatches:
+            self._workspace_dynamic = False
             return None
         src = self._get_source_view(mounted_only=True)
         gdb = self._get_gdb_widget(mounted_only=True)
         if src is None or gdb is None:
+            self._workspace_dynamic = False
             return None
 
         new_root = PaneContainer(
@@ -594,11 +596,18 @@ class TGDBApp(App):
             orientation=self.cfg.winsplitorientation,
             id="split-container",
         )
-        async with global_container.batch():
+        try:
+            # Remove children from the static container and the container itself,
+            # then mount the new PaneContainer.  The mount is done OUTSIDE any
+            # batch() so that Textual fully processes new_root's lifecycle
+            # (on_mount event, etc.) before we try to mount children into it.
             await old_root.remove_children([src, splitter, gdb])
             await old_root.remove()
             await global_container.mount(new_root, before=status)
-        await new_root.set_items([src, gdb])
+            await new_root.set_items([src, gdb])
+        except Exception:
+            self._workspace_dynamic = False
+            raise
         return new_root
 
     async def _replace_workspace_item(self, target: Widget, new_item: Widget) -> bool:
@@ -1591,7 +1600,8 @@ class TGDBApp(App):
                 self.query_one("#split-container", PaneContainer).set_orientation(
                     self.cfg.winsplitorientation
                 )
-            except NoMatches:
+            except (NoMatches, Exception):
+                # WrongType or missing: dynamic workspace is in transition, skip
                 pass
             self._last_orientation = self.cfg.winsplitorientation
             return

@@ -5,18 +5,18 @@ manipulation to :python scripts as ``import tgdb; tgdb.screen.split(...)``.
 Design notes
 ------------
 All write operations (split, close, attach, detach, close_all_panes) are
-scheduled as asyncio coroutines via ``asyncio.ensure_future``.  Because the
-:python exec() runs synchronously in the Textual event loop, these coroutines
-are queued and execute **in the order they were scheduled**, but only after
-exec() returns and control is yielded back to the event loop.
+scheduled via ``app.call_later()``, which runs them inside Textual's event
+loop after the current :python exec() returns.  This ensures all Textual DOM
+operations (mount, remove, etc.) have full widget lifecycle support.
 
-This means:
-- Read operations (size, width, height, get_pane) return results based on the
-  **current** widget-tree state (i.e. state BEFORE the queued mutations run).
-- ``get_pane(address)`` returns a PaneHandle that records the address but does
-  NOT resolve it immediately.  The resolution happens when the corresponding
-  attach/detach coroutine runs — by which time all earlier split/close
-  mutations have already been applied to the widget tree.
+Execution order guarantee: ``call_later`` callbacks are processed in the order
+they were registered, so multiple split/attach calls within one :python block
+execute in the order written.
+
+- Read operations (size, width, height, get_pane) reflect current state.
+- ``get_pane(address)`` returns a PaneHandle that resolves lazily when the
+  corresponding async operation runs (after earlier splits have been applied).
+
 
 Pane addresses
 --------------
@@ -31,7 +31,6 @@ container tree starting from the root PaneContainer:
 """
 from __future__ import annotations
 
-import asyncio
 import enum
 from typing import TYPE_CHECKING, Optional
 
@@ -77,11 +76,11 @@ class PaneHandle:
 
     def attach(self, pane_type: Pane) -> None:
         """Replace the cell's current content with a named pane widget."""
-        asyncio.ensure_future(self._screen._do_attach(self._address, pane_type))
+        self._screen._schedule(self._screen._do_attach, self._address, pane_type)
 
     def detach(self) -> None:
         """Replace the cell's content with an EmptyPane."""
-        asyncio.ensure_future(self._screen._do_detach(self._address))
+        self._screen._schedule(self._screen._do_detach, self._address)
 
     def __repr__(self) -> str:
         return f"PaneHandle({self._address})"
@@ -134,12 +133,19 @@ class TGDBScreen:
         return PaneHandle(self, list(address))
 
     # ------------------------------------------------------------------
-    # Write operations (async, scheduled via ensure_future)
+    # Write operations (scheduled via app.call_later so they run inside
+    # Textual's event loop with full widget lifecycle support)
     # ------------------------------------------------------------------
+
+    def _schedule(self, coro_fn, *args) -> None:
+        """Schedule an async operation via Textual's call_later."""
+        if self._app is None:
+            return
+        self._app.call_later(coro_fn, *args)
 
     def close_all_panes(self) -> None:
         """Remove all workspace panes and reset to a single empty cell."""
-        asyncio.ensure_future(self._do_close_all())
+        self._schedule(self._do_close_all)
 
     def split(self, pane: list[int] | None = None,
               mode: SplitMode = SplitMode.HORIZONTAL) -> None:
@@ -155,13 +161,11 @@ class TGDBScreen:
         * If the orientations differ, the target is wrapped in a new container
           of the requested *mode* and the new empty cell is added alongside it.
         """
-        if pane is None:
-            pane = []
-        asyncio.ensure_future(self._do_split(list(pane), mode))
+        self._schedule(self._do_split, list(pane) if pane is not None else [], mode)
 
     def close(self, address: list[int]) -> None:
         """Delete the workspace cell at *address* (equivalent to context-menu Delete)."""
-        asyncio.ensure_future(self._do_close(list(address)))
+        self._schedule(self._do_close, list(address))
 
     # ------------------------------------------------------------------
     # Async implementation helpers
