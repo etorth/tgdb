@@ -606,7 +606,7 @@ class GDBController:
     def set_breakpoint(self, location: str, temporary: bool = False) -> None:
         flag = "-t " if temporary else ""
         self.mi_command(f"-break-insert {flag}{location}")
-        asyncio.ensure_future(self._delayed_break_list())
+        asyncio.create_task(self._delayed_break_list())
 
     async def _delayed_break_list(self) -> None:
         await asyncio.sleep(0.1)
@@ -637,7 +637,7 @@ class GDBController:
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)
-            asyncio.ensure_future(self._refresh_breakpoints())
+            asyncio.create_task(self._refresh_breakpoints())
         elif cls == "running":
             self._inferior_running = True
             self.locals = []

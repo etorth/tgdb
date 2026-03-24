@@ -1,21 +1,26 @@
 """
 tgdb standard-library namespace — exposes workspace, screen, and pane
-manipulation to :python scripts as ``import tgdb; tgdb.screen.split(...)``.
+manipulation to :python scripts as ``import tgdb; await tgdb.screen.split(...)``.
 
 Design notes
 ------------
 All write operations (split, close, attach, detach, close_all_panes) are
-scheduled via ``app.call_later()``, which runs them inside Textual's event
-loop after the current :python exec() returns.  This ensures all Textual DOM
-operations (mount, remove, etc.) have full widget lifecycle support.
+``async def`` coroutines.  Because :python heredocs now run as a proper
+``async def _tgdb_script()`` coroutine (awaited from the command task),
+scripts can simply ``await`` these operations directly:
 
-Execution order guarantee: ``call_later`` callbacks are processed in the order
-they were registered, so multiple split/attach calls within one :python block
-execute in the order written.
+    await tgdb.screen.close_all_panes()
+    await tgdb.screen.split(pane=[], mode=tgdb.SplitMode.HORIZONTAL)
+    src = tgdb.screen.get_pane([0])
+    await src.attach(tgdb.Pane.SOURCE)
 
-- Read operations (size, width, height, get_pane) reflect current state.
-- ``get_pane(address)`` returns a PaneHandle that resolves lazily when the
-  corresponding async operation runs (after earlier splits have been applied).
+Each await suspends the script, lets Textual complete the DOM mutation
+(mount/remove etc.), then resumes the script.  This guarantees that
+earlier splits are fully applied before later address lookups run.
+
+- Read operations (size, width, height, get_pane) remain synchronous.
+- ``get_pane(address)`` returns a PaneHandle immediately; the address is
+  resolved against the live widget tree when the async attach/detach runs.
 
 
 Pane addresses
@@ -74,13 +79,13 @@ class PaneHandle:
         self._screen = screen
         self._address = address
 
-    def attach(self, pane_type: Pane) -> None:
+    async def attach(self, pane_type: Pane) -> None:
         """Replace the cell's current content with a named pane widget."""
-        self._screen._schedule(self._screen._do_attach, self._address, pane_type)
+        await self._screen._do_attach(self._address, pane_type)
 
-    def detach(self) -> None:
+    async def detach(self) -> None:
         """Replace the cell's content with an EmptyPane."""
-        self._screen._schedule(self._screen._do_detach, self._address)
+        await self._screen._do_detach(self._address)
 
     def __repr__(self) -> str:
         return f"PaneHandle({self._address})"
@@ -133,21 +138,14 @@ class TGDBScreen:
         return PaneHandle(self, list(address))
 
     # ------------------------------------------------------------------
-    # Write operations (scheduled via app.call_later so they run inside
-    # Textual's event loop with full widget lifecycle support)
+    # Write operations — async coroutines; call with ``await``
     # ------------------------------------------------------------------
 
-    def _schedule(self, coro_fn, *args) -> None:
-        """Schedule an async operation via Textual's call_later."""
-        if self._app is None:
-            return
-        self._app.call_later(coro_fn, *args)
-
-    def close_all_panes(self) -> None:
+    async def close_all_panes(self) -> None:
         """Remove all workspace panes and reset to a single empty cell."""
-        self._schedule(self._do_close_all)
+        await self._do_close_all()
 
-    def split(self, pane: list[int] | None = None,
+    async def split(self, pane: list[int] | None = None,
               mode: SplitMode = SplitMode.HORIZONTAL) -> None:
         """Add a new empty cell relative to the cell at *pane*.
 
@@ -161,11 +159,11 @@ class TGDBScreen:
         * If the orientations differ, the target is wrapped in a new container
           of the requested *mode* and the new empty cell is added alongside it.
         """
-        self._schedule(self._do_split, list(pane) if pane is not None else [], mode)
+        await self._do_split(list(pane) if pane is not None else [], mode)
 
-    def close(self, address: list[int]) -> None:
+    async def close(self, address: list[int]) -> None:
         """Delete the workspace cell at *address* (equivalent to context-menu Delete)."""
-        self._schedule(self._do_close, list(address))
+        await self._do_close(list(address))
 
     # ------------------------------------------------------------------
     # Async implementation helpers

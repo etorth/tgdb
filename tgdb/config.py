@@ -7,6 +7,7 @@ Supports all :set options, :highlight, :map, :imap, :unmap, :iunmap.
 """
 from __future__ import annotations
 
+import asyncio
 import builtins
 import contextlib
 import io
@@ -14,6 +15,7 @@ import json
 import os
 import re
 import shlex
+import textwrap
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -399,6 +401,112 @@ class ConfigParser:
         except OSError as e:
             return f"pyfile: cannot open '{path}': {e}"
         return self._exec_py(code, path)
+
+    # ------------------------------------------------------------------
+    # Async execute — used by CommandLineBar task runner
+    # ------------------------------------------------------------------
+
+    async def execute_async(self, line: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+        """Async version of execute() for use from the command task.
+
+        :python and :pyfile run as real coroutines so ``await tgdb.screen.xxx()``
+        works inside scripts.  All other commands delegate to the synchronous
+        execute() (they are fast config mutations, no awaiting needed).
+        """
+        stripped = line.strip()
+        if not stripped:
+            return None
+        check = stripped[1:].strip() if stripped.startswith(":") else stripped
+
+        _raw = re.match(r'^(python|pyfile|pyf|py)\s*(.*)', check, re.DOTALL | re.IGNORECASE)
+        if _raw:
+            _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
+            if _cmd in ("python", "py"):
+                return await self._exec_py_async(_raw_arg, "<tgdb:python>", print_fn)
+            else:
+                return await self._exec_pyfile_async(_raw_arg.strip(), print_fn)
+
+        # All other commands are synchronous config operations.
+        return self.execute(stripped)
+
+    async def _exec_py_async(self, code: str, source_label: str,
+                              print_fn: Optional[Callable] = None) -> Optional[str]:
+        """Compile *code* as ``async def _tgdb_script()`` and await it.
+
+        This lets scripts use ``await tgdb.screen.split(...)`` etc.
+        Each ``print()`` call immediately forwards the text to *print_fn*
+        (the CommandLineBar's append_output) so output appears as soon as
+        the event loop gets a cycle.
+        """
+        if not code.strip():
+            return None
+
+        # Indent and wrap in an async def so the user can use await freely.
+        try:
+            indented = textwrap.indent(code, "    ")
+            wrapper = f"async def _tgdb_script():\n{indented}\n"
+            compiled = compile(wrapper, source_label, "exec")
+        except SyntaxError:
+            return traceback.format_exc().strip()
+
+        ns = dict(self._py_namespace)
+
+        # Install a custom print() that forwards output to print_fn immediately.
+        # A plain sys.stdout redirect is also set up to catch output from
+        # imported modules (e.g. third-party libraries that call sys.stdout.write).
+        class _Writer:
+            def __init__(self, fn: Callable) -> None:
+                self._fn = fn
+            def write(self, s: str) -> int:
+                if s:
+                    self._fn(s)
+                return len(s)
+            def flush(self) -> None:
+                pass
+
+        if print_fn is not None:
+            writer: Any = _Writer(print_fn)
+
+            def _custom_print(*args, sep: str = " ", end: str = "\n",
+                               file=None, flush: bool = False) -> None:
+                print_fn(sep.join(str(a) for a in args) + end)
+
+            ns["print"] = _custom_print
+        else:
+            writer = io.StringIO()
+
+        try:
+            exec(compiled, ns)  # noqa: S102 — defines _tgdb_script in ns
+            script_fn = ns.get("_tgdb_script")
+            if script_fn is None:
+                return "Internal error: _tgdb_script not defined after exec"
+            with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
+                await script_fn()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            err = traceback.format_exc().strip()
+            if print_fn:
+                print_fn(err)
+                return None
+            return err
+
+        if isinstance(writer, io.StringIO):
+            out = writer.getvalue().rstrip("\n")
+            return out or None
+        return None
+
+    async def _exec_pyfile_async(self, path: str,
+                                  print_fn: Optional[Callable] = None) -> Optional[str]:
+        """Execute a Python file as an async coroutine."""
+        if not path:
+            return "pyfile: missing filename"
+        path = os.path.expanduser(path)
+        try:
+            code = Path(path).read_text(encoding="utf-8")
+        except OSError as e:
+            return f"pyfile: cannot open '{path}': {e}"
+        return await self._exec_py_async(code, path, print_fn)
 
     # ------------------------------------------------------------------
     # :command — user-defined commands
