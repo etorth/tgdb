@@ -1,9 +1,6 @@
 """
 Dedicated bottom command-line bar for ':' commands, search prompts, and messages.
 
-Formerly called StatusBar; renamed to CommandLineBar to better reflect its role
-as a vim/cgdb-style command line rather than a passive status display.
-
 Normally renders as one row.  Expands vertically during:
 - Heredoc multi-line :python << MARKER input (collection phase)
 - Multi-line command output / error display (dismiss phase)
@@ -395,7 +392,7 @@ class CommandLineBar(Widget):
             if self._cursor_pos > 0:
                 self._input_buf = (
                     self._input_buf[: self._cursor_pos - 1]
-                    + self._input_buf[self._cursor_pos :]
+                    + self._input_buf[self._cursor_pos:]
                 )
                 self._cursor_pos -= 1
             if not self._input_buf:
@@ -408,7 +405,7 @@ class CommandLineBar(Widget):
             self._input_buf = (
                 self._input_buf[: self._cursor_pos]
                 + char
-                + self._input_buf[self._cursor_pos :]
+                + self._input_buf[self._cursor_pos:]
             )
             self._cursor_pos += 1
             self.refresh()

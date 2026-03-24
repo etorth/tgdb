@@ -11,4 +11,3 @@ Import it inside a :python block to access workspace and screen utilities::
 from .tgdb_api import screen, SplitMode, Pane, PaneHandle, TGDBScreen
 
 __all__ = ["screen", "SplitMode", "Pane", "PaneHandle", "TGDBScreen"]
-

@@ -908,7 +908,6 @@ class TGDBApp(App):
             elif key == "enter":
                 self.gdb.send_input(b"\n")
 
-
     def _handle_non_gdb_focus_key(self, key: str, char: str) -> bool:
         """Absorb keys that arrive at GDB during focus handoff to CGDB/STATUS."""
         if self._handle_pending_mark_key(char):
