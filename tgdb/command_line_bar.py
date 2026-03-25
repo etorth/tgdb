@@ -292,7 +292,7 @@ class CommandLineBar(Widget):
                 return True
             if key in ("enter", "return", "escape", "q"):
                 self.dismiss_message()
-                self.post_message(CommandCancel())
+                self.post_message(MessageDismissed())
                 return True
             # Any other key: not consumed — app will dismiss
             return False
@@ -683,4 +683,14 @@ class CommandSubmit(Message):
 
 
 class CommandCancel(Message):
+    pass
+
+
+class MessageDismissed(Message):
+    """Posted when the multiline message display is dismissed (Enter/ESC/q).
+
+    Distinct from CommandCancel (which is for cancelling active CMD input)
+    so that stale dismissal events don't kill a CMD session entered during
+    map replay after the message was already cleared.
+    """
     pass
