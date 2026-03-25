@@ -772,10 +772,13 @@ class SourceView(Widget):
         if getattr(self.app, "_mode", None) == "CMD":
             from .command_line_bar import CommandLineBar
 
-            status = self.app.query_one("#cmdline", CommandLineBar)
-            if status.feed_key(key, char):
-                event.stop()
-                return
+            try:
+                status = self.app.query_one("#cmdline", CommandLineBar)
+                status.feed_key(key, char)
+            except Exception:
+                pass
+            event.stop()
+            return
 
         if self.handle_cgdb_key(key, char):
             event.stop()
