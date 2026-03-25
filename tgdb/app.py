@@ -139,10 +139,7 @@ class TGDBApp(App):
         _tgdb_pkg.screen._set_app(self)
         self.cp.set_py_globals({"app": self, "tgdb": _tgdb_pkg})
 
-        if rc_file:
-            self.cp.load_file(rc_file)
-        else:
-            self.cp.load_default_rc()
+        self._rc_file: Optional[str] = rc_file  # resolved in on_mount after app is ready
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: Optional[asyncio.Task] = None
@@ -307,6 +304,10 @@ class TGDBApp(App):
         self._gdb_task = asyncio.create_task(self.gdb.run_async())
         asyncio.create_task(self._request_initial_location())
 
+        # Source the rc file as an async task so it runs exactly like the user
+        # typed the commands interactively after startup (await-capable, etc.).
+        asyncio.create_task(self._load_rc_async())
+
         # Initial mode: GDB focused
         self._set_mode("GDB")
         gdb_w.focus()
@@ -314,6 +315,26 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
     # Mode management
     # ------------------------------------------------------------------
+
+    async def _load_rc_async(self) -> None:
+        """Source the rc file as if the user had typed each command interactively.
+
+        ``--rcfile NONE`` skips loading entirely.  Otherwise the default rc is
+        ``~/.config/tgdb/tgdbrc`` (or the path given with ``--rcfile``).
+        """
+        if self._rc_file == "NONE":
+            return
+        if self._rc_file:
+            path: Optional[str] = self._rc_file
+        else:
+            p = self.cp.default_rc_path()
+            if p is None:
+                return
+            path = str(p)
+        err = await self.cp.load_file_async(path)
+        if err:
+            self._show_status(err)
+        self._sync_config()
 
     def _set_mode(self, mode: str) -> None:
         self._mode = mode

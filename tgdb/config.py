@@ -1,8 +1,8 @@
 """
-Configuration parser — mirrors cgdb's cgdbrc.cpp.
+Configuration parser for tgdb.
 
-Supports $CGDB_DIR/cgdbrc, $XDG_CONFIG_HOME/tgdb/tgdbrc, ~/.config/tgdb/tgdbrc,
-and ~/.cgdb/cgdbrc (legacy) as initialization files.
+Supports $XDG_CONFIG_HOME/tgdb/tgdbrc (default: ~/.config/tgdb/tgdbrc)
+as the initialization file.
 Supports all :set options, :highlight, :map, :imap, :unmap, :iunmap.
 """
 from __future__ import annotations
@@ -212,23 +212,16 @@ class ConfigParser:
     # File loading
     # ------------------------------------------------------------------
 
-    def load_default_rc(self) -> None:
-        """Load the first existing initialization file, in priority order:
+    def default_rc_path(self) -> Optional[Path]:
+        """Return the default rc file path (~/.config/tgdb/tgdbrc), or None if it doesn't exist."""
+        path = tgdb_config_dir() / "tgdbrc"
+        return path if path.exists() else None
 
-        1. ``$CGDB_DIR/cgdbrc``          (legacy CGDB_DIR env-var)
-        2. ``$XDG_CONFIG_HOME/tgdb/tgdbrc`` (XDG; default ``~/.config/tgdb/tgdbrc``)
-        3. ``~/.cgdb/cgdbrc``             (legacy cgdb location, kept for compatibility)
-        """
-        candidates = []
-        cgdb_dir = os.environ.get("CGDB_DIR", "")
-        if cgdb_dir:
-            candidates.append(Path(cgdb_dir) / "cgdbrc")
-        candidates.append(tgdb_config_dir() / "tgdbrc")
-        candidates.append(Path.home() / ".cgdb" / "cgdbrc")
-        for path in candidates:
-            if path.exists():
-                self.load_file(str(path))
-                return
+    def load_default_rc(self) -> None:
+        """Load ~/.config/tgdb/tgdbrc if it exists (synchronous, used only for --rcfile path)."""
+        path = self.default_rc_path()
+        if path is not None:
+            self.load_file(str(path))
 
     def load_file(self, path: str) -> Optional[str]:
         """Load and execute every non-blank, non-comment line in *path*.
@@ -508,7 +501,7 @@ class ConfigParser:
 
     async def _exec_py_async(self, code: str, source_label: str,
                              print_fn: Optional[Callable] = None) -> Optional[str]:
-        """Compile *code* as ``async def _tgdb_script()`` and await it.
+        """Compile *code* as ``async def _tgdb_RSVD_run_script()`` and await it.
 
         This lets scripts use ``await tgdb.screen.split(...)`` etc.
         Each ``print()`` call immediately forwards the text to *print_fn*
@@ -522,17 +515,22 @@ class ConfigParser:
         # Inject a 'finally' block that copies function-local names back to
         # globals (== ns) so that top-level 'def foo', 'import x', 'x = 1'
         # survive into the persistent namespace — same as the sync exec() path.
+
+        # ensure the user's code itself is properly de-indented
+        # in case they pasted it with leading tabs/spaces
+        user_code = textwrap.dedent(code)
+
+        # re-indent the user's code by exactly 8 spaces (2 levels: one for 'def', one for 'try')
+        indented_user_code = textwrap.indent(user_code, "        ")
+        wrapper = f"""\
+async def _tgdb_RSVD_run_script():
+    try:
+{indented_user_code}
+    finally:
+        _tgdb_RSVD_locs = locals()
+        globals().update({{k: v for k, v in _tgdb_RSVD_locs.items() if not k.startswith('_tgdb_RSVD')}})
+"""
         try:
-            user_lines = textwrap.indent(code, "    ")
-            wrapper = (
-                "async def _tgdb_script():\n"
-                "    try:\n"
-                + textwrap.indent(user_lines, "    ")
-                + "\n    finally:\n"
-                "        globals().update(\n"
-                "            {_k: _v for _k, _v in locals().items()\n"
-                "             if not _k.startswith('_tgdb_')})\n"
-            )
             compiled = compile(wrapper, source_label, "exec")
         except SyntaxError:
             return traceback.format_exc().strip()
@@ -584,10 +582,10 @@ class ConfigParser:
             writer = io.StringIO()
 
         try:
-            exec(compiled, ns)  # noqa: S102 — defines _tgdb_script in ns
-            script_fn = ns.get("_tgdb_script")
+            exec(compiled, ns)  # noqa: S102 — defines _tgdb_RSVD_run_script in ns
+            script_fn = ns.get("_tgdb_RSVD_run_script")
             if script_fn is None:
-                return "Internal error: _tgdb_script not defined after exec"
+                return "Internal error: _tgdb_RSVD_run_script not defined after exec"
             with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
                 await script_fn()
         except asyncio.CancelledError:
@@ -601,10 +599,7 @@ class ConfigParser:
         finally:
             # Propagate any new/modified names back to the persistent namespace
             # so that 'def foo', 'import mod', 'x = 1' survive across commands.
-            self._py_namespace.update(
-                {k: v for k, v in ns.items()
-                 if k not in ("_tgdb_script", "__builtins__")}
-            )
+            self._py_namespace.update({k: v for k, v in ns.items() if k not in ("_tgdb_RSVD_run_script", "__builtins__")})
 
         if isinstance(writer, io.StringIO):
             out = writer.getvalue().rstrip("\n")

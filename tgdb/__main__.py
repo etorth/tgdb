@@ -1,4 +1,4 @@
-"""tgdb entry point — command-line interface compatible with cgdb."""
+"""tgdb entry point — command-line interface."""
 from __future__ import annotations
 
 import argparse
@@ -37,7 +37,7 @@ Examples:
     parser.add_argument(
         "-r", "--rcfile", metavar="FILE",
         default=None,
-        help="Read configuration from FILE instead of ~/.cgdb/cgdbrc",
+        help="Read configuration from FILE instead of ~/.config/tgdb/tgdbrc; use NONE to skip",
     )
     parser.add_argument(
         "--args", action="store_true",
