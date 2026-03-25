@@ -25,6 +25,12 @@ if TYPE_CHECKING:
     from .highlight_groups import HighlightGroups
     from .key_mapper import KeyMapper
 
+# ---------------------------------------------------------------------------
+# Reserved namespace prefix — any name starting with this string is internal
+# and must never leak into or be overwritten from user Python scripts.
+# ---------------------------------------------------------------------------
+_TGDB_RESERVED_PREFIX = "_tgdb_RSVD"
+
 
 # ---------------------------------------------------------------------------
 # XDG base-directory helpers
@@ -523,12 +529,12 @@ class ConfigParser:
         # re-indent the user's code by exactly 8 spaces (2 levels: one for 'def', one for 'try')
         indented_user_code = textwrap.indent(user_code, "        ")
         wrapper = f"""\
-async def _tgdb_RSVD_run_script():
+async def {_TGDB_RESERVED_PREFIX}_run_script():
     try:
 {indented_user_code}
     finally:
-        _tgdb_RSVD_locs = locals()
-        globals().update({{k: v for k, v in _tgdb_RSVD_locs.items() if not k.startswith('_tgdb_RSVD')}})
+        {_TGDB_RESERVED_PREFIX}_locs = locals()
+        globals().update({{k: v for k, v in {_TGDB_RESERVED_PREFIX}_locs.items() if not k.startswith('{_TGDB_RESERVED_PREFIX}')}})
 """
         try:
             compiled = compile(wrapper, source_label, "exec")
@@ -583,9 +589,9 @@ async def _tgdb_RSVD_run_script():
 
         try:
             exec(compiled, ns)  # noqa: S102 — defines _tgdb_RSVD_run_script in ns
-            script_fn = ns.get("_tgdb_RSVD_run_script")
+            script_fn = ns.get(f"{_TGDB_RESERVED_PREFIX}_run_script")
             if script_fn is None:
-                return "Internal error: _tgdb_RSVD_run_script not defined after exec"
+                return f"Internal error: {_TGDB_RESERVED_PREFIX}_run_script not defined after exec"
             with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
                 await script_fn()
         except asyncio.CancelledError:
@@ -599,7 +605,9 @@ async def _tgdb_RSVD_run_script():
         finally:
             # Propagate any new/modified names back to the persistent namespace
             # so that 'def foo', 'import mod', 'x = 1' survive across commands.
-            self._py_namespace.update({k: v for k, v in ns.items() if k not in ("_tgdb_RSVD_run_script", "__builtins__")})
+            self._py_namespace.update({k: v for k, v in ns.items()
+                                        if not k.startswith(_TGDB_RESERVED_PREFIX)
+                                        and k != "__builtins__"})
 
         if isinstance(writer, io.StringIO):
             out = writer.getvalue().rstrip("\n")

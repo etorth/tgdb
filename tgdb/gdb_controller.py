@@ -293,7 +293,6 @@ class GDBController:
         """
         # Create secondary PTY for MI channel
         mi_master_fd, mi_slave_fd = os.openpty()
-        self._mi_master_fd = mi_master_fd
 
         # Disable echo on MI slave so our written commands don't echo back
         try:
@@ -307,14 +306,24 @@ class GDBController:
         mi_slave_name = os.ttyname(mi_slave_fd)
         # Keep slave fd open — if we close it before GDB opens it, the master
         # immediately returns EIO (no slave reader). GDB opens its own copy.
-        self._mi_slave_fd = mi_slave_fd
 
         # Spawn GDB:
-        #   --nw              : no TUI (cgdb draws its own UI)
+        #   --nw              : no TUI
         #   -ex "new-ui mi X" : open MI channel on secondary PTY
         cmd = [self.gdb_path, "--nw", "-ex", f"new-ui mi {mi_slave_name}"]
         cmd.extend(self.gdb_args)
-        self._proc = ptyprocess.PtyProcess.spawn(cmd, dimensions=(rows, cols))
+        try:
+            self._proc = ptyprocess.PtyProcess.spawn(cmd, dimensions=(rows, cols))
+        except Exception:
+            # Clean up PTY fds if spawn fails so we don't leak them.
+            for fd in (mi_master_fd, mi_slave_fd):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            raise
+        self._mi_master_fd = mi_master_fd
+        self._mi_slave_fd = mi_slave_fd
 
     def resize(self, rows: int, cols: int) -> None:
         if self._proc and self._proc.isalive():

@@ -1703,13 +1703,20 @@ class TGDBApp(App):
         if command_name in {"up", "down", "frame", "f", "select-frame", "thread"}:
             asyncio.get_running_loop().call_later(
                 0.1,
-                lambda: self.gdb.request_current_location(report_error=False),
+                lambda: self._safe_request_location(),
             )
         self._switch_to_gdb()
 
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
+
+    def _safe_request_location(self) -> None:
+        """Safely request the current source location; swallow any error."""
+        try:
+            self.gdb.request_current_location(report_error=False)
+        except Exception:
+            pass
 
     def _apply_split(self) -> None:
         if self._workspace_dynamic:
