@@ -290,12 +290,10 @@ class CommandLineBar(Widget):
             if key in ("k", "up"):
                 self._msg_scroll_up()
                 return True
-            if key in ("enter", "return", "escape", "q"):
-                self.dismiss_message()
-                self.post_message(MessageDismissed())
-                return True
-            # Any other key: not consumed — app will dismiss
-            return False
+            # Any other key (including enter/ESC) dismisses the message.
+            self.dismiss_message()
+            self.post_message(MessageDismissed())
+            return True
 
         # ── Heredoc continuation input ────────────────────────────────
         if self._ml_active:
