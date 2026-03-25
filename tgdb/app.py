@@ -5,7 +5,7 @@ Global layout:
   ┌──────────────────────────┐
   │    Source / GDB area     │
   ├──────────────────────────┤
-  │    command-line bar  │  1 line
+  │    command-line bar      │  1 line
   └──────────────────────────┘
 
 The source pane itself reserves its bottom row for the current file path.
