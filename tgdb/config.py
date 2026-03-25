@@ -610,6 +610,7 @@ class ConfigParser:
             out = writer.getvalue().rstrip("\n")
             return out or None
         return None
+
     async def _exec_pyfile_async(self, path: str,
                                  print_fn: Optional[Callable] = None) -> Optional[str]:
         """Execute a Python file as an async coroutine."""
