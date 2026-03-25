@@ -860,14 +860,10 @@ class TGDBApp(App):
         if self._mode == "MESSAGE":
             try:
                 bar = self.query_one("#cmdline", CommandLineBar)
-                if bar.feed_key(key, char):
-                    # Bar consumed the key.  If the message was dismissed (Enter/ESC/q)
-                    # _msg_lines is now empty — switch mode synchronously so the NEXT
-                    # replay token sees TGDB mode, not MESSAGE mode.
-                    if not bar._msg_lines:
-                        self._switch_to_tgdb()
-                else:
-                    bar.dismiss_message()
+                bar.feed_key(key, char)
+                # If the key dismissed the message (non-scroll), sync mode now
+                # so the next replay token sees TGDB instead of MESSAGE.
+                if not bar._msg_lines:
                     self._switch_to_tgdb()
             except NoMatches:
                 pass
@@ -993,11 +989,9 @@ class TGDBApp(App):
         if self._mode == "MESSAGE":
             try:
                 status = self.query_one("#cmdline", CommandLineBar)
-                consumed = status.feed_key(key, char)
+                status.feed_key(key, char)
                 event.stop()
-                if not consumed:
-                    # Any key not handled by the bar (i.e. not Enter/ESC) dismisses
-                    status.dismiss_message()
+                if not status._msg_lines:
                     self._switch_to_tgdb()
             except NoMatches:
                 pass
