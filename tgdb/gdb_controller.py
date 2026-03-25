@@ -813,7 +813,8 @@ class GDBController:
         existing.fullname = data.get("fullname", existing.fullname)
         existing.line = self._safe_int(data.get("line", existing.line))
         existing.addr = data.get("addr", existing.addr)
-        existing.enabled = data.get("enabled", "y") == "y"
+        if "enabled" in data:
+            existing.enabled = data["enabled"] == "y"
         existing.temporary = data.get("disp", "") == "del"
         self.on_breakpoints(list(self.breakpoints))
 
