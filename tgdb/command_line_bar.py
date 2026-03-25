@@ -274,10 +274,13 @@ class CommandLineBar(Widget):
     def feed_key(self, key: str, char: str) -> bool:
         """Handle one keystroke.  Returns True if the key was consumed."""
 
-        # While a command task is running all keyboard input is blocked.
-        # Ctrl+C cancellation is handled at the app level before feed_key.
+        # While a command task is running all keyboard input is blocked,
+        # except Ctrl+C which must propagate to TGDBApp.on_key for task
+        # cancellation (feed_key is called from CommandLineBar.on_key which
+        # fires first because the bar has focus; returning False lets the
+        # event bubble up so the app can call _cmd_task.cancel()).
         if self._task_running:
-            return True
+            return key != "ctrl+c"
 
         # ── Multiline message dismiss ─────────────────────────────────
         if self._msg_lines:
