@@ -294,28 +294,28 @@ class GDBController:
         # Create secondary PTY for MI channel
         mi_master_fd, mi_slave_fd = os.openpty()
 
-        # Disable echo on MI slave so our written commands don't echo back
         try:
-            attrs = termios.tcgetattr(mi_slave_fd)
-            attrs[3] &= ~(termios.ECHO | termios.ECHOE |
-                          termios.ECHOK | termios.ECHONL)
-            termios.tcsetattr(mi_slave_fd, termios.TCSANOW, attrs)
-        except Exception:
-            pass
+            # Disable echo on MI slave so our written commands don't echo back
+            try:
+                attrs = termios.tcgetattr(mi_slave_fd)
+                attrs[3] &= ~(termios.ECHO | termios.ECHOE |
+                              termios.ECHOK | termios.ECHONL)
+                termios.tcsetattr(mi_slave_fd, termios.TCSANOW, attrs)
+            except Exception:
+                pass
 
-        mi_slave_name = os.ttyname(mi_slave_fd)
-        # Keep slave fd open — if we close it before GDB opens it, the master
-        # immediately returns EIO (no slave reader). GDB opens its own copy.
+            mi_slave_name = os.ttyname(mi_slave_fd)
+            # Keep slave fd open — if we close it before GDB opens it, the master
+            # immediately returns EIO (no slave reader). GDB opens its own copy.
 
-        # Spawn GDB:
-        #   --nw              : no TUI
-        #   -ex "new-ui mi X" : open MI channel on secondary PTY
-        cmd = [self.gdb_path, "--nw", "-ex", f"new-ui mi {mi_slave_name}"]
-        cmd.extend(self.gdb_args)
-        try:
+            # Spawn GDB:
+            #   --nw              : no TUI
+            #   -ex "new-ui mi X" : open MI channel on secondary PTY
+            cmd = [self.gdb_path, "--nw", "-ex", f"new-ui mi {mi_slave_name}"]
+            cmd.extend(self.gdb_args)
             self._proc = ptyprocess.PtyProcess.spawn(cmd, dimensions=(rows, cols))
         except Exception:
-            # Clean up PTY fds if spawn fails so we don't leak them.
+            # Clean up PTY fds if startup fails anywhere after openpty().
             for fd in (mi_master_fd, mi_slave_fd):
                 try:
                     os.close(fd)

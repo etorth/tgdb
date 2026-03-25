@@ -304,13 +304,15 @@ class TGDBApp(App):
         self._gdb_task = asyncio.create_task(self.gdb.run_async())
         asyncio.create_task(self._request_initial_location())
 
-        # Source the rc file as an async task so it runs exactly like the user
-        # typed the commands interactively after startup (await-capable, etc.).
-        asyncio.create_task(self._load_rc_async())
-
-        # Initial mode: GDB focused
+        # Initial mode: GDB focused.
         self._set_mode("GDB")
         gdb_w.focus()
+
+        # Source the rc file before handing control to the user.
+        # This keeps startup semantics "as if" the user sourced the file
+        # immediately before the interactive session begins, instead of letting
+        # a background task race with real user input.
+        await self._load_rc_async()
 
     # ------------------------------------------------------------------
     # Mode management
