@@ -49,7 +49,7 @@ from .gdb_widget import (
     GDBWidget, ScrollModeChange,
     ScrollSearchStart, ScrollSearchUpdate, ScrollSearchCommit, ScrollSearchCancel,
 )
-from .command_line_bar import CommandLineBar, CommandSubmit, CommandCancel
+from .command_line_bar import CommandLineBar, CommandSubmit, CommandCancel, MessageDismissed
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 from .context_menu import (
     ContextMenu,
@@ -860,7 +860,13 @@ class TGDBApp(App):
         if self._mode == "MESSAGE":
             try:
                 bar = self.query_one("#cmdline", CommandLineBar)
-                if not bar.feed_key(key, char):
+                if bar.feed_key(key, char):
+                    # Bar consumed the key.  If the message was dismissed (Enter/ESC/q)
+                    # _msg_lines is now empty — switch mode synchronously so the NEXT
+                    # replay token sees TGDB mode, not MESSAGE mode.
+                    if not bar._msg_lines:
+                        self._switch_to_tgdb()
+                else:
                     bar.dismiss_message()
                     self._switch_to_tgdb()
             except NoMatches:
@@ -1352,6 +1358,13 @@ class TGDBApp(App):
 
     def on_command_cancel(self, msg: CommandCancel) -> None:
         self._switch_to_tgdb()
+
+    def on_message_dismissed(self, msg: MessageDismissed) -> None:
+        # Only act if still in MESSAGE mode.  During map replay the synchronous
+        # mode switch in _dispatch_key_internal already moved us out of MESSAGE;
+        # this handler becomes a no-op so it can't kill a subsequent CMD entry.
+        if self._mode == "MESSAGE":
+            self._switch_to_tgdb()
 
     # ------------------------------------------------------------------
     # File dialog
