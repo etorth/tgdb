@@ -103,6 +103,17 @@ int main() {
      * * * /  <-- sneaky comment end
      */
 
+    std::vector<int> intv{1, 5, 3, 4, 7};
+    std::sort(intv.begin(), intv.end(), [](const auto &x, const auto &y)
+    {
+        const auto fn_foo = [&] -> bool
+        {
+            return x < y;
+        };
+
+        return fn_foo();
+    });
+
     /* * * /  <-- sneaky comment end */
 
     StringMap registry;
