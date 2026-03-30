@@ -30,7 +30,7 @@ from rich.text import Text
 
 from .highlight_groups import HighlightGroups
 from .key_mapper import KeyMapper
-from .config import Config, ConfigParser, tgdb_history_file
+from .config import Config, ConfigParser
 from .gdb_controller import (
     GDBController,
     Breakpoint,
@@ -62,6 +62,7 @@ from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
 from .workspace import DragResize, EmptyPane, PaneContainer, PaneDescriptor, Splitter
+from .xdg_path import XDGPath
 
 
 class TGDBApp(App):
@@ -271,7 +272,7 @@ class TGDBApp(App):
         # Configure command-line bar — history
         try:
             cmdline = self.query_one("#cmdline", CommandLineBar)
-            cmdline._history_file = tgdb_history_file()
+            cmdline._history_file = XDGPath.state_home() / "tgdb" / "history"
             self.cp.set_cmdline_bar(cmdline)
             cmdline.load_history()
             # Session delimiter — recorded in history so sessions are visible when browsing

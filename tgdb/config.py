@@ -25,52 +25,13 @@ if TYPE_CHECKING:
     from .highlight_groups import HighlightGroups
     from .key_mapper import KeyMapper
 
+from .xdg_path import XDGPath
+
 # ---------------------------------------------------------------------------
 # Reserved namespace prefix — any name starting with this string is internal
 # and must never leak into or be overwritten from user Python scripts.
 # ---------------------------------------------------------------------------
 _TGDB_RESERVED_PREFIX = "_tgdb_RSVD"
-
-
-# ---------------------------------------------------------------------------
-# XDG base-directory helpers
-# ---------------------------------------------------------------------------
-
-def xdg_config_home() -> Path:
-    """Return $XDG_CONFIG_HOME or its default (~/.config)."""
-    v = os.environ.get("XDG_CONFIG_HOME", "")
-    return Path(v) if v else Path.home() / ".config"
-
-
-def xdg_data_home() -> Path:
-    """Return $XDG_DATA_HOME or its default (~/.local/share)."""
-    v = os.environ.get("XDG_DATA_HOME", "")
-    return Path(v) if v else Path.home() / ".local" / "share"
-
-
-def xdg_cache_home() -> Path:
-    """Return $XDG_CACHE_HOME or its default (~/.cache)."""
-    v = os.environ.get("XDG_CACHE_HOME", "")
-    return Path(v) if v else Path.home() / ".cache"
-
-
-def xdg_state_home() -> Path:
-    """Return $XDG_STATE_HOME or its default (~/.local/state)."""
-    v = os.environ.get("XDG_STATE_HOME", "")
-    return Path(v) if v else Path.home() / ".local" / "state"
-
-
-def tgdb_config_dir() -> Path:
-    return xdg_config_home() / "tgdb"
-
-
-def tgdb_state_dir() -> Path:
-    return xdg_state_home() / "tgdb"
-
-
-def tgdb_history_file() -> Path:
-    return tgdb_state_dir() / "history"
-
 
 # ---------------------------------------------------------------------------
 # Config state
@@ -219,7 +180,7 @@ class ConfigParser:
 
     def default_rc_path(self) -> Optional[Path]:
         """Return the default rc file path (~/.config/tgdb/tgdbrc), or None if it doesn't exist."""
-        path = tgdb_config_dir() / "tgdbrc"
+        path = XDGPath.config_home() / "tgdb" / "tgdbrc"
         return path if path.exists() else None
 
     async def load_file_async(self, path: str,
