@@ -273,8 +273,11 @@ class TGDBApp(App):
             cmdline = self.query_one("#cmdline", CommandLineBar)
             cmdline._history_file = tgdb_history_file()
             self.cp.set_cmdline_bar(cmdline)
-            if self.cfg.history:
-                cmdline.load_history()
+            cmdline.load_history()
+            # Session delimiter — recorded in history so sessions are visible when browsing
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cmdline._add_to_history(f"# tgdb begins {ts}", max_size=self.cfg.historysize)
         except NoMatches:
             pass
 
@@ -317,6 +320,14 @@ class TGDBApp(App):
     # ------------------------------------------------------------------
     # Mode management
     # ------------------------------------------------------------------
+
+    async def on_unmount(self) -> None:
+        """Save command history to disk when tgdb exits."""
+        try:
+            bar = self.query_one("#cmdline", CommandLineBar)
+            bar.save_history(max_size=self.cfg.historysize)
+        except Exception:
+            pass
 
     async def _load_rc_async(self) -> None:
         """Source the rc file as if the user had typed each command interactively.
@@ -1339,9 +1350,7 @@ class TGDBApp(App):
         # Record in history before execution.
         cmd_text = cmd.strip()
         if cmd_text:
-            max_size = self.cfg.historysize
-            save_now = self.cfg.history
-            cmdline._add_to_history(cmd_text, save=save_now, max_size=max_size)
+            cmdline._add_to_history(cmd_text, max_size=self.cfg.historysize)
 
         cmdline.lock_for_task()
         captured_output: Optional[str] = None
@@ -1601,6 +1610,7 @@ class TGDBApp(App):
             "until": gdb_cmd("until"), "u": gdb_cmd("until"),
             "up": gdb_cmd("up"),
             "down": gdb_cmd("down"),
+            "_goto_line": self._cmd_goto_line,
         }
         for name, fn in cmds.items():
             self.cp.register_handler(name, fn)
@@ -1608,6 +1618,26 @@ class TGDBApp(App):
     def _cmd_quit(self, _: list) -> None:
         self.gdb.terminate()
         self.exit(0)
+
+    def _cmd_goto_line(self, args: list) -> Optional[str]:
+        """Handle :N line-jump: positive=goto, :+N=scroll down, :-N=scroll up."""
+        if not args:
+            return None
+        raw = args[0]
+        try:
+            n = int(raw)
+        except ValueError:
+            return f"Invalid line number: {raw!r}"
+        src = self._get_source_view()
+        if src is None:
+            return None
+        if raw.startswith("+"):
+            src.scroll_down(n)
+        elif raw.startswith("-"):
+            src.scroll_up(-n)
+        else:
+            src.move_to(n if n > 0 else 1)
+        return None
 
     def _cmd_help(self, _: list) -> None:
         self._show_help_in_source()
@@ -1649,7 +1679,7 @@ class TGDBApp(App):
         """Mirror cgdb's :syntax [on|off|c|asm|…] command."""
         value = args[0] if args else ""
         if value:
-            self.cp._set_option("syntax", value)
+            self.cfg.syntax = value.lower()
         # No args: cgdb prints info (TODO); we just refresh
         self._sync_config()
 

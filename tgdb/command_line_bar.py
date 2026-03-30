@@ -225,43 +225,122 @@ class CommandLineBar(Widget):
     # ------------------------------------------------------------------
 
     def load_history(self) -> None:
-        """Load command history from the history file (called at startup)."""
+        """Load command history from the history file at startup.
+
+        The file format matches the tgdb rc file format: plain commands on
+        single lines, multi-line Python blocks as ``python << EOF`` heredocs.
+        """
         if not self._history_file:
             return
         try:
-            lines = self._history_file.read_text(encoding="utf-8").splitlines()
-            self._history = [ln for ln in lines if ln.strip()]
+            raw_lines = self._history_file.read_text(encoding="utf-8").splitlines()
         except (OSError, UnicodeDecodeError):
             self._history = []
+            return
+
+        entries: list[str] = []
+        i = 0
+        while i < len(raw_lines):
+            line = raw_lines[i]
+            stripped = line.strip()
+            i += 1
+            if not stripped:
+                continue
+            # Heredoc entry: "python << EOF" … "EOF"
+            m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', stripped, re.IGNORECASE)
+            if m:
+                cmd_name = m.group(1).lower()
+                marker = m.group(2)
+                code_lines: list[str] = []
+                while i < len(raw_lines):
+                    code_line = raw_lines[i]
+                    i += 1
+                    if code_line.strip() == marker:
+                        break
+                    code_lines.append(code_line)
+                entries.append(cmd_name + "\n" + "\n".join(code_lines))
+            else:
+                entries.append(stripped)
+        self._history = entries
 
     def save_history(self, path: Optional[Path] = None, *, max_size: int = 1024) -> Optional[str]:
         """Save the current session history to *path* (default: history file).
 
-        Returns an error string on failure, or None on success.
+        Multi-line (heredoc) entries are written in ``python << EOF`` format
+        so they can be replayed with ``:source`` or !!.
+        max_size=0 writes an empty file (history buffer disabled).
+        Returns an error string on failure, None on success.
         """
         target = path or self._history_file
         if target is None:
             return "history: no history file configured"
+
+        if max_size == 0:
+            entries: list[str] = []
+        elif max_size > 0:
+            entries = self._history[-max_size:]
+        else:
+            entries = list(self._history)
+
+        file_lines: list[str] = []
+        for entry in entries:
+            if "\n" in entry:
+                # Multi-line (heredoc) entry — reconstruct heredoc format
+                first, _, rest = entry.partition("\n")
+                file_lines.append(f"{first} << EOF")
+                file_lines.extend(rest.splitlines())
+                file_lines.append("EOF")
+            else:
+                file_lines.append(entry)
+
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            entries = self._history[-max_size:] if max_size > 0 else self._history
-            target.write_text("\n".join(entries) + "\n", encoding="utf-8")
+            content = "\n".join(file_lines)
+            if content:
+                content += "\n"
+            target.write_text(content, encoding="utf-8")
         except OSError as exc:
             return f"history: cannot write '{target}': {exc}"
         return None
 
-    def _add_to_history(self, cmd: str, *, save: bool = False, max_size: int = 1024) -> None:
-        """Add *cmd* to in-memory history (deduplicating adjacent identical entries)."""
+    def list_history(self) -> Optional[str]:
+        """Return a numbered listing of all history entries for :history command."""
+        if not self._history:
+            return "No history entries."
+
+        lines: list[str] = []
+        idx_w = len(str(len(self._history)))
+        for i, entry in enumerate(self._history, 1):
+            prefix = f"{i:>{idx_w}} "
+            if "\n" in entry:
+                # Multi-line (heredoc) entry
+                first, _, rest = entry.partition("\n")
+                lines.append(f"{prefix}{first} << EOF")
+                indent = " " * (idx_w + 1) + "   "
+                for code_line in rest.splitlines():
+                    lines.append(f"{indent}{code_line}")
+                lines.append(f"{indent}EOF")
+            else:
+                lines.append(f"{prefix}{entry}")
+        return "\n".join(lines)
+
+    def _add_to_history(self, cmd: str, *, max_size: int = 1024) -> None:
+        """Add *cmd* to in-memory history.
+
+        If max_size == 0, history is disabled and nothing is recorded.
+        Adjacent identical entries are deduplicated (but each entry is unique
+        since time-stamped comment delimiters are always distinct).
+        """
         cmd = cmd.strip()
         if not cmd:
             return
+        if max_size == 0:
+            return  # history buffer disabled
         if self._history and self._history[-1] == cmd:
-            return
+            return  # suppress adjacent duplicates
         self._history.append(cmd)
         if max_size > 0:
             self._history = self._history[-max_size:]
-        if save:
-            self.save_history(max_size=max_size)
 
     # ------------------------------------------------------------------
     # Key dispatch

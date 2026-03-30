@@ -344,7 +344,7 @@ class FileDialog(Widget):
                 return
             self._num_buf = ""
 
-        if char.isdigit() and char != "0":
+        if char.isdigit() and (char != "0" or self._num_buf):
             self._num_buf += char
             event.stop()
             return

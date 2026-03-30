@@ -92,8 +92,7 @@ class Config:
     wrapscan: bool = True
 
     # History options
-    history: bool = True            # set history on|off
-    historysize: int = 1024         # set history size N  (-1 = unlimited)
+    historysize: int = 1024         # set history=N  (0 = disabled)
 
     # Integer options
     scrollbackbuffersize: int = 10000
@@ -138,7 +137,7 @@ _ALIASES: dict[str, str] = {
 
 _BOOL_OPTIONS = {
     "autosourcereload", "color", "debugwincolor", "disasm", "hlsearch",
-    "history", "ignorecase", "showmarks", "showdebugcommands", "timeout",
+    "ignorecase", "showmarks", "showdebugcommands", "timeout",
     "ttimeout", "wrapscan",
 }
 _INT_OPTIONS = {
@@ -223,22 +222,17 @@ class ConfigParser:
         path = tgdb_config_dir() / "tgdbrc"
         return path if path.exists() else None
 
-    def load_default_rc(self) -> None:
-        """Load ~/.config/tgdb/tgdbrc if it exists (synchronous, used only for --rcfile path)."""
-        path = self.default_rc_path()
-        if path is not None:
-            self.load_file(str(path))
-
-    def load_file(self, path: str) -> Optional[str]:
-        """Load and execute every non-blank, non-comment line in *path*.
+    async def load_file_async(self, path: str,
+                              print_fn: Optional[Callable] = None) -> Optional[str]:
+        """Load and execute every non-blank line in *path* asynchronously.
 
         Supports heredoc blocks (``python << MARKER`` … ``MARKER``) so that
         multi-line Python function definitions work just like typing them
-        manually in the status bar.
+        manually in the status bar.  Each line is routed through
+        execute_async() so sourced files can use top-level ``await``.
 
         Returns an error string if the file cannot be opened, None on success.
-        Errors from individual lines are silently ignored (same as startup
-        behaviour).
+        Errors from individual lines are silently ignored.
         """
         try:
             with open(path) as f:
@@ -252,52 +246,10 @@ class ConfigParser:
             stripped = line.strip()
             i += 1
 
-            if not stripped or stripped.startswith("#"):
+            if not stripped:
                 continue
 
             # Detect heredoc: [:]python << MARKER
-            check = stripped.lstrip(":")
-            m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', check, re.IGNORECASE)
-            if m:
-                cmd_name = m.group(1).lower()
-                marker = m.group(2)
-                code_lines: list[str] = []
-                while i < len(raw_lines):
-                    code_line = raw_lines[i].rstrip("\n")
-                    i += 1
-                    if code_line.strip() == marker:
-                        break
-                    code_lines.append(code_line)
-                self.execute(f"{cmd_name}\n" + "\n".join(code_lines))
-                continue
-
-            self.execute(stripped)
-
-        return None
-
-    async def load_file_async(self, path: str,
-                              print_fn: Optional[Callable] = None) -> Optional[str]:
-        """Async version of load_file() used by execute_async().
-
-        This preserves the same heredoc parsing and "ignore per-line errors"
-        behaviour as load_file(), but routes each command through execute_async()
-        so sourced files can use top-level await inside :python blocks.
-        """
-        try:
-            with open(path) as f:
-                raw_lines = f.readlines()
-        except OSError as e:
-            return f"source: cannot open '{path}': {e}"
-
-        i = 0
-        while i < len(raw_lines):
-            line = raw_lines[i].rstrip("\n")
-            stripped = line.strip()
-            i += 1
-
-            if not stripped or stripped.startswith("#"):
-                continue
-
             check = stripped.lstrip(":")
             m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', check, re.IGNORECASE)
             if m:
@@ -321,37 +273,45 @@ class ConfigParser:
         return None
 
     # ------------------------------------------------------------------
-    # Command execution
+    # Command execution — single async entry point
     # ------------------------------------------------------------------
 
-    def execute(self, line: str) -> Optional[str]:
-        """
-        Execute one config/status-bar command.
-        Returns an error string or None on success.
+    async def execute_async(self, line: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+        """Execute one config/status-bar command asynchronously.
+
+        This is the sole command-execution entry point.  All commands —
+        :set, :highlight, :map, :source, :python, user commands, etc. —
+        are dispatched from here.
+
+        Lines starting with optional whitespace then '#' are treated as
+        comments and are a no-op (the caller may still record them in
+        history).
         """
         line = line.strip()
         if not line:
             return None
-        # Strip leading colon
         if line.startswith(":"):
             line = line[1:].strip()
         if not line:
             return None
 
-        # :python / :py and :pyfile / :pyf take a raw (un-tokenised) argument,
-        # so handle them before shlex to preserve spaces inside code strings.
+        # Comment: leading whitespace + '#' is a no-op.
+        if re.match(r'^\s*#', line):
+            return None
+
+        # :python / :py and :pyfile / :pyf take raw (un-tokenised) argument.
         _raw = re.match(r'^(python|pyfile|pyf|py)\s*(.*)', line, re.DOTALL | re.IGNORECASE)
         if _raw:
             _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
             if _cmd in ("python", "py"):
-                return self._cmd_python(_raw_arg)
+                return await self._exec_py_async(_raw_arg, "<tgdb:python>", print_fn)
             else:
-                return self._cmd_pyfile(_raw_arg.strip())
+                return await self._exec_pyfile_async(_raw_arg.strip(), print_fn)
 
-        # :command also needs raw handling to preserve the replacement template.
+        # :command needs raw handling to preserve the replacement template.
         _cmd_m = re.match(r'^command\b\s*(.*)', line, re.DOTALL | re.IGNORECASE)
         if _cmd_m:
-            return self._cmd_command(_cmd_m.group(1))
+            return await self._cmd_command(_cmd_m.group(1))
 
         # :map / :imap need raw handling so spaces in the RHS are preserved.
         _map_m = re.match(r'^(imap|im|map)\b\s*(\S+)\s*(.*)', line, re.DOTALL | re.IGNORECASE)
@@ -376,31 +336,48 @@ class ConfigParser:
         cmd = raw_cmd.lower()
         args = parts[1:]
 
-        # Check registered handlers first
+        # Pure number: :12 → goto line; :+5 → scroll down; :-3 → scroll up
+        if re.match(r'^[+-]?\d+$', raw_cmd):
+            handler = self._handlers.get("_goto_line")
+            if handler is not None:
+                return handler([raw_cmd])
+            return None
+
+        # History replay: !! → last entry; !N → entry N
+        if raw_cmd == "!!" or (raw_cmd.startswith("!") and raw_cmd[1:].isdigit()):
+            return await self._cmd_history_run(raw_cmd)
+
+        # Registered handlers (sync callables — no await needed)
         if cmd in self._handlers:
             return self._handlers[cmd](args)
 
         # Built-in commands
         if cmd == "set":
-            return self._cmd_set(args)
+            return await self._cmd_set(args)
         elif cmd in ("highlight", "hi"):
-            return self._cmd_highlight(args)
+            return await self._cmd_highlight(args)
         elif cmd in ("unmap", "unm"):
-            return self._cmd_unmap("tgdb", args)
+            return await self._cmd_unmap("tgdb", args)
         elif cmd in ("iunmap", "iu"):
-            return self._cmd_unmap("gdb", args)
+            return await self._cmd_unmap("gdb", args)
         elif cmd == "noh":
             self.config.hlsearch = False
             return None
         elif cmd == "syntax":
             if args:
-                return self._set_option("syntax", args[0])
+                return await self._set_option("syntax", args[0])
+            return None
         elif cmd in ("source", "so"):
             if not args:
                 return "source: missing filename"
-            return self.load_file(os.path.expanduser(args[0]))
+            return await self.load_file_async(
+                os.path.expanduser(args[0]),
+                print_fn=print_fn,
+            )
         elif cmd == "save":
-            return self._cmd_save(args)
+            return await self._cmd_save(args)
+        elif cmd == "history":
+            return await self._cmd_history()
 
         # User-defined commands (must start with an uppercase letter)
         if raw_cmd[:1].isupper():
@@ -410,100 +387,13 @@ class ConfigParser:
             if ucmd is not None:
                 m = re.match(r'\S+\s*(.*)', line, re.DOTALL)
                 raw_args = m.group(1) if m else ""
-                return self._exec_user_command(ucmd, raw_args)
-
-        return f"Unknown command: {cmd}"
-
-    # ------------------------------------------------------------------
-    # :python / :pyfile
-    # ------------------------------------------------------------------
-
-    def _exec_py(self, code: str, source_label: str) -> Optional[str]:
-        """Execute *code* in the persistent namespace; return captured output or error."""
-        buf = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-                exec(compile(code, source_label, "exec"), self._py_namespace)  # noqa: S102
-        except Exception:
-            return traceback.format_exc().strip()
-        output = buf.getvalue()
-        return output.rstrip("\n") or None
-
-    def _cmd_python(self, code: str) -> Optional[str]:
-        """Execute a Python code string in the persistent tgdb namespace."""
-        if not code.strip():
-            return None
-        return self._exec_py(code, "<tgdb:python>")
-
-    def _cmd_pyfile(self, path: str) -> Optional[str]:
-        """Execute a Python file in the persistent tgdb namespace."""
-        if not path:
-            return "pyfile: missing filename"
-        path = os.path.expanduser(path)
-        try:
-            code = Path(path).read_text(encoding="utf-8")
-        except OSError as e:
-            return f"pyfile: cannot open '{path}': {e}"
-        return self._exec_py(code, path)
-
-    # ------------------------------------------------------------------
-    # Async execute — used by CommandLineBar task runner
-    # ------------------------------------------------------------------
-
-    async def execute_async(self, line: str, print_fn: Optional[Callable] = None) -> Optional[str]:
-        """Async version of execute() for use from the command task.
-
-        :python and :pyfile run as real coroutines so ``await tgdb.screen.xxx()``
-        works inside scripts.  ``:source`` and user-defined commands recurse
-        through execute_async() as well, so awaited Python also works when
-        reached indirectly from a sourced file or command expansion.
-        """
-        stripped = line.strip()
-        if not stripped:
-            return None
-        check = stripped[1:].strip() if stripped.startswith(":") else stripped
-
-        _raw = re.match(r'^(python|pyfile|pyf|py)\s*(.*)', check, re.DOTALL | re.IGNORECASE)
-        if _raw:
-            _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
-            if _cmd in ("python", "py"):
-                return await self._exec_py_async(_raw_arg, "<tgdb:python>", print_fn)
-            else:
-                return await self._exec_pyfile_async(_raw_arg.strip(), print_fn)
-
-        try:
-            parts = shlex.split(check)
-        except ValueError:
-            parts = check.split()
-        if not parts:
-            return None
-
-        raw_cmd = parts[0]
-        cmd = raw_cmd.lower()
-        args = parts[1:]
-
-        if cmd in ("source", "so"):
-            if not args:
-                return "source: missing filename"
-            return await self.load_file_async(
-                os.path.expanduser(args[0]),
-                print_fn=print_fn,
-            )
-
-        if raw_cmd[:1].isupper():
-            ucmd, amb_err = self._lookup_user_command(raw_cmd)
-            if amb_err:
-                return amb_err
-            if ucmd is not None:
-                m = re.match(r'\S+\s*(.*)', check, re.DOTALL)
-                raw_args = m.group(1) if m else ""
                 return await self._exec_user_command_async(
                     ucmd,
                     raw_args,
                     print_fn=print_fn,
                 )
 
-        return self.execute(stripped)
+        return f"Unknown command: {cmd}"
 
     async def _exec_py_async(self, code: str, source_label: str,
                              print_fn: Optional[Callable] = None) -> Optional[str]:
@@ -630,7 +520,7 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
     # :command — user-defined commands
     # ------------------------------------------------------------------
 
-    def _cmd_command(self, raw: str) -> Optional[str]:
+    async def _cmd_command(self, raw: str) -> Optional[str]:
         """Parse and handle a :command invocation.
 
         :command              → list all user commands
@@ -707,26 +597,6 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
         if len(matches) == 1:
             return self._user_commands[matches[0]], None
         return None, f"Ambiguous command: '{name}' (matches: {', '.join(sorted(matches))})"
-
-    def _exec_user_command(self, ucmd: UserCommandDef, raw_args: str) -> Optional[str]:
-        if self._exec_depth >= 20:
-            return f"{ucmd.name}: maximum command recursion depth exceeded"
-        try:
-            shlex_args = shlex.split(raw_args)
-        except ValueError:
-            shlex_args = raw_args.split()
-        err = self._validate_nargs(ucmd.nargs, shlex_args, raw_args)
-        if err:
-            return f"{ucmd.name}: {err}"
-        try:
-            expanded = self._expand_replacement(ucmd.replacement, shlex_args, raw_args)
-        except Exception as e:
-            return f"{ucmd.name}: error expanding replacement: {e}"
-        self._exec_depth += 1
-        try:
-            return self.execute(expanded)
-        finally:
-            self._exec_depth -= 1
 
     async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str,
                                        print_fn: Optional[Callable] = None) -> Optional[str]:
@@ -850,13 +720,9 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
     # :set
     # ------------------------------------------------------------------
 
-    def _cmd_set(self, args: list[str]) -> Optional[str]:
+    async def _cmd_set(self, args: list[str]) -> Optional[str]:
         if not args:
             return "set: missing argument"
-
-        # Special compound forms: "set history on|off" and "set history size N|unlimited"
-        if args[0].lower() == "history":
-            return self._cmd_set_history(args[1:])
 
         expr = args[0]
         # Boolean negation: noXXX
@@ -869,7 +735,10 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
         if "=" in expr:
             name, _, value = expr.partition("=")
             name = self._resolve_name(name.strip())
-            return self._set_option(name, value.strip())
+            # Special case: history=N sets buffer size
+            if name == "history":
+                return self._cmd_set_history_n(value.strip())
+            return await self._set_option(name, value.strip())
         # Boolean enable
         name = self._resolve_name(expr)
         if name in _BOOL_OPTIONS:
@@ -877,37 +746,24 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
             return None
         return f"set: unknown option '{expr}'"
 
-    def _cmd_set_history(self, args: list[str]) -> Optional[str]:
-        """Handle: set history on|off  |  set history size N|unlimited"""
-        if not args:
-            # Show current state
-            size = "unlimited" if self.config.historysize < 0 else str(self.config.historysize)
-            return (
-                f"history is {'on' if self.config.history else 'off'}, "
-                f"size is {size}"
-            )
-        sub = args[0].lower()
-        if sub in ("on", "off"):
-            self.config.history = (sub == "on")
-            return None
-        if sub == "size":
-            if len(args) < 2:
-                return "set history size: missing value"
-            val = args[1].lower()
-            if val == "unlimited":
-                self.config.historysize = -1
-                return None
-            try:
-                n = int(val)
-            except ValueError:
-                return f"set history size: invalid value '{args[1]}'"
-            if n < 0:
-                return "set history size: value must be non-negative or 'unlimited'"
-            self.config.historysize = n
-            return None
-        return f"set history: unknown sub-command '{args[0]}'"
+    def _cmd_set_history_n(self, val: str) -> Optional[str]:
+        """Handle: set history=N  (N >= 0; 0 = disable history buffer)."""
+        try:
+            n = int(val)
+        except ValueError:
+            return f"set history: invalid value {val!r} (must be a non-negative integer)"
+        if n < 0:
+            return "set history: value must be >= 0"
+        bar = self._cmdline_bar
+        if bar is not None:
+            if n == 0:
+                bar._history.clear()
+            elif len(bar._history) > n:
+                bar._history = bar._history[-n:]
+        self.config.historysize = n
+        return None
 
-    def _set_option(self, name: str, value: str) -> Optional[str]:
+    async def _set_option(self, name: str, value: str) -> Optional[str]:
         name = self._resolve_name(name)
         if name in _BOOL_OPTIONS:
             setattr(self.config, name, value.lower() not in ("0", "false", "off", "no"))
@@ -935,12 +791,10 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
     # :save
     # ------------------------------------------------------------------
 
-    def _cmd_save(self, args: list[str]) -> Optional[str]:
+    async def _cmd_save(self, args: list[str]) -> Optional[str]:
         """Handle: save history [filename]"""
         if not args or args[0].lower() != "history":
             return f"save: unknown sub-command '{args[0] if args else ''}'"
-        if not self.config.history:
-            return "save history: history is disabled (set history on)"
         bar = self._cmdline_bar
         if bar is None:
             return "save history: command-line bar not available"
@@ -952,7 +806,7 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
     # :highlight / :hi
     # ------------------------------------------------------------------
 
-    def _cmd_highlight(self, args: list[str]) -> Optional[str]:
+    async def _cmd_highlight(self, args: list[str]) -> Optional[str]:
         if not args:
             return "highlight: missing group name"
         group = args[0]
@@ -971,6 +825,41 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
         return None
 
     # ------------------------------------------------------------------
+    # :history  /  !!  /  !N
+    # ------------------------------------------------------------------
+
+    async def _cmd_history(self) -> Optional[str]:
+        """Handle: :history — list all recorded commands with line numbers."""
+        bar = self._cmdline_bar
+        if bar is None:
+            return "history: command-line bar not available"
+        return bar.list_history()
+
+    async def _cmd_history_run(self, cmd: str) -> Optional[str]:
+        """Handle: !! (rerun last non-comment) or !N (rerun entry N)."""
+        bar = self._cmdline_bar
+        if bar is None:
+            return "history: command-line bar not available"
+        history = bar._history
+        if not history:
+            return "history: no history entries"
+        if cmd == "!!":
+            # Find last non-comment entry
+            for i in range(len(history) - 1, -1, -1):
+                if not history[i].lstrip().startswith("#"):
+                    return await self.execute_async(history[i])
+            return "history: no commands to rerun"
+        # !N
+        n_str = cmd[1:]
+        try:
+            n = int(n_str)
+        except ValueError:
+            return f"history: invalid index {n_str!r}"
+        if n < 1 or n > len(history):
+            return f"history: index {n} out of range (1\u2013{len(history)})"
+        return await self.execute_async(history[n - 1])
+
+    # ------------------------------------------------------------------
     # :map / :imap
     # ------------------------------------------------------------------
 
@@ -978,7 +867,7 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
     # :unmap / :iunmap
     # ------------------------------------------------------------------
 
-    def _cmd_unmap(self, mode: str, args: list[str]) -> Optional[str]:
+    async def _cmd_unmap(self, mode: str, args: list[str]) -> Optional[str]:
         if not args:
             return "unmap: requires lhs"
         lhs = self._decode_keyseq_tokens(args[0])

@@ -265,6 +265,24 @@ class SourceView(Widget):
         self._col_offset = max(0, self._col_offset + delta)
         self.refresh()
 
+    def scroll_col_to(self, col: int) -> None:
+        """Set horizontal scroll to an absolute display-column position.
+
+        Pass col=999999 to scroll to the end of the currently selected line.
+        """
+        if col >= 999999:
+            if self.source_file and 1 <= self.sel_line <= len(self.source_file.lines):
+                from rich.cells import cell_len as _cell_len
+                line_text = self.source_file.lines[self.sel_line - 1]
+                line_cells = _cell_len(line_text)
+                # Account for line-number gutter (approx 4–6 cols); use width−6
+                visible_w = max(1, (self.size.width or 80) - 6)
+                col = max(0, line_cells - visible_w)
+            else:
+                col = 0
+        self._col_offset = max(0, col)
+        self.refresh()
+
     def page_up(self) -> None:
         h = self._visible_height()
         self.sel_line = max(1, self.sel_line - h)
@@ -667,8 +685,9 @@ class SourceView(Widget):
             # Not 'gg' — treat buffered 'g' as nothing, reprocess current key
             self._num_buf = ""
 
-        # Numeric prefix (not starting with 0)
-        if char.isdigit() and char != "0":
+        # Numeric prefix: 1-9 always starts/extends a count; 0 extends an
+        # already-started count (e.g. "20j" → count 20) but alone means col-0.
+        if char.isdigit() and (char != "0" or self._num_buf):
             self._num_buf += char
             return True
         count = int(self._num_buf) if self._num_buf else 1
@@ -748,6 +767,15 @@ class SourceView(Widget):
             self.post_message(ToggleOrientation())
         elif key == "ctrl+t":
             self.post_message(OpenTTY())
+        elif char == "0":
+            # vim: '0' = go to beginning of line (column 0)
+            self.scroll_col_to(0)
+        elif char == "^":
+            # vim: '^' = first visible char (same as 0 for source view)
+            self.scroll_col_to(0)
+        elif key == "dollar" or char == "$":
+            # vim: '$' = go to end of line
+            self.scroll_col_to(999999)
         elif key == "f1":
             self.post_message(ShowHelp())  # cgdb: if_display_help
         elif key == "f5":
