@@ -538,7 +538,7 @@ class CommandLineBar(Widget):
             self.refresh()
             m = _HEREDOC_RE.match(cmd)
             if m:
-                self._start_multiline(m.group(1), m.group(2))
+                self._start_multiline(m.group(1), m.group(2), original=cmd)
             else:
                 self.post_message(CommandSubmit(cmd))
 
@@ -663,12 +663,12 @@ class CommandLineBar(Widget):
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _start_multiline(self, cmd: str, marker: str) -> None:
+    def _start_multiline(self, cmd: str, marker: str, *, original: str = "") -> None:
         self._input_active = False
         self._ml_active = True
         self._ml_cmd = cmd.lower()
         self._ml_marker = marker
-        self._ml_header = f"{cmd} << {marker}"  # original header as typed
+        self._ml_header = original if original else f"{cmd} << {marker}"
         self._ml_buf = []
         self._input_buf = ""
         self._set_height(2)     # header row + current-input row
