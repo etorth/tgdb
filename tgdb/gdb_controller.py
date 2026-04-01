@@ -77,144 +77,10 @@ class RegisterInfo:
 
 
 # ---------------------------------------------------------------------------
-# GDB/MI output parser
+# GDB/MI output parser — uses GDBMIParser extracted from pygdbmi
 # ---------------------------------------------------------------------------
 
-class MIParser:
-    """Parse a single GDB/MI output record line."""
-
-    @staticmethod
-    def parse(line: str) -> dict:
-        line = line.strip()
-        out: dict = {"token": None, "type": None, "class_": None,
-                     "results": {}, "raw": line}
-        if not line or line == "(gdb)":
-            out["type"] = "prompt"
-            out["results"]["text"] = "(gdb)"
-            return out
-
-        i = 0
-        while i < len(line) and line[i].isdigit():
-            i += 1
-        if i > 0:
-            out["token"] = int(line[:i])
-
-        if i >= len(line):
-            return out
-
-        ch = line[i]
-        i += 1
-
-        if ch in "^*+=":
-            out["type"] = ch
-        elif ch == "~":
-            out["type"] = "console"
-            out["results"]["text"] = MIParser._unescape(line[i:])
-            return out
-        elif ch == "@":
-            out["type"] = "target"
-            out["results"]["text"] = MIParser._unescape(line[i:])
-            return out
-        elif ch == "&":
-            out["type"] = "log"
-            out["results"]["text"] = MIParser._unescape(line[i:])
-            return out
-        else:
-            out["type"] = "unknown"
-            return out
-
-        end = line.find(",", i)
-        if end == -1:
-            out["class_"] = line[i:]
-            return out
-        out["class_"] = line[i:end]
-        out["results"] = MIParser._parse_results(line[end + 1:])
-        return out
-
-    @staticmethod
-    def _parse_results(s: str) -> dict:
-        result: dict = {}
-        pos = 0
-        while pos < len(s):
-            m = re.match(r'(\w[\w-]*)=', s[pos:])
-            if not m:
-                break
-            key = m.group(1)
-            pos += m.end()
-            val, consumed = MIParser._parse_value(s, pos)
-            pos += consumed
-            if key in result:
-                if not isinstance(result[key], list):
-                    result[key] = [result[key]]
-                result[key].append(val)
-            else:
-                result[key] = val
-            if pos < len(s) and s[pos] == ',':
-                pos += 1
-        return result
-
-    @staticmethod
-    def _parse_value(s: str, pos: int) -> tuple:
-        if pos >= len(s):
-            return ("", 0)
-        ch = s[pos]
-        if ch == '"':
-            end = pos + 1
-            while end < len(s):
-                if s[end] == '\\':
-                    end += 2
-                    continue
-                if s[end] == '"':
-                    end += 1
-                    break
-                end += 1
-            return (MIParser._unescape(s[pos + 1:end - 1]), end - pos)
-        elif ch == '{':
-            end = pos + 1
-            depth = 1
-            while end < len(s) and depth > 0:
-                if s[end] == '{':
-                    depth += 1
-                elif s[end] == '}':
-                    depth -= 1
-                end += 1
-            return (MIParser._parse_results(s[pos + 1:end - 1]), end - pos)
-        elif ch == '[':
-            items = []
-            end = pos + 1
-            depth = 1
-            while end < len(s) and depth > 0:
-                if s[end] == '[':
-                    depth += 1
-                elif s[end] == ']':
-                    depth -= 1
-                end += 1
-            inner = s[pos + 1:end - 1]
-            p = 0
-            while p < len(inner):
-                if re.match(r'\w[\w-]*=', inner[p:]):
-                    parsed = MIParser._parse_results(inner[p:])
-                    items.append(parsed)
-                    p = len(inner)
-                else:
-                    val, consumed = MIParser._parse_value(inner, p)
-                    items.append(val)
-                    p += consumed
-                    if p < len(inner) and inner[p] == ',':
-                        p += 1
-            return (items, end - pos)
-        else:
-            end = pos
-            while end < len(s) and s[end] not in (',', '}', ']'):
-                end += 1
-            return (s[pos:end], end - pos)
-
-    @staticmethod
-    def _unescape(s: str) -> str:
-        if s.startswith('"') and s.endswith('"'):
-            s = s[1:-1]
-        return (s.replace('\\n', '\n').replace('\\t', '\t')
-                 .replace('\\"', '"').replace('\\\\', '\\'))
+from .gdbmi_parser import GDBMIParser
 
 
 # ---------------------------------------------------------------------------
@@ -432,17 +298,17 @@ class GDBController:
     def _dispatch(self, line: str) -> None:
         if not line:
             return
-        rec = MIParser.parse(line)
+        rec = GDBMIParser.parse_response(line)
         t = rec["type"]
-        if t == "^":
+        if t == "result":
             self._handle_result(rec)
-        elif t in ("*", "="):
+        elif t == "notify":
             self._handle_async(rec)
-        # console/target/log/prompt on MI channel are noise — ignore
+        # console/target/log/done/output on MI channel are noise — ignore
 
     def _handle_result(self, rec: dict) -> None:
-        cls = rec.get("class_", "")
-        results = rec.get("results", {})
+        cls = rec.get("message", "")
+        results = rec.get("payload") or {}
         token = rec.get("token")
         meta: dict[str, object] = {}
         if token is not None:
@@ -529,7 +395,7 @@ class GDBController:
         if token is not None and token in self._pending:
             fut = self._pending.pop(token)
             if not fut.done():
-                fut.set_result({"class_": cls, "results": results})
+                fut.set_result({"message": cls, "payload": results})
 
     def _send_mi_command(
         self,
@@ -631,8 +497,8 @@ class GDBController:
         self.mi_command(f"-break-disable {number}")
 
     def _handle_async(self, rec: dict) -> None:
-        cls = rec.get("class_", "")
-        results = rec.get("results", {})
+        cls = rec.get("message", "")
+        results = rec.get("payload") or {}
 
         if cls == "stopped":
             self._inferior_running = False
