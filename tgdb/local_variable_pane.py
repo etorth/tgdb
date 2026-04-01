@@ -53,6 +53,8 @@ class LocalVariablePane(Widget):
         self._var_delete: Optional[Callable[..., Coroutine]] = None
         # Track created varobj names so we can clean them up
         self._varobj_names: list[str] = []
+        # Generation counter to cancel stale rebuilds
+        self._rebuild_gen: int = 0
 
     def compose(self):
         yield Tree("Local Variables", id="var-tree")
@@ -75,7 +77,8 @@ class LocalVariablePane(Widget):
     def set_variables(self, variables: list[LocalVariable]) -> None:
         """Called when the frame changes — rebuild the tree from scratch."""
         self._variables = list(variables)
-        asyncio.create_task(self._rebuild_tree())
+        self._rebuild_gen += 1
+        asyncio.create_task(self._rebuild_tree(self._rebuild_gen))
 
     async def _cleanup_varobjs(self) -> None:
         """Delete all existing varobjs."""
@@ -88,7 +91,7 @@ class LocalVariablePane(Widget):
                 pass
         self._varobj_names = []
 
-    async def _rebuild_tree(self) -> None:
+    async def _rebuild_tree(self, gen: int) -> None:
         """Clear the tree and create varobjs for each local variable."""
         try:
             tree = self.query_one(Tree)
@@ -98,24 +101,27 @@ class LocalVariablePane(Widget):
         await self._cleanup_varobjs()
         tree.clear()
 
+        if self._rebuild_gen != gen:
+            return
+
         if not self._var_create:
-            # No GDB connection — fall back to flat display
             for var in self._variables:
-                prefix = "[arg] " if var.is_arg else ""
                 val = var.value.replace("\n", " ") if var.value else "<complex>"
-                label = f"{prefix}{var.name}: {var.type} = {val}"
-                tree.root.add_leaf(label)
+                tree.root.add_leaf(f"{var.name} = {val}")
             return
 
         for var in self._variables:
+            if self._rebuild_gen != gen:
+                return
             try:
                 info = await self._var_create(var.name)
             except Exception:
-                # Fall back to flat display for this variable
-                prefix = "[arg] " if var.is_arg else ""
                 val = var.value.replace("\n", " ") if var.value else "<complex>"
-                tree.root.add_leaf(f"{prefix}{var.name} = {val}")
+                tree.root.add_leaf(f"{var.name} = {val}")
                 continue
+
+            if self._rebuild_gen != gen:
+                return
 
             varobj_name = info.get("name", "")
             if varobj_name:
