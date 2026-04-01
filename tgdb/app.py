@@ -322,13 +322,17 @@ class TGDBApp(App):
     # Mode management
     # ------------------------------------------------------------------
 
-    async def on_unmount(self) -> None:
-        """Save command history to disk when tgdb exits."""
+    def _save_history_to_disk(self) -> None:
+        """Persist command history to the history file (best-effort)."""
         try:
             bar = self.query_one("#cmdline", CommandLineBar)
             bar.save_history(max_size=self.cfg.historysize)
         except Exception:
             pass
+
+    async def on_unmount(self) -> None:
+        """Save command history to disk when tgdb exits."""
+        self._save_history_to_disk()
 
     async def _load_rc_async(self) -> None:
         """Source the rc file as if the user had typed each command interactively.
@@ -1354,31 +1358,50 @@ class TGDBApp(App):
             cmdline._add_to_history(cmd_text, max_size=self.cfg.historysize)
 
         cmdline.lock_for_task()
-        captured_output: Optional[str] = None
+        error_output: Optional[str] = None
+        cancelled = False
         try:
             result = await self.cp.execute_async(cmd, print_fn=cmdline.append_output)
-            streaming = cmdline._streaming_buf.rstrip("\n")
-            if streaming and result:
-                captured_output = streaming + "\n" + result
-            elif streaming:
-                captured_output = streaming
-            else:
-                captured_output = result
+            if result:
+                error_output = result
         except asyncio.CancelledError:
-            streaming = cmdline._streaming_buf.rstrip("\n")
-            captured_output = (streaming + "\n[Interrupted]").strip() if streaming else "[Interrupted]"
+            cancelled = True
         except Exception as exc:
-            captured_output = f"Internal error: {exc}"
-        finally:
-            cmdline.finish_task()
-            self._cmd_task = None
+            error_output = f"Internal error: {exc}"
 
-        if captured_output:
-            if self._show_status(captured_output):
+        # Retrieve all lines collected during task execution (sync-print-op)
+        collected = cmdline.get_collected_output()
+        cmdline.finish_task()
+        self._cmd_task = None
+
+        if cancelled:
+            text = "\n".join(collected) + "\n[Interrupted]" if collected else "[Interrupted]"
+            error_output = text.strip()
+            collected = []  # already merged into error_output
+
+        # Build sync-print-op output
+        if error_output:
+            # Errors always shown as message
+            if collected:
+                captured = "\n".join(collected) + "\n" + error_output
+            else:
+                captured = error_output
+            if self._show_status(captured):
                 self._resume_pending_replay()
                 return  # MESSAGE mode — stay until user dismisses
+        elif collected:
+            if len(collected) == 1:
+                # Single line: show briefly, no "Press ENTER" prompt
+                self._show_status(collected[0])
+            else:
+                # Multi-line: show with "Press ENTER" prompt
+                captured = "\n".join(collected)
+                if self._show_status(captured):
+                    self._resume_pending_replay()
+                    return  # MESSAGE mode
         else:
             self._sync_config()
+
         if self._mode == "CMD":
             self._switch_to_tgdb()
         self._resume_pending_replay()
@@ -1577,6 +1600,7 @@ class TGDBApp(App):
     def _ui_gdb_exit(self) -> None:
         # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
         # cgdb calls cgdb_cleanup_and_exit(0) in tgdb_process() on size<=0.
+        self._save_history_to_disk()
         self.exit(0)
 
     # ------------------------------------------------------------------
@@ -1617,6 +1641,7 @@ class TGDBApp(App):
             self.cp.register_handler(name, fn)
 
     def _cmd_quit(self, _: list) -> None:
+        self._save_history_to_disk()
         self.gdb.terminate()
         self.exit(0)
 

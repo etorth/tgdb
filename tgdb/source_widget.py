@@ -690,6 +690,7 @@ class SourceView(Widget):
         if char.isdigit() and (char != "0" or self._num_buf):
             self._num_buf += char
             return True
+        has_prefix = bool(self._num_buf)
         count = int(self._num_buf) if self._num_buf else 1
         self._num_buf = ""
 
@@ -711,7 +712,11 @@ class SourceView(Widget):
         elif key == "ctrl+u":
             self.half_page_up()
         elif key == "G":
-            self.goto_bottom(count if count != 1 else None)
+            if has_prefix:
+                n = self._line_count() or 1
+                self.move_to(max(1, min(count, n)))
+            else:
+                self.goto_bottom()
         elif key == "H":
             self.goto_screen_top()
         elif key == "M":

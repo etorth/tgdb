@@ -67,6 +67,8 @@ class CommandLineBar(Widget):
         self._ml_buf: list[str] = []        # lines collected so far
         self._ml_marker: str = ""           # e.g. "EOF"
         self._ml_cmd: str = ""              # e.g. "python"
+        self._ml_history_recall: bool = False  # True when showing a recalled heredoc entry
+        self._ml_history_full: str = ""        # full multiline command for recall
 
         # ── Multiline message display state ──────────────────────────
         self._msg_lines: list[str] = []
@@ -93,6 +95,7 @@ class CommandLineBar(Widget):
         # is blocked and streaming output from the task is shown.
         self._task_running: bool = False
         self._streaming_buf: str = ""       # accumulated output from running task
+        self._collected_lines: list[str] = []  # all output lines collected during task
 
     # ------------------------------------------------------------------
     # Height management
@@ -152,11 +155,12 @@ class CommandLineBar(Widget):
         self.refresh()
 
     def start_command(self) -> None:
-        # Clear any lingering message so the input line is unobstructed
+        # Clear any lingering message/async-print so the input line is unobstructed
         self._message = ""
         self._msg_lines = []
         self._msg_scroll = 0
         self._msg_visible_rows = 0
+        self._streaming_buf = ""  # clear fire-and-forget async-print display
         self._input_active = True
         self._search_active = False
         self._input_buf = ""
@@ -199,6 +203,7 @@ class CommandLineBar(Widget):
         """Called by the app when a command task starts.  Locks the bar."""
         self._task_running = True
         self._streaming_buf = ""
+        self._collected_lines = []
         self._input_active = False
         self._message = ""
         self._msg_lines = []
@@ -208,16 +213,63 @@ class CommandLineBar(Widget):
         self.refresh()
 
     def append_output(self, chunk: str) -> None:
-        """Append streaming output from a running task and trigger a repaint."""
+        """Append streaming output from a running task (async-print-op).
+
+        During task execution (``_task_running`` is True) the output is shown
+        immediately with a ``▶ `` prefix.  The raw text is also buffered in
+        ``_collected_lines`` for the sync-print-op when the task finishes.
+
+        After the task has ended, fire-and-forget coroutines may still call
+        this.  The async-print-op is shown only if the bar is idle (not in
+        user-input, not showing a sync-print-op/message).
+        """
         if not chunk:
             return
-        self._streaming_buf += chunk
-        self.refresh()
+
+        # Buffer raw output for sync-print-op (strip trailing newline for clean lines)
+        raw = chunk.rstrip("\n")
+        if raw:
+            self._collected_lines.extend(raw.split("\n"))
+
+        if self._task_running:
+            # Replace streaming buf with latest chunk for async-print display
+            self._streaming_buf = chunk
+            # Expand bar height for multi-line print
+            display_lines = chunk.rstrip("\n").split("\n")
+            self._set_height(max(1, len(display_lines)))
+            self.refresh()
+        else:
+            # Fire-and-forget: show if bar is idle
+            if self._can_show_async_print():
+                self._streaming_buf = chunk
+                display_lines = chunk.rstrip("\n").split("\n")
+                self._set_height(max(1, len(display_lines)))
+                self.refresh()
+
+    def _can_show_async_print(self) -> bool:
+        """Return True if the bar can show an async-print-op right now.
+
+        Conditions where async-print is suppressed:
+        - User is typing input (_input_active or _ml_active)
+        - A sync-print-op message is displayed (_msg_lines)
+        """
+        if self._input_active or self._ml_active:
+            return False
+        if self._msg_lines:
+            return False
+        return True
+
+    def get_collected_output(self) -> list[str]:
+        """Return all output lines collected during the task and clear the buffer."""
+        lines = list(self._collected_lines)
+        self._collected_lines = []
+        return lines
 
     def finish_task(self) -> None:
         """Called by the app when the task ends; resets running state."""
         self._task_running = False
         self._streaming_buf = ""
+        self._set_height(1)
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -376,6 +428,30 @@ class CommandLineBar(Widget):
 
         # ── Heredoc continuation input ────────────────────────────────
         if self._ml_active:
+            # History-recalled multiline entry — read-only display
+            if self._ml_history_recall:
+                if key in ("enter", "return"):
+                    full_cmd = self._ml_history_full
+                    self._cancel_history_multiline()
+                    self._reset_history_browse()
+                    self.post_message(CommandSubmit(full_cmd))
+                    return True
+                if key == "escape":
+                    self._cancel_history_multiline()
+                    self._reset_history_browse()
+                    self._input_active = False
+                    self._set_height(1)
+                    self.refresh()
+                    self.post_message(CommandCancel())
+                    return True
+                if key == "up":
+                    self._history_up()
+                    return True
+                if key == "down":
+                    self._history_down()
+                    return True
+                return True  # swallow other keys in recall mode
+
             if key == "escape":
                 self._cancel_multiline()
                 self.post_message(CommandCancel())
@@ -513,8 +589,14 @@ class CommandLineBar(Widget):
         for i in range(search_start, -1, -1):
             if self._history[i].startswith(self._history_prefix):
                 self._history_idx = i
-                self._input_buf = self._history[i]
-                self._cursor_pos = len(self._input_buf)
+                entry = self._history[i]
+                if "\n" in entry:
+                    self._show_history_multiline(entry)
+                else:
+                    self._ml_history_recall = False
+                    self._ml_history_full = ""
+                    self._input_buf = entry
+                    self._cursor_pos = len(self._input_buf)
                 self.refresh()
                 return
 
@@ -525,13 +607,47 @@ class CommandLineBar(Widget):
         for i in range(self._history_idx + 1, len(self._history)):
             if self._history[i].startswith(self._history_prefix):
                 self._history_idx = i
-                self._input_buf = self._history[i]
-                self._cursor_pos = len(self._input_buf)
+                entry = self._history[i]
+                if "\n" in entry:
+                    self._show_history_multiline(entry)
+                else:
+                    self._ml_history_recall = False
+                    self._ml_history_full = ""
+                    self._input_buf = entry
+                    self._cursor_pos = len(self._input_buf)
                 self.refresh()
                 return
         # Past the end — restore original input
+        self._cancel_history_multiline()
         self._reset_history_browse()
         self.refresh()
+
+    def _show_history_multiline(self, entry: str) -> None:
+        """Switch into multiline display mode for a recalled heredoc history entry."""
+        first, _, rest = entry.partition("\n")
+        self._ml_active = True
+        self._ml_history_recall = True
+        self._ml_history_full = entry
+        self._ml_cmd = first
+        self._ml_marker = "EOF"
+        self._ml_buf = rest.splitlines()
+        self._input_buf = ""
+        self._input_active = False
+        # header + code lines + marker line + hint line
+        self._set_height(2 + len(self._ml_buf) + 1)
+
+    def _cancel_history_multiline(self) -> None:
+        """Exit history-recall multiline display mode."""
+        if self._ml_history_recall:
+            self._ml_active = False
+            self._ml_history_recall = False
+            self._ml_history_full = ""
+            self._ml_buf = []
+            self._ml_marker = ""
+            self._ml_cmd = ""
+            self._input_buf = ""
+            self._input_active = True
+            self._set_height(1)
 
     def _reset_history_browse(self) -> None:
         """Abort browsing: revert _input_buf to the original prefix."""
@@ -562,6 +678,8 @@ class CommandLineBar(Widget):
 
     def _cancel_multiline(self) -> None:
         self._ml_active = False
+        self._ml_history_recall = False
+        self._ml_history_full = ""
         self._ml_buf = []
         self._ml_marker = ""
         self._ml_cmd = ""
@@ -649,6 +767,10 @@ class CommandLineBar(Widget):
             t.stylize(style)
             return t
 
+        # Fire-and-forget async-print-op (task finished but background coroutine printed)
+        if self._streaming_buf:
+            return self._render_streaming(w, style)
+
         if self._message:
             t = Text(_pad_crop(self._message, w), style=style, no_wrap=True, overflow="crop")
             return t
@@ -702,23 +824,43 @@ class CommandLineBar(Widget):
         return t
 
     def _render_streaming(self, w: int, style: str) -> Text:
-        """Render task-running state: show the last output line plus an indicator."""
+        """Render async-print-op: show latest print output with ▶ prefix.
+
+        First line is prefixed with ``▶ ``; continuation lines are indented
+        with three spaces to align with the text after ``▶ ``.
+        """
         buf = self._streaming_buf
         if buf:
-            last_line = buf.rstrip("\n").rsplit("\n", 1)[-1]
-            text = _pad_crop(f"\u25b6 {last_line}", w)
-        else:
-            text = _pad_crop("\u25b6 Running\u2026", w)
+            lines = buf.rstrip("\n").split("\n")
+            rendered = []
+            for i, ln in enumerate(lines):
+                if i == 0:
+                    rendered.append(_pad_crop(f"\u25b6 {ln}", w))
+                else:
+                    rendered.append(_pad_crop(f"   {ln}", w))
+            t = Text("\n".join(rendered))
+            t.stylize(style)
+            return t
+        text = _pad_crop("\u25b6 Running\u2026", w)
         return Text(text, style=style, no_wrap=True, overflow="crop")
 
     def _render_ml_input(self, w: int, style: str) -> Text:
         """Render the heredoc continuation prompt (multi-row)."""
         lines = []
-        lines.append(_pad_crop(f":python << {self._ml_marker}", w))
-        for ln in self._ml_buf:
-            lines.append(_pad_crop(f"  {ln}", w))
-        # Current input row — append a block cursor marker
-        lines.append(_pad_crop(f"  {self._input_buf}\u258f", w))
+        if self._ml_history_recall:
+            # History-recalled heredoc — read-only display
+            lines.append(_pad_crop(f":{self._ml_cmd} << {self._ml_marker}", w))
+            for ln in self._ml_buf:
+                lines.append(_pad_crop(f"  {ln}", w))
+            lines.append(_pad_crop(f"  {self._ml_marker}", w))
+            hint = "-- Press ENTER to re-run, ESC to cancel, Up/Down to browse --"
+            lines.append(_pad_crop(hint, w))
+        else:
+            lines.append(_pad_crop(f":python << {self._ml_marker}", w))
+            for ln in self._ml_buf:
+                lines.append(_pad_crop(f"  {ln}", w))
+            # Current input row — append a block cursor marker
+            lines.append(_pad_crop(f"  {self._input_buf}\u258f", w))
         t = Text("\n".join(lines))
         t.stylize(style)
         return t
