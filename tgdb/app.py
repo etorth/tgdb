@@ -1343,9 +1343,10 @@ class TGDBApp(App):
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
             return
-        self._cmd_task = asyncio.create_task(self._run_cmd_task(msg.command))
+        self._cmd_task = asyncio.create_task(
+            self._run_cmd_task(msg.command, history_text=msg.history_text))
 
-    async def _run_cmd_task(self, cmd: str) -> None:
+    async def _run_cmd_task(self, cmd: str, *, history_text: str = "") -> None:
         """Run one CommandLineBar command as an async task (one-at-a-time)."""
         try:
             cmdline = self.query_one("#cmdline", CommandLineBar)
@@ -1353,9 +1354,10 @@ class TGDBApp(App):
             return
 
         # Record in history before execution.
-        cmd_text = cmd.strip()
-        if cmd_text:
-            cmdline._add_to_history(cmd_text, max_size=self.cfg.historysize)
+        # Use verbatim history_text if provided (heredoc), otherwise cmd itself.
+        hist = (history_text or cmd).strip()
+        if hist:
+            cmdline._add_to_history(hist, max_size=self.cfg.historysize)
 
         cmdline.lock_for_task()
         error_output: Optional[str] = None

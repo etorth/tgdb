@@ -67,6 +67,7 @@ class CommandLineBar(Widget):
         self._ml_buf: list[str] = []        # lines collected so far
         self._ml_marker: str = ""           # e.g. "EOF"
         self._ml_cmd: str = ""              # e.g. "python"
+        self._ml_header: str = ""           # original header as typed
         self._ml_history_recall: bool = False  # True when showing a recalled heredoc entry
         self._ml_history_full: str = ""        # full multiline command for recall
 
@@ -280,7 +281,8 @@ class CommandLineBar(Widget):
         """Load command history from the history file at startup.
 
         The file format matches the tgdb rc file format: plain commands on
-        single lines, multi-line Python blocks as ``python << EOF`` heredocs.
+        single lines, multi-line Python blocks as ``python << MARKER`` heredocs.
+        Entries are stored verbatim (header + body + closing marker).
         """
         if not self._history_file:
             return
@@ -301,16 +303,16 @@ class CommandLineBar(Widget):
             # Heredoc entry: "python << EOF" … "EOF"
             m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', stripped, re.IGNORECASE)
             if m:
-                cmd_name = m.group(1).lower()
                 marker = m.group(2)
-                code_lines: list[str] = []
+                # Collect verbatim: header + body lines + closing marker
+                entry_lines: list[str] = [line.rstrip()]
                 while i < len(raw_lines):
                     code_line = raw_lines[i]
                     i += 1
+                    entry_lines.append(code_line.rstrip())
                     if code_line.strip() == marker:
                         break
-                    code_lines.append(code_line)
-                entries.append(cmd_name + "\n" + "\n".join(code_lines))
+                entries.append("\n".join(entry_lines))
             else:
                 entries.append(stripped)
         self._history = entries
@@ -318,8 +320,7 @@ class CommandLineBar(Widget):
     def save_history(self, path: Optional[Path] = None, *, max_size: int = 1024) -> Optional[str]:
         """Save the current session history to *path* (default: history file).
 
-        Multi-line (heredoc) entries are written in ``python << EOF`` format
-        so they can be replayed with ``:source`` or !!.
+        Multi-line (heredoc) entries are stored verbatim (header + body + marker).
         max_size=0 writes an empty file (history buffer disabled).
         Returns an error string on failure, None on success.
         """
@@ -336,14 +337,9 @@ class CommandLineBar(Widget):
 
         file_lines: list[str] = []
         for entry in entries:
-            if "\n" in entry:
-                # Multi-line (heredoc) entry — reconstruct heredoc format
-                first, _, rest = entry.partition("\n")
-                file_lines.append(f"{first} << EOF")
-                file_lines.extend(rest.splitlines())
-                file_lines.append("EOF")
-            else:
-                file_lines.append(entry)
+            # Entries are stored verbatim — multiline entries already contain
+            # the full heredoc (header + body + marker).
+            file_lines.extend(entry.splitlines())
 
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -365,13 +361,12 @@ class CommandLineBar(Widget):
         for i, entry in enumerate(self._history, 1):
             prefix = f"{i:>{idx_w}} "
             if "\n" in entry:
-                # Multi-line (heredoc) entry
-                first, _, rest = entry.partition("\n")
-                lines.append(f"{prefix}{first} << EOF")
+                # Multi-line (heredoc) entry — show verbatim with indented continuation
+                entry_lines = entry.splitlines()
+                lines.append(f"{prefix}{entry_lines[0]}")
                 indent = " " * (idx_w + 1) + "   "
-                for code_line in rest.splitlines():
-                    lines.append(f"{indent}{code_line}")
-                lines.append(f"{indent}EOF")
+                for cont_line in entry_lines[1:]:
+                    lines.append(f"{indent}{cont_line}")
             else:
                 lines.append(f"{prefix}{entry}")
         return "\n".join(lines)
@@ -464,8 +459,12 @@ class CommandLineBar(Widget):
                     # Terminator found — assemble and submit the block
                     code = "\n".join(self._ml_buf)
                     cmd = self._ml_cmd
+                    # Build verbatim history text: header + body lines + closing marker
+                    header = self._ml_header
+                    verbatim_lines = [header] + list(self._ml_buf) + [line]
+                    history_text = "\n".join(verbatim_lines)
                     self._cancel_multiline()
-                    self.post_message(CommandSubmit(f"{cmd}\n{code}"))
+                    self.post_message(CommandSubmit(f"{cmd}\n{code}", history_text=history_text))
                 else:
                     self._ml_buf.append(line)
                     # header + collected + current-input row
@@ -593,8 +592,7 @@ class CommandLineBar(Widget):
                 if "\n" in entry:
                     self._show_history_multiline(entry)
                 else:
-                    self._ml_history_recall = False
-                    self._ml_history_full = ""
+                    self._cancel_history_multiline()
                     self._input_buf = entry
                     self._cursor_pos = len(self._input_buf)
                 self.refresh()
@@ -611,8 +609,7 @@ class CommandLineBar(Widget):
                 if "\n" in entry:
                     self._show_history_multiline(entry)
                 else:
-                    self._ml_history_recall = False
-                    self._ml_history_full = ""
+                    self._cancel_history_multiline()
                     self._input_buf = entry
                     self._cursor_pos = len(self._input_buf)
                 self.refresh()
@@ -624,17 +621,17 @@ class CommandLineBar(Widget):
 
     def _show_history_multiline(self, entry: str) -> None:
         """Switch into multiline display mode for a recalled heredoc history entry."""
-        first, _, rest = entry.partition("\n")
+        all_lines = entry.splitlines()
         self._ml_active = True
         self._ml_history_recall = True
         self._ml_history_full = entry
-        self._ml_cmd = first
-        self._ml_marker = "EOF"
-        self._ml_buf = rest.splitlines()
+        self._ml_cmd = ""
+        self._ml_marker = ""
+        self._ml_buf = all_lines  # all verbatim lines
         self._input_buf = ""
         self._input_active = False
-        # header + code lines + marker line + hint line
-        self._set_height(2 + len(self._ml_buf) + 1)
+        # all lines of the entry
+        self._set_height(len(all_lines))
 
     def _cancel_history_multiline(self) -> None:
         """Exit history-recall multiline display mode."""
@@ -671,6 +668,7 @@ class CommandLineBar(Widget):
         self._ml_active = True
         self._ml_cmd = cmd.lower()
         self._ml_marker = marker
+        self._ml_header = f"{cmd} << {marker}"  # original header as typed
         self._ml_buf = []
         self._input_buf = ""
         self._set_height(2)     # header row + current-input row
@@ -683,6 +681,7 @@ class CommandLineBar(Widget):
         self._ml_buf = []
         self._ml_marker = ""
         self._ml_cmd = ""
+        self._ml_header = ""
         self._input_buf = ""
         self._set_height(1)
         self.refresh()
@@ -848,13 +847,12 @@ class CommandLineBar(Widget):
         """Render the heredoc continuation prompt (multi-row)."""
         lines = []
         if self._ml_history_recall:
-            # History-recalled heredoc — read-only display
-            lines.append(_pad_crop(f":{self._ml_cmd} << {self._ml_marker}", w))
-            for ln in self._ml_buf:
-                lines.append(_pad_crop(f"  {ln}", w))
-            lines.append(_pad_crop(f"  {self._ml_marker}", w))
-            hint = "-- Press ENTER to re-run, ESC to cancel, Up/Down to browse --"
-            lines.append(_pad_crop(hint, w))
+            # History-recalled heredoc — show verbatim lines with ':' prefix on first
+            for i, ln in enumerate(self._ml_buf):
+                if i == 0:
+                    lines.append(_pad_crop(f":{ln}", w))
+                else:
+                    lines.append(_pad_crop(f" {ln}", w))
         else:
             lines.append(_pad_crop(f":python << {self._ml_marker}", w))
             for ln in self._ml_buf:
@@ -896,9 +894,10 @@ class CommandLineBar(Widget):
 
 
 class CommandSubmit(Message):
-    def __init__(self, command: str) -> None:
+    def __init__(self, command: str, *, history_text: str = "") -> None:
         super().__init__()
         self.command = command
+        self.history_text = history_text  # verbatim input for history (if different from command)
 
 
 class CommandCancel(Message):

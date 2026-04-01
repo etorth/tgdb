@@ -265,6 +265,18 @@ class ConfigParser:
         if _raw:
             _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
             if _cmd in ("python", "py"):
+                # Handle heredoc format: "<<  MARKER\n...\nMARKER"
+                _hd = re.match(r'^<<\s*(\S+)\s*\n(.*)', _raw_arg, re.DOTALL)
+                if _hd:
+                    _marker, _body = _hd.group(1), _hd.group(2)
+                    # Strip the closing marker line
+                    _body_lines = _body.split("\n")
+                    code_lines = []
+                    for bl in _body_lines:
+                        if bl.strip() == _marker:
+                            break
+                        code_lines.append(bl)
+                    _raw_arg = "\n".join(code_lines)
                 return await self._exec_py_async(_raw_arg, "<tgdb:python>", print_fn)
             else:
                 return await self._exec_pyfile_async(_raw_arg.strip(), print_fn)
