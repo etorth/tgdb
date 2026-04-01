@@ -17,6 +17,7 @@ from rich.text import Text
 from .gdb_controller import LocalVariable
 from .highlight_groups import HighlightGroups
 from .pane_utils import center_cells
+from .type_simplifier import simplify_type
 
 
 class LocalVariablePane(Widget):
@@ -124,7 +125,7 @@ class LocalVariablePane(Widget):
             numchild = self._safe_int(info.get("numchild", "0"))
             has_children = numchild > 0 or info.get("dynamic", "0") == "1"
             value = info.get("value", "")
-            var_type = info.get("type", var.type)
+            var_type = simplify_type(info.get("type", var.type))
 
             if has_children:
                 label = f"{var.name}: {var_type}"
@@ -173,8 +174,43 @@ class LocalVariablePane(Widget):
         await self._add_children(node, children)
 
     async def _add_children(self, node: TreeNode, children: list[dict]) -> None:
-        """Add child nodes, transparently flattening access specifier groups."""
+        """Add child nodes, transparently flattening access specifier groups.
+
+        For map-like containers whose pretty-printer emits alternating
+        key/value children (``[0]``=key, ``[1]``=value, …), pairs them
+        into single nodes labeled ``[key] = value``.
+        """
         _ACCESS = {"public", "private", "protected"}
+
+        # Detect alternating key/value pattern from map pretty-printer:
+        # children come as [0]=key, [1]=value, [2]=key, [3]=value, ...
+        # Heuristic: even count, sequential numeric exp labels, odd
+        # children all have the same container-like type.
+        paired = self._detect_map_pairs(children)
+
+        if paired:
+            for key_child, val_child in paired:
+                key_val = key_child.get("value", "?")
+                val_name = val_child.get("name", "")
+                val_numchild = self._safe_int(val_child.get("numchild", "0"))
+                val_dynamic = val_child.get("dynamic", "0") == "1"
+                val_has_children = val_numchild > 0 or val_dynamic
+                val_value = val_child.get("value", "")
+                val_type = simplify_type(val_child.get("type", ""))
+
+                if val_has_children:
+                    label = f"[{key_val}]: {val_type}" if val_type else f"[{key_val}]"
+                    if val_value:
+                        label += f" = {self._truncate(val_value)}"
+                    child_node = node.add(label, expand=False)
+                    child_node.data = {"varobj": val_name, "loaded": False}
+                    child_node.add_leaf("⏳ loading...")
+                else:
+                    disp = val_value if val_value else ""
+                    label = f"[{key_val}]: {val_type} = {disp}" if val_type else f"[{key_val}] = {disp}"
+                    node.add_leaf(label)
+            return
+
         for child in children:
             child_name = child.get("name", "")
             exp = child.get("exp", "")
@@ -182,7 +218,7 @@ class LocalVariablePane(Widget):
             dynamic = child.get("dynamic", "0") == "1"
             has_children = numchild > 0 or dynamic
             value = child.get("value", "")
-            child_type = child.get("type", "")
+            child_type = simplify_type(child.get("type", ""))
 
             # Access specifier pseudo-nodes — expand inline
             if exp in _ACCESS and has_children:
@@ -206,6 +242,26 @@ class LocalVariablePane(Widget):
                 else:
                     label = f"{exp} = {value}" if value else exp
                 node.add_leaf(label)
+
+    @staticmethod
+    def _detect_map_pairs(
+        children: list[dict],
+    ) -> list[tuple[dict, dict]] | None:
+        """If *children* look like map pretty-printer output (alternating
+        key/value with sequential ``[0], [1], [2], [3], …`` labels),
+        return a list of ``(key_child, value_child)`` pairs.
+
+        Returns ``None`` if the pattern does not match.
+        """
+        n = len(children)
+        if n == 0 or n % 2 != 0:
+            return None
+        # Check that exp labels are sequential integers 0..n-1
+        for i, c in enumerate(children):
+            if c.get("exp", "") != str(i):
+                return None
+        # Pair them up
+        return [(children[i], children[i + 1]) for i in range(0, n, 2)]
 
     @staticmethod
     def _safe_int(val) -> int:

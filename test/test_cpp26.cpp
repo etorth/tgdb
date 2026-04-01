@@ -18,7 +18,7 @@
 auto test_attributes() { return 42; }
 
 // 2. Type aliases and expected
-using StringMap = std::map<std::string, std::vector<std::string>, std::less<>>;
+using StringMap2 = std::map<std::string, std::vector<std::string>, std::less<>>;
 
 std::expected<int, std::string> get_value(bool fail) {
     if (fail) return std::unexpected("错误: _ 不是数字"); // Chinese in std::expected
@@ -149,10 +149,11 @@ int main() {
 
     /* * * /  <-- sneaky comment end */
 
+    using StringMap = std::map<std::string, std::vector<std::string>, std::less<>>;
     StringMap registry;
+
     registry["cpp26"] = {"placeholder", "pack_indexing", "structured_bindings"};
     registry["legacy"] = {"macros", "void*", "goto", "😊"};
-
 
     registry["cjk_test"] = {"开发", "テスト", "코드", "😊"}; // CN, JP, KR, Emoji
                                                        //
