@@ -10,15 +10,15 @@ from __future__ import annotations
 import asyncio
 from typing import Callable, Coroutine, Optional
 
-from textual.widget import Widget
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
 from .gdb_controller import LocalVariable
 from .highlight_groups import HighlightGroups
+from .pane_base import PaneBase
 
 
-class LocalVariablePane(Widget):
+class LocalVariablePane(PaneBase):
     """Render the current frame's local variables as an expandable tree.
 
     Top-level variables are created via ``-var-create``.  When the user
@@ -42,9 +42,7 @@ class LocalVariablePane(Widget):
     """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.hl = hl
-        self.can_focus = True
+        super().__init__(hl, **kwargs)
         self._variables: list[LocalVariable] = []
         # Callbacks set by the app to interact with the GDB controller
         self._var_create: Optional[Callable[..., Coroutine]] = None
@@ -55,11 +53,16 @@ class LocalVariablePane(Widget):
         # Generation counter to cancel stale rebuilds
         self._rebuild_gen: int = 0
 
+    def title(self) -> str:
+        return "LOCALS"
+
     def compose(self):
-        yield Tree("Local Variables", id="var-tree")
+        yield from super().compose()
+        yield Tree("", id="var-tree")
 
     def on_mount(self) -> None:
         tree = self.query_one(Tree)
+        tree.show_root = False
         tree.root.expand()
 
     def set_var_callbacks(

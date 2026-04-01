@@ -9,18 +9,17 @@ from textual.widget import Widget
 
 from .gdb_controller import RegisterInfo
 from .highlight_groups import HighlightGroups
-from .pane_utils import center_cells, fit_cells
+from .pane_base import PaneBase
+from .pane_utils import fit_cells
 
 
-class RegisterPane(Widget):
-    """Render register names and values for the current frame."""
+class _RegisterContent(Widget):
+    """Renders the register list (no title row)."""
 
     DEFAULT_CSS = """
-    RegisterPane {
+    _RegisterContent {
         width: 1fr;
         height: 1fr;
-        min-width: 4;
-        min-height: 2;
         overflow: hidden;
     }
     """
@@ -28,7 +27,7 @@ class RegisterPane(Widget):
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
-        self.can_focus = True
+        self.can_focus = False
         self._registers: list[RegisterInfo] = []
 
     def set_registers(self, registers: list[RegisterInfo]) -> None:
@@ -42,20 +41,30 @@ class RegisterPane(Widget):
         width = max(1, self.size.width or 1)
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
-
-        result.append(center_cells("Registers", width), style=self.hl.style("StatusLine"))
-
-        visible_rows = max(0, height - 1)
-        for register in self._registers[:visible_rows]:
-            result.append("\n")
-            result.append(
-                fit_cells(self._register_text(register), width),
-                style=self.hl.style("Normal"),
-            )
-
-        remaining_rows = height - 1 - min(visible_rows, len(self._registers))
-        for _ in range(max(0, remaining_rows)):
+        for i, register in enumerate(self._registers[:height]):
+            if i > 0:
+                result.append("\n")
+            result.append(fit_cells(self._register_text(register), width), style=self.hl.style("Normal"))
+        remaining = height - min(height, len(self._registers))
+        for i in range(max(0, remaining)):
             result.append("\n")
             result.append(" " * width, style=self.hl.style("Normal"))
-
         return result
+
+
+class RegisterPane(PaneBase):
+    """Register pane: title bar + register list."""
+
+    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        super().__init__(hl, **kwargs)
+        self._content = _RegisterContent(hl)
+
+    def title(self) -> str:
+        return "Registers"
+
+    def compose(self):
+        yield from super().compose()
+        yield self._content
+
+    def set_registers(self, registers: list[RegisterInfo]) -> None:
+        self._content.set_registers(registers)

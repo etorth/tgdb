@@ -17,6 +17,7 @@ from textual.message import Message
 from textual.widget import Widget
 
 from .highlight_groups import HighlightGroups
+from .pane_base import PaneBase  # noqa: F401 — re-exported for callers
 
 
 class DragResize(Message):
@@ -105,7 +106,7 @@ class Splitter(Widget):
             event.stop()
 
 
-class EmptyPane(Widget):
+class EmptyPane(PaneBase):
     """An empty workspace leaf created by context-menu split actions."""
 
     DEFAULT_CSS = """
@@ -117,14 +118,6 @@ class EmptyPane(Widget):
         background: $surface-darken-1;
     }
     """
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.can_focus = True
-
-    def render(self) -> Text:
-        width = max(1, self.size.width or 1)
-        return Text(" " * width, no_wrap=True, overflow="crop")
 
 
 class PaneContainer(Widget):
@@ -292,9 +285,12 @@ class PaneContainer(Widget):
             self._apply_item_style(item, self._weights[index])
             children.append(item)
             if index < len(self._items) - 1:
-                splitter = Splitter(self.hl, draggable=True)
-                splitter.set_orientation(is_horizontal)
-                children.append(splitter)
+                # In vertical containers the title bar of the next PaneBase
+                # item acts as the visual/drag boundary — no separate Splitter.
+                if is_horizontal:
+                    splitter = Splitter(self.hl, draggable=True)
+                    splitter.set_orientation(is_horizontal)
+                    children.append(splitter)
 
         async with self.batch():
             await self.remove_children()
@@ -310,3 +306,33 @@ class PaneContainer(Widget):
             return
         if self._resize_from_drag(splitter, msg.screen_x, msg.screen_y):
             msg.stop()
+
+    def _resize_from_title_drag(self, before: Widget, after: Widget, screen_y: int) -> None:
+        """Resize *before* and *after* panes in a vertical container when the
+        user drags the title bar of *after* (which is the visual boundary)."""
+        self._capture_layout_weights()
+        try:
+            before_index = self._items.index(before)
+            after_index = self._items.index(after)
+        except ValueError:
+            return
+
+        before_size = before.size.height
+        after_size = after.size.height
+        total_size = before_size + after_size
+        min_size = self.min_item_height
+
+        if total_size <= min_size * 2:
+            return
+
+        start = before.region.y
+        new_before = max(min_size, min(total_size - min_size, int(screen_y - start)))
+        new_after = total_size - new_before
+
+        if new_before <= 0 or new_after <= 0:
+            return
+
+        self._weights[before_index] = new_before
+        self._weights[after_index] = new_after
+        self._apply_orientation()
+        self.refresh(layout=True)

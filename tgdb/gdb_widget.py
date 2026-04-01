@@ -46,14 +46,18 @@ from .gdb_scroll import (  # noqa: F401 — re-exported
 )
 
 
-class GDBWidget(ScrollMixin, Widget):
+from .pane_base import PaneBase
+
+
+class _GDBContent(ScrollMixin, Widget):
     """
-    Bottom pane: real VT100 terminal emulator (pyte) connected to GDB's PTY.
-    Mirrors cgdb's scroller which uses libvterm.
+    Internal VT100 terminal widget (pyte) connected to GDB's PTY.
+    Hosted inside GDBWidget (PaneBase) which provides the title bar.
     """
 
     DEFAULT_CSS = """
-    GDBWidget {
+    _GDBContent {
+        width: 1fr;
         height: 1fr;
         overflow: hidden;
     }
@@ -63,7 +67,7 @@ class GDBWidget(ScrollMixin, Widget):
         super().__init__(**kwargs)
         self.hl = hl
         self.max_scrollback = max_scrollback
-        self.can_focus = True
+        self.can_focus = False
         self.gdb_focused: bool = True
         self._scrollback: deque[Text] = deque(maxlen=max_scrollback)
         self._scrollback_raw: deque = deque(maxlen=max_scrollback)
@@ -434,6 +438,70 @@ class GDBWidget(ScrollMixin, Widget):
         elif char and (char.isprintable() or char == "\t"):
             self.send_to_gdb(char.encode())
         event.stop()
+
+
+# ---------------------------------------------------------------------------
+# Public pane wrapper
+# ---------------------------------------------------------------------------
+
+# Attributes that must be forwarded to _GDBContent on set.
+_GDB_DELEGATE_SET = frozenset(
+    {
+        "send_to_gdb",
+        "resize_gdb",
+        "on_switch_to_tgdb",
+        "imap_feed",
+        "imap_replay",
+        "gdb_focused",
+        "debugwincolor",
+        "ignorecase",
+        "wrapscan",
+        "max_scrollback",
+    }
+)
+
+
+class GDBWidget(PaneBase):
+    """GDB console pane: title bar (blank) + _GDBContent terminal widget."""
+
+    def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
+        super().__init__(hl, **kwargs)
+        self._content = _GDBContent(hl, max_scrollback)
+
+    def title(self) -> Optional[str]:
+        return None
+
+    def compose(self):
+        yield from super().compose()
+        yield self._content
+
+    # ------------------------------------------------------------------
+    # Key and refresh delegation
+    # ------------------------------------------------------------------
+
+    def on_key(self, event: events.Key) -> None:
+        self._content.on_key(event)
+
+    def refresh(self, *args, **kwargs):
+        if self._content.is_mounted:
+            self._content.refresh(*args, **kwargs)
+        return super().refresh(*args, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Attribute delegation to _GDBContent
+    # ------------------------------------------------------------------
+
+    def __setattr__(self, name: str, value) -> None:
+        if name in _GDB_DELEGATE_SET and "_content" in self.__dict__:
+            setattr(self._content, name, value)
+        else:
+            super().__setattr__(name, value)
+
+    def __getattr__(self, name: str):
+        content = self.__dict__.get("_content")
+        if content is not None:
+            return getattr(content, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
 # ---------------------------------------------------------------------------

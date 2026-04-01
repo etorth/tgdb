@@ -9,18 +9,17 @@ from textual.widget import Widget
 
 from .gdb_controller import ThreadInfo
 from .highlight_groups import HighlightGroups
-from .pane_utils import center_cells, fit_cells, frame_location
+from .pane_base import PaneBase
+from .pane_utils import fit_cells, frame_location
 
 
-class ThreadPane(Widget):
-    """Render all known threads and highlight the current one."""
+class _ThreadContent(Widget):
+    """Renders the thread list (no title row)."""
 
     DEFAULT_CSS = """
-    ThreadPane {
+    _ThreadContent {
         width: 1fr;
         height: 1fr;
-        min-width: 4;
-        min-height: 2;
         overflow: hidden;
     }
     """
@@ -28,7 +27,7 @@ class ThreadPane(Widget):
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
-        self.can_focus = True
+        self.can_focus = False
         self._threads: list[ThreadInfo] = []
 
     def set_threads(self, threads: list[ThreadInfo]) -> None:
@@ -57,18 +56,31 @@ class ThreadPane(Widget):
         width = max(1, self.size.width or 1)
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
-
-        result.append(center_cells("Threads", width), style=self.hl.style("StatusLine"))
-
-        visible_rows = max(0, height - 1)
-        for thread in self._threads[:visible_rows]:
-            result.append("\n")
+        for i, thread in enumerate(self._threads[:height]):
+            if i > 0:
+                result.append("\n")
             style = self.hl.style("SelectedLineHighlight") if thread.is_current else self.hl.style("Normal")
             result.append(fit_cells(self._thread_text(thread), width), style=style)
-
-        remaining_rows = height - 1 - min(visible_rows, len(self._threads))
-        for _ in range(max(0, remaining_rows)):
+        remaining = height - min(height, len(self._threads))
+        for i in range(max(0, remaining)):
             result.append("\n")
             result.append(" " * width, style=self.hl.style("Normal"))
-
         return result
+
+
+class ThreadPane(PaneBase):
+    """Thread pane: title bar + thread list."""
+
+    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        super().__init__(hl, **kwargs)
+        self._content = _ThreadContent(hl)
+
+    def title(self) -> str:
+        return "Threads"
+
+    def compose(self):
+        yield from super().compose()
+        yield self._content
+
+    def set_threads(self, threads: list[ThreadInfo]) -> None:
+        self._content.set_threads(threads)

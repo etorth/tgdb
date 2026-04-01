@@ -52,17 +52,23 @@ from .source_messages import (  # noqa: F401 — re-exported
     GDBCommand,
 )
 
+from .pane_base import PaneBase
+
 
 # ---------------------------------------------------------------------------
-# Source view widget
+# Internal content widget (does the actual rendering + key handling)
 # ---------------------------------------------------------------------------
 
 
-class SourceView(SourceViewRendering, Widget):
-    """Scrollable, syntax-highlighted source viewer with vi keybindings."""
+class _SourceContent(SourceViewRendering, Widget):
+    """Scrollable, syntax-highlighted source viewer with vi keybindings.
+
+    This is the internal content widget hosted inside SourceView (PaneBase).
+    """
 
     DEFAULT_CSS = """
-    SourceView {
+    _SourceContent {
+        width: 1fr;
         height: 1fr;
         overflow: hidden;
     }
@@ -95,7 +101,7 @@ class SourceView(SourceViewRendering, Widget):
         self._show_logo: bool = False  # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}
         self._pending_search: Optional[tuple[str, bool]] = None
-        self.can_focus = True
+        self.can_focus = False
 
     # ------------------------------------------------------------------
     # File management
@@ -521,6 +527,78 @@ class SourceView(SourceViewRendering, Widget):
         elif char and char.isprintable():
             self._search_buf += char
             self.post_message(SearchUpdate(self._search_buf))
+
+
+# ---------------------------------------------------------------------------
+# Public pane wrapper
+# ---------------------------------------------------------------------------
+
+# Attributes that must be forwarded to _SourceContent on set.
+_SRC_DELEGATE_SET = frozenset(
+    {
+        "exe_line",
+        "sel_line",
+        "executing_line_display",
+        "selected_line_display",
+        "tabstop",
+        "hlsearch",
+        "ignorecase",
+        "wrapscan",
+        "showmarks",
+        "color",
+    }
+)
+
+
+class SourceView(PaneBase):
+    """Source-code pane: title bar (file path) + _SourceContent viewer."""
+
+    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        super().__init__(hl, **kwargs)
+        self._content = _SourceContent(hl)
+
+    def title(self) -> Optional[str]:
+        content = self.__dict__.get("_content")
+        sf = getattr(content, "source_file", None) if content is not None else None
+        return sf.path if sf is not None else None
+
+    def align(self) -> str:
+        return "left"
+
+    def compose(self):
+        yield from super().compose()
+        yield self._content
+
+    # ------------------------------------------------------------------
+    # Key, resize, refresh delegation
+    # ------------------------------------------------------------------
+
+    def on_key(self, event: events.Key) -> None:
+        self._content.on_key(event)
+
+    def refresh(self, *args, **kwargs):
+        # Refresh title bar in case source_file path changed.
+        if self._title_bar is not None and self._title_bar.is_mounted:
+            self._title_bar.refresh()
+        if self._content.is_mounted:
+            self._content.refresh(*args, **kwargs)
+        return super().refresh(*args, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Attribute delegation to _SourceContent
+    # ------------------------------------------------------------------
+
+    def __setattr__(self, name: str, value) -> None:
+        if name in _SRC_DELEGATE_SET and "_content" in self.__dict__:
+            setattr(self._content, name, value)
+        else:
+            super().__setattr__(name, value)
+
+    def __getattr__(self, name: str):
+        content = self.__dict__.get("_content")
+        if content is not None:
+            return getattr(content, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
 # ---------------------------------------------------------------------------

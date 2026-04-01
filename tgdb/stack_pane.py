@@ -9,18 +9,17 @@ from textual.widget import Widget
 
 from .gdb_controller import Frame
 from .highlight_groups import HighlightGroups
-from .pane_utils import center_cells, fit_cells, frame_location
+from .pane_base import PaneBase
+from .pane_utils import fit_cells, frame_location
 
 
-class StackPane(Widget):
-    """Render the current call stack."""
+class _StackContent(Widget):
+    """Renders the call-stack frame list (no title row)."""
 
     DEFAULT_CSS = """
-    StackPane {
+    _StackContent {
         width: 1fr;
         height: 1fr;
-        min-width: 4;
-        min-height: 2;
         overflow: hidden;
     }
     """
@@ -28,7 +27,7 @@ class StackPane(Widget):
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
-        self.can_focus = True
+        self.can_focus = False
         self._frames: list[Frame] = []
         self._current_level: int = 0
 
@@ -50,18 +49,31 @@ class StackPane(Widget):
         width = max(1, self.size.width or 1)
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
-
-        result.append(center_cells("Call Stack", width), style=self.hl.style("StatusLine"))
-
-        visible_rows = max(0, height - 1)
-        for frame in self._frames[:visible_rows]:
-            result.append("\n")
+        for i, frame in enumerate(self._frames[:height]):
+            if i > 0:
+                result.append("\n")
             style = self.hl.style("SelectedLineHighlight") if frame.level == self._current_level else self.hl.style("Normal")
             result.append(fit_cells(self._frame_text(frame), width), style=style)
-
-        remaining_rows = height - 1 - min(visible_rows, len(self._frames))
-        for _ in range(max(0, remaining_rows)):
+        remaining = height - min(height, len(self._frames))
+        for i in range(max(0, remaining)):
             result.append("\n")
             result.append(" " * width, style=self.hl.style("Normal"))
-
         return result
+
+
+class StackPane(PaneBase):
+    """Call-stack pane: title bar + scrollable frame list."""
+
+    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        super().__init__(hl, **kwargs)
+        self._content = _StackContent(hl)
+
+    def title(self) -> str:
+        return "Call Stack"
+
+    def compose(self):
+        yield from super().compose()
+        yield self._content
+
+    def set_frames(self, frames: list[Frame], current_level: int = 0) -> None:
+        self._content.set_frames(frames, current_level)

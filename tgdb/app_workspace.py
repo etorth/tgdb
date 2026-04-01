@@ -262,7 +262,7 @@ class WorkspaceMixin:
             item_count = len(current.items)
             if parent is None:
                 if item_count == 0:
-                    await current.set_items([EmptyPane()])
+                    await current.set_items([EmptyPane(self.hl)])
                 return self._first_workspace_leaf()
 
             if item_count > 1:
@@ -272,7 +272,7 @@ class WorkspaceMixin:
                 remaining = await current.take_item(current.items[0])
                 await parent.replace_item(current, remaining)
             else:
-                await parent.replace_item(current, EmptyPane())
+                await parent.replace_item(current, EmptyPane(self.hl))
             current = parent
 
     async def _add_pane_to_workspace(self: TGDBApp, target: Widget, pane_kind: str) -> Optional[Widget]:
@@ -297,7 +297,7 @@ class WorkspaceMixin:
     async def _hide_workspace_item(self: TGDBApp, target: Widget) -> Optional[Widget]:
         if isinstance(target, EmptyPane):
             return target
-        replacement = EmptyPane()
+        replacement = EmptyPane(self.hl)
         if await self._replace_workspace_item(target, replacement):
             return replacement
         return None
@@ -320,15 +320,15 @@ class WorkspaceMixin:
             index = parent.index_of(target)
             if not insert_before:
                 index += 1
-            await parent.insert_item(index, EmptyPane())
+            await parent.insert_item(index, EmptyPane(self.hl))
             return True
 
         new_container = PaneContainer(self.hl, orientation=axis)
         await parent.replace_item(target, new_container)
         if insert_before:
-            await new_container.set_items([EmptyPane(), target])
+            await new_container.set_items([EmptyPane(self.hl), target])
         else:
-            await new_container.set_items([target, EmptyPane()])
+            await new_container.set_items([target, EmptyPane(self.hl)])
         return True
 
     # ------------------------------------------------------------------
