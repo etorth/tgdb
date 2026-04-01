@@ -51,9 +51,6 @@ class SourceViewRendering:
                     left = max(0, (w - lw) // 2)
                     result.append(" " * left + line, style=style)
                 # else: empty row (blank padding above/below logo)
-            if h > 0:
-                result.append("\n")
-            result.append_text(self._build_footer(w, None))
             return result
 
         render_top = self._scroll_top
@@ -65,9 +62,6 @@ class SourceViewRendering:
             result.append_text(self._build_line(line_idx, sf))
             if y < h - 1:
                 result.append("\n")
-        if h > 0:
-            result.append("\n")
-        result.append_text(self._build_footer(w, sf))
         return result
 
     # Width of the line-number field (minimum 1, grows with file size)
@@ -271,12 +265,4 @@ class SourceViewRendering:
 
         return out
 
-    def _build_footer(self, width: int, sf: Optional[SourceFile]) -> Text:
-        footer = Text(no_wrap=True, overflow="crop")
-        path = ""
-        if sf is not None and not self._show_logo:
-            path = sf.path
-            if len(path) > width:
-                path = "…" + path[-(width - 1) :]
-        footer.append(path.ljust(width), style=self.hl.style("StatusLine"))
-        return footer
+

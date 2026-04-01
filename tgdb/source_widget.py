@@ -174,8 +174,7 @@ class _SourceContent(SourceViewRendering, Widget):
         return len(_LOGO_LINES)
 
     def _visible_height(self) -> int:
-        total_height = max(1, self.size.height)
-        return max(0, total_height - 1)
+        return max(1, self.size.height)
 
     def _ensure_visible(self, line: int) -> None:
         """Mirror cgdb: keep the selected line centered when possible."""
