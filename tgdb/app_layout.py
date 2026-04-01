@@ -8,7 +8,7 @@ from textual import events
 from textual.css.query import NoMatches
 
 from .source_widget import ResizeSource, ToggleOrientation
-from .workspace import DragResize, PaneContainer, Splitter
+from .workspace import DragResize, PaneContainer, Splitter, TitleBarResized
 
 if TYPE_CHECKING:
     from .app import TGDBApp
@@ -38,7 +38,9 @@ class LayoutMixin:
         return max(1, self.size.width if is_horizontal else max(1, self.size.height - 1))
 
     def _pane_axis(self: TGDBApp, is_horizontal: bool) -> int:
-        return max(0, self._split_axis(is_horizontal) - 1)
+        # Subtract 1 only for horizontal mode where a 1-column Splitter exists.
+        splitter_size = 1 if is_horizontal else 0
+        return max(0, self._split_axis(is_horizontal) - splitter_size)
 
     def _reset_window_shift(self: TGDBApp, is_horizontal: bool) -> None:
         half_axis = self._pane_axis(is_horizontal) // 2
@@ -88,8 +90,6 @@ class LayoutMixin:
     # ------------------------------------------------------------------
 
     def on_resize_source(self: TGDBApp, msg: ResizeSource) -> None:
-        if self._workspace_dynamic:
-            return
         is_horizontal = self.cfg.winsplitorientation == "horizontal"
         half_axis = self._split_axis(is_horizontal) // 2
 
@@ -138,12 +138,6 @@ class LayoutMixin:
     def on_toggle_orientation(self: TGDBApp, _: ToggleOrientation) -> None:
         new_orientation = "vertical" if self.cfg.winsplitorientation == "horizontal" else "horizontal"
         self.cfg.winsplitorientation = new_orientation
-        if self._workspace_dynamic:
-            try:
-                self.query_one("#split-container", PaneContainer).set_orientation(new_orientation)
-            except NoMatches:
-                pass
-            return
         self._set_window_shift_from_ratio(new_orientation == "horizontal", self._split_ratio)
         self._preserve_window_shift_once = True
         self._apply_split()
@@ -153,14 +147,6 @@ class LayoutMixin:
     # ------------------------------------------------------------------
 
     def _apply_split(self: TGDBApp) -> None:
-        if self._workspace_dynamic:
-            try:
-                self.query_one("#split-container", PaneContainer).set_orientation(self.cfg.winsplitorientation)
-            except (NoMatches, Exception):
-                # WrongType or missing: dynamic workspace is in transition, skip
-                pass
-            self._last_orientation = self.cfg.winsplitorientation
-            return
         split = self.cfg.winsplit.lower()
         is_horizontal = self.cfg.winsplitorientation == "horizontal"
         split_changed = split != self._last_split_setting
@@ -178,23 +164,21 @@ class LayoutMixin:
         self._validate_window_shift(is_horizontal)
         total_axis = max(1, self._split_axis(is_horizontal))
         src_size, gdb_size = self._compute_split_sizes(is_horizontal)
-        show_splitter = src_size > 0 and gdb_size > 0
-        if not show_splitter:
+        show_both = src_size > 0 and gdb_size > 0
+        if not show_both:
             src_size, gdb_size = self._compute_split_sizes(is_horizontal, total_axis)
         pane_total = max(1, src_size + gdb_size)
         self._split_ratio = src_size / pane_total
 
         try:
-            container = self.query_one("#split-container")
-            splitter = self.query_one("#splitter", Splitter)
+            container = self.query_one("#split-container", PaneContainer)
             src = self._get_source_view(mounted_only=True)
             gdb = self._get_gdb_widget(mounted_only=True)
             if src is None or gdb is None:
                 return
-            splitter.set_orientation(is_horizontal)
-            splitter.styles.display = "block" if show_splitter else "none"
+            if orientation_changed:
+                container.set_orientation(self.cfg.winsplitorientation)
             if is_horizontal:
-                # Horizontal container: source on the left, GDB on the right.
                 container.styles.layout = "horizontal"
                 src.styles.display = "none" if src_size <= 0 else "block"
                 gdb.styles.display = "none" if gdb_size <= 0 else "block"
@@ -203,7 +187,6 @@ class LayoutMixin:
                 gdb.styles.width = gdb_size
                 gdb.styles.height = "1fr"
             else:
-                # Vertical container: source on top, GDB below.
                 container.styles.layout = "vertical"
                 src.styles.display = "none" if src_size <= 0 else "block"
                 gdb.styles.display = "none" if gdb_size <= 0 else "block"
@@ -219,21 +202,23 @@ class LayoutMixin:
             self._preserve_window_shift_once = False
 
     def on_drag_resize(self: TGDBApp, msg: DragResize) -> None:
-        if self._workspace_dynamic:
+        """Handle Splitter drag for the root #split-container (horizontal mode)."""
+        if msg.splitter is None:
             return
+        try:
+            root = self.query_one("#split-container", PaneContainer)
+        except NoMatches:
+            return
+        if msg.splitter.parent is not root:
+            return  # nested PaneContainer already handled it
+
         is_horizontal = self.cfg.winsplitorientation == "horizontal"
         axis = self._pane_axis(is_horizontal)
         if axis <= 0:
             return
 
-        try:
-            container = self.query_one("#split-container")
-            origin_x = getattr(container.region, "x", 0)
-            origin_y = getattr(container.region, "y", 0)
-        except NoMatches:
-            origin_x = 0
-            origin_y = 0
-
+        origin_x = getattr(root.region, "x", 0)
+        origin_y = getattr(root.region, "y", 0)
         pos = (msg.screen_x - origin_x) if is_horizontal else (msg.screen_y - origin_y)
         pos = max(0, min(axis, int(pos)))
         self._cur_win_split = self._WIN_SPLIT_FREE
@@ -242,12 +227,24 @@ class LayoutMixin:
         self.cfg.winsplit = "free"
         self._apply_split()
 
-    def on_resize(self: TGDBApp, event: events.Resize) -> None:
-        if self._workspace_dynamic:
-            try:
-                self.query_one("#split-container", PaneContainer).refresh(layout=True)
-            except NoMatches:
-                pass
+    def on_title_bar_resized(self: TGDBApp, msg: TitleBarResized) -> None:
+        """Sync _window_shift after a vertical title-bar drag on the root container."""
+        try:
+            root = self.query_one("#split-container", PaneContainer)
+        except NoMatches:
             return
+        if msg.container is not root:
+            return
+        is_horizontal = self.cfg.winsplitorientation == "horizontal"
+        axis = self._pane_axis(is_horizontal)
+        if axis <= 0:
+            return
+        self._cur_win_split = self._WIN_SPLIT_FREE
+        self._window_shift = msg.new_before_size - (axis // 2)
+        self.cfg.winsplit = "free"
+        self._validate_window_shift(is_horizontal)
+
+    def on_resize(self: TGDBApp, event: events.Resize) -> None:
         self._apply_split()
         # GDBWidget.on_resize handles pyte + PTY resize itself via resize_gdb callback
+

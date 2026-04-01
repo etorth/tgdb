@@ -35,6 +35,19 @@ class DragResize(Message):
         self.splitter = splitter
 
 
+class TitleBarResized(Message):
+    """Posted after a title-bar drag resizes two items in a vertical PaneContainer.
+
+    ``new_before_size`` is the resulting pixel height of the *before* pane so
+    that the app can sync its internal ``_window_shift`` state.
+    """
+
+    def __init__(self, container: "PaneContainer", new_before_size: int) -> None:
+        super().__init__()
+        self.container = container
+        self.new_before_size = new_before_size
+
+
 @dataclass(frozen=True)
 class PaneDescriptor:
     label: str
@@ -154,9 +167,12 @@ class PaneContainer(Widget):
         return self._items.index(item)
 
     def set_orientation(self, orientation: str) -> None:
+        if self.orientation == orientation:
+            return
         self.orientation = orientation
-        self._apply_orientation()
-        self.refresh(layout=True)
+        # _rebuild is async and correctly adds/removes Splitter widgets.
+        # Schedule it for the next frame; callers can proceed synchronously.
+        self.call_later(self._rebuild)
 
     async def set_items(self, items: list[Widget]) -> None:
         self._items = list(items)
@@ -304,8 +320,9 @@ class PaneContainer(Widget):
         splitter = msg.splitter
         if splitter is None or splitter.parent is not self:
             return
-        if self._resize_from_drag(splitter, msg.screen_x, msg.screen_y):
-            msg.stop()
+        # Always handle the drag; do NOT stop the message so it can bubble to
+        # the app for top-level _window_shift bookkeeping.
+        self._resize_from_drag(splitter, msg.screen_x, msg.screen_y)
 
     def _resize_from_title_drag(self, before: Widget, after: Widget, screen_y: int) -> None:
         """Resize *before* and *after* panes in a vertical container when the
@@ -336,3 +353,5 @@ class PaneContainer(Widget):
         self._weights[after_index] = new_after
         self._apply_orientation()
         self.refresh(layout=True)
+        # Notify the app so it can sync _window_shift for proper on_resize behaviour.
+        self.post_message(TitleBarResized(self, new_before))

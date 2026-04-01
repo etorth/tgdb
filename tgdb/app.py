@@ -45,7 +45,7 @@ from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
-from .workspace import PaneContainer, PaneDescriptor, Splitter
+from .workspace import PaneContainer, PaneDescriptor
 from .xdg_path import XDGPath
 from .app_commands import CommandsMixin
 from .app_workspace import WorkspaceMixin
@@ -69,7 +69,6 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         width: 1fr;
     }
     #split-container {
-        layout: horizontal;
         height: 1fr;
         width: 1fr;
     }
@@ -88,9 +87,6 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         height: 1fr;
         min-height: 2;
         min-width: 4;
-    }
-    #splitter {
-        display: block;
     }
     #context-menu {
         display: none;
@@ -135,7 +131,6 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
 
         self._mode: str = "GDB"
-        self._await_mark_jump: bool = False
         self._await_mark_set: bool = False
         self._split_ratio: float = 0.5
         self._cur_win_split: int = {
@@ -151,7 +146,6 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self._preserve_window_shift_once: bool = False
         self._file_dialog_pending: bool = False
         self._inf_tty_fd: Optional[int] = None
-        self._workspace_dynamic: bool = False
         self._context_menu_target: Optional[Widget] = None
         self._source_view: Optional[SourceView] = None
         self._gdb_widget: Optional[GDBWidget] = None
@@ -215,10 +209,11 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
                 id="gdb-pane",
             )
         with Widget(id="global-container"):
-            with Widget(id="split-container"):
-                yield self._source_view
-                yield Splitter(self.hl, id="splitter")
-                yield self._gdb_widget
+            yield PaneContainer(
+                self.hl,
+                orientation=self.cfg.winsplitorientation,
+                id="split-container",
+            )
             yield CommandLineBar(self.hl, completion_provider=self.cp.get_completions, id="cmdline")
         yield FileDialog(self.hl, id="file-dlg")
         yield ContextMenu(self.hl, id="context-menu")
@@ -250,6 +245,14 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         gdb_w.on_switch_to_tgdb = self._switch_to_tgdb
         gdb_w.imap_feed = self._imap_feed
         gdb_w.imap_replay = self._replay_gdb_key_sequence
+
+        # Mount src and gdb into the root PaneContainer (always present).
+        try:
+            container = self.query_one("#split-container", PaneContainer)
+            await container.set_items([src, gdb_w])
+        except Exception as exc:
+            self._show_status(f"Failed to initialize workspace: {exc}")
+            return
 
         # Configure file dialog
         fd = self.query_one("#file-dlg", FileDialog)
@@ -434,8 +437,6 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
 
     def _first_workspace_leaf(self, widget: Optional[Widget] = None) -> Optional[Widget]:
         if widget is None:
-            if not self._workspace_dynamic:
-                return self._get_source_view(mounted_only=True) or self._get_gdb_widget(mounted_only=True)
             try:
                 widget = self.query_one("#split-container", PaneContainer)
             except NoMatches:

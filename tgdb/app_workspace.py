@@ -196,57 +196,15 @@ class WorkspaceMixin:
             parent = current.parent
             if isinstance(parent, PaneContainer):
                 return current
-            if getattr(parent, "id", None) == "split-container" and getattr(current, "id", None) in {
-                "src-pane",
-                "gdb-pane",
-            }:
-                return current
             current = parent if isinstance(parent, Widget) else None
         return None
 
     async def _ensure_dynamic_workspace(self: TGDBApp) -> Optional[PaneContainer]:
-        if self._workspace_dynamic:
-            try:
-                return self.query_one("#split-container", PaneContainer)
-            except NoMatches:
-                return None
-
-        # Set the flag immediately to prevent a second concurrent call from
-        # entering the same transformation path before the first one finishes.
-        self._workspace_dynamic = True
-
+        """Return the root PaneContainer (always present since the layout is unified)."""
         try:
-            old_root = self.query_one("#split-container")
-            global_container = self.query_one("#global-container")
-            status = self.query_one("#cmdline")
-            splitter = self.query_one("#splitter", Splitter)
+            return self.query_one("#split-container", PaneContainer)
         except NoMatches:
-            self._workspace_dynamic = False
             return None
-        src = self._get_source_view(mounted_only=True)
-        gdb = self._get_gdb_widget(mounted_only=True)
-        if src is None or gdb is None:
-            self._workspace_dynamic = False
-            return None
-
-        new_root = PaneContainer(
-            self.hl,
-            orientation=self.cfg.winsplitorientation,
-            id="split-container",
-        )
-        try:
-            # Remove children from the static container and the container itself,
-            # then mount the new PaneContainer.  The mount is done OUTSIDE any
-            # batch() so that Textual fully processes new_root's lifecycle
-            # (on_mount event, etc.) before we try to mount children into it.
-            await old_root.remove_children([src, splitter, gdb])
-            await old_root.remove()
-            await global_container.mount(new_root, before=status)
-            await new_root.set_items([src, gdb])
-        except Exception:
-            self._workspace_dynamic = False
-            raise
-        return new_root
 
     async def _replace_workspace_item(self: TGDBApp, target: Widget, new_item: Widget) -> bool:
         parent = target.parent if isinstance(target.parent, PaneContainer) else None
