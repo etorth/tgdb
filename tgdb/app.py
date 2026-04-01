@@ -1359,11 +1359,15 @@ class TGDBApp(App):
         if hist:
             cmdline._add_to_history(hist, max_size=self.cfg.historysize)
 
-        cmdline.lock_for_task()
+        gen = cmdline.lock_for_task()
         error_output: Optional[str] = None
         cancelled = False
+
+        def _print_fn(chunk: str) -> None:
+            cmdline.append_output(chunk, task_gen=gen)
+
         try:
-            result = await self.cp.execute_async(cmd, print_fn=cmdline.append_output)
+            result = await self.cp.execute_async(cmd, print_fn=_print_fn)
             if result:
                 error_output = result
         except asyncio.CancelledError:

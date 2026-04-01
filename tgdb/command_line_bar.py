@@ -97,6 +97,7 @@ class CommandLineBar(Widget):
         self._task_running: bool = False
         self._streaming_buf: str = ""       # accumulated output from running task
         self._collected_lines: list[str] = []  # all output lines collected during task
+        self._task_gen: int = 0             # generation counter for task isolation
 
     # ------------------------------------------------------------------
     # Height management
@@ -200,8 +201,12 @@ class CommandLineBar(Widget):
     # Async task support — lock bar and stream output while task runs
     # ------------------------------------------------------------------
 
-    def lock_for_task(self) -> None:
-        """Called by the app when a command task starts.  Locks the bar."""
+    def lock_for_task(self) -> int:
+        """Called by the app when a command task starts.  Locks the bar.
+
+        Returns the task generation number for use with ``append_output``.
+        """
+        self._task_gen += 1
         self._task_running = True
         self._streaming_buf = ""
         self._collected_lines = []
@@ -212,30 +217,30 @@ class CommandLineBar(Widget):
         self._msg_visible_rows = 0
         self._set_height(1)
         self.refresh()
+        return self._task_gen
 
-    def append_output(self, chunk: str) -> None:
+    def append_output(self, chunk: str, *, task_gen: int = 0) -> None:
         """Append streaming output from a running task (async-print-op).
 
-        During task execution (``_task_running`` is True) the output is shown
-        immediately with a ``▶ `` prefix.  The raw text is also buffered in
-        ``_collected_lines`` for the sync-print-op when the task finishes.
-
-        After the task has ended, fire-and-forget coroutines may still call
-        this.  The async-print-op is shown only if the bar is idle (not in
-        user-input, not showing a sync-print-op/message).
+        *task_gen* identifies which task produced the output.  Only output
+        whose *task_gen* matches the current ``_task_gen`` is buffered in
+        ``_collected_lines`` for the sync-print-op.  Stale output from
+        fire-and-forget coroutines left by earlier tasks is still displayed
+        (async-print-op) but never pollutes the current task's sync buffer.
         """
         if not chunk:
             return
 
-        # Buffer raw output for sync-print-op (strip trailing newline for clean lines)
-        raw = chunk.rstrip("\n")
-        if raw:
-            self._collected_lines.extend(raw.split("\n"))
+        # Buffer only if this output belongs to the current task
+        is_current = (task_gen == self._task_gen)
+        if is_current:
+            raw = chunk.rstrip("\n")
+            if raw:
+                self._collected_lines.extend(raw.split("\n"))
 
         if self._task_running:
             # Replace streaming buf with latest chunk for async-print display
             self._streaming_buf = chunk
-            # Expand bar height for multi-line print
             display_lines = chunk.rstrip("\n").split("\n")
             self._set_height(max(1, len(display_lines)))
             self.refresh()
