@@ -131,6 +131,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
 
         self._mode: str = "GDB"
+        self._await_mark_jump: bool = False
         self._await_mark_set: bool = False
         self._split_ratio: float = 0.5
         self._cur_win_split: int = {
