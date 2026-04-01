@@ -17,7 +17,6 @@ from rich.text import Text
 from .gdb_controller import LocalVariable
 from .highlight_groups import HighlightGroups
 from .pane_utils import center_cells
-from .type_simplifier import simplify_type
 
 
 class LocalVariablePane(Widget):
@@ -125,19 +124,16 @@ class LocalVariablePane(Widget):
             numchild = self._safe_int(info.get("numchild", "0"))
             has_children = numchild > 0 or info.get("dynamic", "0") == "1"
             value = info.get("value", "")
-            var_type = simplify_type(info.get("type", var.type))
 
             if has_children:
-                label = f"{var.name}: {var_type}"
+                label = var.name
                 if value:
                     label += f" = {self._truncate(value)}"
                 node = tree.root.add(label, expand=False)
-                # Store varobj metadata for lazy expansion
                 node.data = {"varobj": varobj_name, "loaded": False}
-                # Add a placeholder so the node is expandable
                 node.add_leaf("⏳ loading...")
             else:
-                label = f"{var.name}: {var_type} = {value}"
+                label = f"{var.name} = {value}"
                 tree.root.add_leaf(label)
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
@@ -196,18 +192,16 @@ class LocalVariablePane(Widget):
                 val_dynamic = val_child.get("dynamic", "0") == "1"
                 val_has_children = val_numchild > 0 or val_dynamic
                 val_value = val_child.get("value", "")
-                val_type = simplify_type(val_child.get("type", ""))
 
                 if val_has_children:
-                    label = f"[{key_val}]: {val_type}" if val_type else f"[{key_val}]"
+                    label = f"[{key_val}]"
                     if val_value:
                         label += f" = {self._truncate(val_value)}"
                     child_node = node.add(label, expand=False)
                     child_node.data = {"varobj": val_name, "loaded": False}
                     child_node.add_leaf("⏳ loading...")
                 else:
-                    disp = val_value if val_value else ""
-                    label = f"[{key_val}]: {val_type} = {disp}" if val_type else f"[{key_val}] = {disp}"
+                    label = f"[{key_val}] = {val_value}" if val_value else f"[{key_val}]"
                     node.add_leaf(label)
             return
 
@@ -218,7 +212,6 @@ class LocalVariablePane(Widget):
             dynamic = child.get("dynamic", "0") == "1"
             has_children = numchild > 0 or dynamic
             value = child.get("value", "")
-            child_type = simplify_type(child.get("type", ""))
 
             # Access specifier pseudo-nodes — expand inline
             if exp in _ACCESS and has_children:
@@ -230,17 +223,14 @@ class LocalVariablePane(Widget):
                 continue
 
             if has_children:
-                label = f"{exp}: {child_type}" if child_type else exp
+                label = exp
                 if value:
                     label += f" = {self._truncate(value)}"
                 child_node = node.add(label, expand=False)
                 child_node.data = {"varobj": child_name, "loaded": False}
                 child_node.add_leaf("⏳ loading...")
             else:
-                if child_type:
-                    label = f"{exp}: {child_type} = {value}"
-                else:
-                    label = f"{exp} = {value}" if value else exp
+                label = f"{exp} = {value}" if value else exp
                 node.add_leaf(label)
 
     @staticmethod
