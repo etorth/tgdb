@@ -875,7 +875,7 @@ class CommandLineBar(Widget):
 
         at_end = self._msg_scroll + visible >= len(self._msg_lines)
         if at_end:
-            hint = "-- Press ENTER or type command to continue --"
+            hint = "-- Press any key to continue --"
         else:
             hint = "-- Use j/k to scroll more lines --"
         lines.append(_pad_crop(hint, w))
