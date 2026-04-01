@@ -69,6 +69,24 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
     Pass in the live Config, HighlightGroups, and KeyMapper objects.
     """
 
+    def __init__(self,
+                 config: Config,
+                 highlight_groups: "HighlightGroups",
+                 key_mapper: "KeyMapper") -> None:
+        self.config = config
+        self.hl = highlight_groups
+        self.km = key_mapper
+        self._handlers: dict[str, Callable[[list[str]], Optional[str]]] = {}
+        self._py_namespace: dict = {
+            "__builtins__": builtins,
+            "config": self.config,
+            "hl": self.hl,
+            "km": self.km,
+        }
+        self._user_commands: dict[str, UserCommandDef] = {}
+        self._exec_depth: int = 0
+        self._cmdline_bar = None
+
 
     def set_cmdline_bar(self, bar) -> None:
         """Inject a reference to the CommandLineBar for history operations."""
