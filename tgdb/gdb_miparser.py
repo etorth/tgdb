@@ -458,7 +458,3 @@ class GDBMIParser:
             "payload": gdb_mi_text,
         }
 
-    @staticmethod
-    def response_is_finished(gdb_mi_text: str) -> bool:
-        """Return ``True`` if *gdb_mi_text* is the ``(gdb)`` prompt."""
-        return _GDB_MI_RESPONSE_FINISHED_RE.match(gdb_mi_text) is not None
