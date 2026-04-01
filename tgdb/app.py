@@ -478,6 +478,11 @@ class TGDBApp(App):
     def _make_local_variable_pane(self) -> LocalVariablePane:
         if self._locals_pane is None:
             self._locals_pane = LocalVariablePane(self.hl)
+            self._locals_pane.set_var_callbacks(
+                var_create=self.gdb.var_create,
+                var_list_children=self.gdb.var_list_children,
+                var_delete=self.gdb.var_delete,
+            )
         self._locals_pane.set_variables(self._current_locals)
         return self._locals_pane
 
