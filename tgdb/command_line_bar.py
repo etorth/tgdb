@@ -854,7 +854,7 @@ class CommandLineBar(Widget):
                 else:
                     lines.append(_pad_crop(f" {ln}", w))
         else:
-            lines.append(_pad_crop(f":python << {self._ml_marker}", w))
+            lines.append(_pad_crop(f":{self._ml_header}", w))
             for ln in self._ml_buf:
                 lines.append(_pad_crop(f"  {ln}", w))
             # Current input row — append a block cursor marker
