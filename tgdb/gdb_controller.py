@@ -80,7 +80,7 @@ class RegisterInfo:
 # GDB/MI output parser — uses GDBMIParser extracted from pygdbmi
 # ---------------------------------------------------------------------------
 
-from .gdbmi_parser import GDBMIParser
+from .gdb_miparser import GDBMIParser
 
 
 # ---------------------------------------------------------------------------
