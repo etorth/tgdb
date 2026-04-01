@@ -131,11 +131,6 @@ def _row_to_text(row, width: int, cursor_col: int = -1,
 class _GDBScreen(pyte.Screen):
     """Intercept index() to save lines that scroll off into a deque."""
 
-    def __init__(self, columns: int, lines: int,
-                 push_fn: "Callable[[Text, Optional[dict]], None]") -> None:
-        super().__init__(columns, lines)
-        self._push_scrollback = push_fn
-        self.use_color: bool = True   # set by GDBWidget to honour debugwincolor
 
     def index(self) -> None:
         if self.cursor.y == self.lines - 1:
@@ -156,7 +151,12 @@ class _GDBScreen(pyte.Screen):
 # GDB widget
 # ---------------------------------------------------------------------------
 
-class GDBWidget(Widget):
+from .gdb_scroll import ScrollMixin  # noqa: F401
+from .gdb_scroll import (  # noqa: F401 — re-exported
+    ScrollModeChange, ScrollSearchStart, ScrollSearchUpdate,
+    ScrollSearchCommit, ScrollSearchCancel,
+)
+class GDBWidget(ScrollMixin, Widget):
     """
     Bottom pane: real VT100 terminal emulator (pyte) connected to GDB's PTY.
     Mirrors cgdb's scroller which uses libvterm.
@@ -169,60 +169,6 @@ class GDBWidget(Widget):
     }
     """
 
-    def __init__(self, hl: HighlightGroups,
-                 max_scrollback: int = 10000, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.hl = hl
-        self.max_scrollback = max_scrollback
-        self.can_focus = True
-        # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — cursor only shown when GDB focused
-        self.gdb_focused: bool = True
-
-        # Scrollback: lines captured as they scroll off the pyte screen.
-        # _scrollback stores Rich Text (for display/search).
-        # _scrollback_raw stores the raw pyte row dict in parallel so rows can
-        # be restored back into the pyte buffer when the pane grows.
-        self._scrollback: deque[Text] = deque(maxlen=max_scrollback)
-        self._scrollback_raw: deque = deque(maxlen=max_scrollback)
-        self.debugwincolor: bool = True  # :set debugwincolor — show ANSI colors
-        # pyte terminal (lazily resized to match widget)
-        self._screen: Optional[_GDBScreen] = None
-        self._stream: Optional[pyte.ByteStream] = None
-        self._pyte_rows: int = 24
-        self._pyte_cols: int = 80
-        self._init_pyte(24, 80)
-
-        # Scroll mode
-        self._scroll_mode: bool = False
-        self._scroll_offset: int = 0   # lines above live bottom (0 = live)
-        self._h_offset: int = 0   # horizontal scroll (cgdb scroll_cursor_col)
-
-        # Search (scroll mode only)
-        self._search_pattern: str = ""
-        self._search_forward: bool = True
-        self._search_active: bool = False
-        self._search_buf: str = ""
-
-        # Callbacks set by app
-        self.send_to_gdb: Callable[[bytes], None] = lambda b: None
-        self.resize_gdb: Callable[[int, int], None] = lambda r, c: None
-        self.on_switch_to_tgdb: Callable[[], None] = lambda: None
-        # Called with a key token; returns the list of tokens to actually send
-        # (the imap expansion), or None to send the key normally.
-        # Signature: (key: str) -> list[str] | None
-        self.imap_feed: Callable[[str], "list[str] | None"] = lambda k: None
-        # Called to replay an imap expansion token by token.
-        self.imap_replay: Callable[["list[str]"], None] = lambda tokens: None
-
-        self.ignorecase: bool = False
-        self.wrapscan: bool = True
-        self._num_buf: str = ""
-        self._await_g: bool = False   # true after first 'g' (for 'gg')
-        self._dot_pending: bool = False  # true after apostrophe (for `'.`)
-        # Last (rows, cols) we sent SIGWINCH to GDB — tracked separately from
-        # _pyte_rows/_pyte_cols so the eager resize in render() doesn't suppress
-        # the SIGWINCH notification that on_resize() must still send to GDB.
-        self._gdb_resize_notified: tuple[int, int] = (24, 80)
 
     # ------------------------------------------------------------------
     # Scrollback helpers
@@ -442,56 +388,6 @@ class GDBWidget(Widget):
             result.append("\n")
         return result
 
-    def _render_scroll(self, h: int) -> Text:
-        """Render scroll mode: combined scrollback + screen."""
-        lines = self._all_lines()
-        total = len(lines)
-        start = max(0, total - h - self._scroll_offset)
-        w = self.size.width or 80
-        rendered_lines: list[Text] = []
-        for y in range(h):
-            idx = start + y
-            if idx < total:
-                line = lines[idx].copy()
-                if self._search_pattern:
-                    try:
-                        flags = re.IGNORECASE if self.ignorecase else 0
-                        rx = re.compile(self._search_pattern, flags)
-                        for m in rx.finditer(line.plain):
-                            line.stylize(self.hl.style("Search"),
-                                         m.start(), m.end())
-                    except re.error:
-                        pass
-                # Apply horizontal offset (cgdb scroll_cursor_col)
-                if self._h_offset > 0:
-                    # Trim _h_offset chars from the left
-                    plain = line.plain
-                    if self._h_offset < len(plain):
-                        line = line[self._h_offset:]
-                    else:
-                        line = Text()
-                rendered_lines.append(line)
-            else:
-                rendered_lines.append(Text())
-
-        # Mirror cgdb scroller.cpp: overlay "[delta/total]" on the top-right.
-        if rendered_lines:
-            delta = self._scroll_offset
-            sb_total = len(self._scrollback)
-            stat = f"[{delta}/{sb_total}]"
-            first = rendered_lines[0]
-            left_width = max(0, w - len(stat))
-            rendered_lines[0] = Text.assemble(
-                first[:left_width],
-                (stat, self.hl.style("ScrollModeStatus")),
-            )
-
-        out = Text(no_wrap=True, overflow="crop")
-        for i, line in enumerate(rendered_lines):
-            if i > 0:
-                out.append("\n")
-            out.append_text(line)
-        return out
 
     # ------------------------------------------------------------------
     # Resize — keep pyte screen in sync with widget size
@@ -514,81 +410,6 @@ class GDBWidget(Widget):
     # Scroll helpers
     # ------------------------------------------------------------------
 
-    def enter_scroll_mode(self) -> None:
-        self._scroll_mode = True
-        self._scroll_offset = 0
-        self.post_message(ScrollModeChange(True))
-        self.refresh()
-
-    def exit_scroll_mode(self) -> None:
-        self._scroll_mode = False
-        self._scroll_offset = 0
-        self._h_offset = 0
-        self.post_message(ScrollModeChange(False))
-        self.refresh()
-
-    def _scroll_up(self, n: int = 1) -> None:
-        max_off = len(self._scrollback)
-        self._scroll_offset = min(max_off, self._scroll_offset + n)
-        self.refresh()
-
-    def _scroll_down(self, n: int = 1) -> None:
-        self._scroll_offset = max(0, self._scroll_offset - n)
-        self.refresh()
-
-    def _scroll_left(self) -> None:
-        """Horizontal scroll left (cgdb scr_left)."""
-        if self._h_offset > 0:
-            self._h_offset -= 1
-            self.refresh()
-
-    def _scroll_right(self) -> None:
-        """Horizontal scroll right (cgdb scr_right)."""
-        self._h_offset += 1
-        self.refresh()
-
-    def _beginning_of_row(self) -> None:
-        """Jump to start of row (cgdb scr_beginning_of_row, key '0')."""
-        self._h_offset = 0
-        self.refresh()
-
-    def _end_of_row(self) -> None:
-        """Jump to end of row (cgdb scr_end_of_row, key '$')."""
-        # Measure longest visible line
-        lines = self._all_lines()
-        total = len(lines)
-        h = self._visible_height()
-        start = max(0, total - h - self._scroll_offset)
-        w = max(80, self.size.width or 80)
-        max_w = max((len(lines[i].plain) for i in range(start, min(start + h, total))), default=w)
-        self._h_offset = max(0, max_w - w)
-        self.refresh()
-
-    def _do_search(self, pattern: str, forward: bool) -> bool:
-        lines = self._all_lines()
-        total = len(lines)
-        if not total or not pattern:
-            return False
-        flags = re.IGNORECASE if self.ignorecase else 0
-        try:
-            rx = re.compile(pattern, flags)
-        except re.error:
-            return False
-        h = self._visible_height()
-        cur = max(0, total - h - self._scroll_offset)
-        order = (
-            list(range(cur + 1, total)) +
-            (list(range(0, cur + 1)) if self.wrapscan else [])
-        ) if forward else (
-            list(range(cur - 1, -1, -1)) +
-            (list(range(total - 1, cur - 1, -1)) if self.wrapscan else [])
-        )
-        for idx in order:
-            if rx.search(lines[idx].plain):
-                self._scroll_offset = max(0, total - h - idx)
-                self.refresh()
-                return True
-        return False
 
     # ------------------------------------------------------------------
     # Key handling
@@ -694,141 +515,9 @@ class GDBWidget(Widget):
             self.send_to_gdb(char.encode())
         event.stop()
 
-    def _handle_scroll_key(self, key: str, char: str) -> None:
-        if char.isdigit() and char != "0":
-            self._num_buf += char
-            return
-        count = int(self._num_buf) if self._num_buf else 1
-        self._num_buf = ""
-
-        if key == "escape":
-            self.on_switch_to_tgdb()
-            self.exit_scroll_mode()
-        elif key in ("q", "i", "enter", "return"):
-            self.exit_scroll_mode()
-        elif key in ("j", "down", "ctrl+n"):
-            self._await_g = False
-            self._scroll_down(count)
-        elif key in ("k", "up", "ctrl+p"):
-            self._await_g = False
-            self._scroll_up(count)
-        elif key in ("h", "left"):
-            self._await_g = False
-            self._scroll_left()
-        elif key in ("l", "right"):
-            self._await_g = False
-            self._scroll_right()
-        elif char == "0":
-            self._await_g = False
-            self._beginning_of_row()
-        elif char == "$":
-            self._await_g = False
-            self._end_of_row()
-        elif key in ("pageup", "ctrl+b"):
-            self._await_g = False
-            self._scroll_up(self._visible_height() * count)
-        elif key in ("pagedown", "ctrl+f"):
-            self._await_g = False
-            self._scroll_down(self._visible_height() * count)
-        elif key == "ctrl+u":
-            self._await_g = False
-            self._scroll_up(self._visible_height() // 2)
-        elif key == "ctrl+d":
-            self._await_g = False
-            self._scroll_down(self._visible_height() // 2)
-        elif char == "G" or key in ("f12", "end"):
-            # G / F12 / End → go to end (most recent output)
-            self._await_g = False
-            self._scroll_offset = 0
-            self.refresh()
-        elif key in ("f11", "home"):
-            # F11 / Home → go to beginning (same as gg)
-            self._await_g = False
-            self._scroll_offset = len(self._scrollback)
-            self.refresh()
-        elif char == "g":
-            if self._await_g:
-                # gg → go to beginning
-                self._await_g = False
-                self._scroll_offset = len(self._scrollback)
-                self.refresh()
-            else:
-                self._await_g = True
-        elif key == "apostrophe":
-            # '' prefix handled at app level; '.' → jump to last line (bottom)
-            self._await_g = False
-            self._dot_pending = True
-        elif self._dot_pending:
-            self._dot_pending = False
-            if char == ".":
-                self._scroll_offset = 0
-                self.refresh()
-        elif key == "slash":
-            self._await_g = False
-            self._search_active = True
-            self._search_forward = True
-            self._search_buf = ""
-            self.post_message(ScrollSearchStart(True))
-        elif key == "question_mark":
-            self._await_g = False
-            self._search_active = True
-            self._search_forward = False
-            self._search_buf = ""
-            self.post_message(ScrollSearchStart(False))
-        elif char == "n":
-            self._await_g = False
-            self._do_search(self._search_pattern, self._search_forward)
-        elif char == "N":
-            self._await_g = False
-            self._do_search(self._search_pattern, not self._search_forward)
-        else:
-            self._await_g = False
-
-    def _handle_search_key(self, key: str, char: str) -> None:
-        if key == "escape":
-            self._search_active = False
-            self.post_message(ScrollSearchCancel())
-        elif key in ("enter", "return"):
-            self._search_active = False
-            self._search_pattern = self._search_buf
-            if self._search_pattern:
-                self._do_search(self._search_pattern, self._search_forward)
-            self.post_message(ScrollSearchCommit(self._search_pattern))
-        elif key in ("backspace", "ctrl+h"):
-            self._search_buf = self._search_buf[:-1]
-            self.post_message(ScrollSearchUpdate(self._search_buf))
-        elif char and char.isprintable():
-            self._search_buf += char
-            self.post_message(ScrollSearchUpdate(self._search_buf))
-
 
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
 
-class ScrollModeChange(Message):
-    def __init__(self, active: bool) -> None:
-        super().__init__()
-        self.active = active
 
-
-class ScrollSearchStart(Message):
-    def __init__(self, forward: bool) -> None:
-        super().__init__()
-        self.forward = forward
-
-
-class ScrollSearchUpdate(Message):
-    def __init__(self, pattern: str) -> None:
-        super().__init__()
-        self.pattern = pattern
-
-
-class ScrollSearchCommit(Message):
-    def __init__(self, pattern: str) -> None:
-        super().__init__()
-        self.pattern = pattern
-
-
-class ScrollSearchCancel(Message):
-    pass

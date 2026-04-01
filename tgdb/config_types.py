@@ -1,0 +1,109 @@
+"""
+Configuration types and constants for tgdb.
+
+This module defines the Config dataclass, UserCommandDef, and all
+option-set / alias constants used by ConfigParser and the rest of
+the application.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+# ---------------------------------------------------------------------------
+# Reserved namespace prefix — any name starting with this string is internal
+# and must never leak into or be overwritten from user Python scripts.
+# ---------------------------------------------------------------------------
+_TGDB_RESERVED_PREFIX = "_tgdb_RSVD"
+
+# ---------------------------------------------------------------------------
+# Config state
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Config:
+    # Boolean options
+    autosourcereload: bool = True
+    color: bool = True
+    debugwincolor: bool = True
+    disasm: bool = False
+    hlsearch: bool = False
+    ignorecase: bool = False
+    showmarks: bool = True
+    showdebugcommands: bool = False
+    timeout: bool = True
+    ttimeout: bool = True
+    wrapscan: bool = True
+
+    # History options
+    historysize: int = 1024         # set history=N  (0 = disabled)
+
+    # Integer options
+    scrollbackbuffersize: int = 10000
+    tabstop: int = 8
+    timeoutlen: int = 1000
+    ttimeoutlen: int = 100
+    winminheight: int = 0
+    winminwidth: int = 0
+
+    # String / enum options
+    cgdbmodekey: str = "escape"     # key name
+    executinglinedisplay: str = "longarrow"   # shortarrow|longarrow|highlight|block
+    selectedlinedisplay: str = "block"
+    winsplit: str = "even"          # src_full|src_big|even|gdb_big|gdb_full
+    winsplitorientation: str = "vertical"   # horizontal|vertical
+    syntax: str = "on"              # on|off|c|asm|…
+
+
+# Abbreviation → canonical name
+_ALIASES: dict[str, str] = {
+    "asr": "autosourcereload",
+    "arrowstyle": "executinglinedisplay",  # deprecated alias (cgdb cgdbrc.cpp)
+    "as": "executinglinedisplay",         # short form of arrowstyle
+    "dwc": "debugwincolor",
+    "dis": "disasm",
+    "eld": "executinglinedisplay",
+    "hls": "hlsearch",
+    "ic": "ignorecase",
+    "sbbs": "scrollbackbuffersize",
+    "sld": "selectedlinedisplay",
+    "sdc": "showdebugcommands",
+    "syn": "syntax",
+    "to": "timeout",
+    "tm": "timeoutlen",
+    "ttm": "ttimeoutlen",
+    "ts": "tabstop",
+    "wmh": "winminheight",
+    "wmw": "winminwidth",
+    "wso": "winsplitorientation",
+    "ws": "wrapscan",
+}
+
+_BOOL_OPTIONS = {
+    "autosourcereload", "color", "debugwincolor", "disasm", "hlsearch",
+    "ignorecase", "showmarks", "showdebugcommands", "timeout",
+    "ttimeout", "wrapscan",
+}
+_INT_OPTIONS = {
+    "historysize", "scrollbackbuffersize", "tabstop", "timeoutlen",
+    "ttimeoutlen", "winminheight", "winminwidth",
+}
+_STR_OPTIONS = {
+    "cgdbmodekey", "executinglinedisplay", "selectedlinedisplay",
+    "winsplit", "winsplitorientation", "syntax",
+}
+
+# Valid -nargs values for :command
+_VALID_NARGS = {"0", "1", "*", "?", "+"}
+
+# User command name must start with uppercase, rest uppercase/lowercase/digits
+_CMD_NAME_RE = re.compile(r'^[A-Z][A-Za-z0-9]*$')
+
+
+@dataclass
+class UserCommandDef:
+    """One user-defined command registered via :command."""
+    name: str
+    nargs: str          # "0" | "1" | "*" | "?" | "+"
+    complete_func: str  # name of Python function in _py_namespace, or ""
+    replacement: str    # raw replacement template with <args>/<q-args>/<f-args>/<lt>
