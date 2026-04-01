@@ -325,8 +325,14 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
             pass
 
     async def on_unmount(self) -> None:
-        """Save command history to disk when tgdb exits."""
+        """Save command history and cancel background tasks when tgdb exits."""
         self._save_history_to_disk()
+        if self._gdb_task and not self._gdb_task.done():
+            self._gdb_task.cancel()
+            try:
+                await self._gdb_task
+            except asyncio.CancelledError:
+                pass
 
     async def _load_rc_async(self) -> None:
         """Source the rc file as if the user had typed each command interactively.

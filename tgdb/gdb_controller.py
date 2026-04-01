@@ -191,7 +191,8 @@ class GDBController(ParsingMixin, VarobjMixin):
         # add_reader on the console fd wakes instantly when data is available,
         # matching cgdb's select()-based approach with no timeout.
         self._console_done: asyncio.Future = loop.create_future()
-        self._mi_done: asyncio.Future = loop.create_future()
+        # _mi_done intentionally omitted — MI fd close is not monitored separately;
+        # the MI reader is removed in the finally block when console closes.
 
         # Register readable callbacks — fires as soon as the fd has data,
         # with zero polling delay (unlike asyncio.sleep(0.02)).
