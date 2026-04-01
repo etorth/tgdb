@@ -169,6 +169,40 @@ class GDBWidget(ScrollMixin, Widget):
     }
     """
 
+    def __init__(self, hl: HighlightGroups,
+                 max_scrollback: int = 10000, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.hl = hl
+        self.max_scrollback = max_scrollback
+        self.can_focus = True
+        self.gdb_focused: bool = True
+        self._scrollback: deque[Text] = deque(maxlen=max_scrollback)
+        self._scrollback_raw: deque = deque(maxlen=max_scrollback)
+        self.debugwincolor: bool = True
+        self._screen: Optional[_GDBScreen] = None
+        self._stream: Optional[pyte.ByteStream] = None
+        self._pyte_rows: int = 24
+        self._pyte_cols: int = 80
+        self._init_pyte(24, 80)
+        self._scroll_mode: bool = False
+        self._scroll_offset: int = 0
+        self._h_offset: int = 0
+        self._search_pattern: str = ""
+        self._search_forward: bool = True
+        self._search_active: bool = False
+        self._search_buf: str = ""
+        self.send_to_gdb: Callable[[bytes], None] = lambda b: None
+        self.resize_gdb: Callable[[int, int], None] = lambda r, c: None
+        self.on_switch_to_tgdb: Callable[[], None] = lambda: None
+        self.imap_feed: Callable[[str], "list[str] | None"] = lambda k: None
+        self.imap_replay: Callable[["list[str]"], None] = lambda tokens: None
+        self.ignorecase: bool = False
+        self.wrapscan: bool = True
+        self._num_buf: str = ""
+        self._await_g: bool = False
+        self._dot_pending: bool = False
+        self._gdb_resize_notified: tuple[int, int] = (24, 80)
+
 
     # ------------------------------------------------------------------
     # Scrollback helpers
