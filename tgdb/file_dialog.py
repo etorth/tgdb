@@ -10,6 +10,7 @@ Layout (matches cgdb filedlg_display()):
   Row h-1:      status bar (search prompt or key hints)
   Row h:        [blank, used as ncurses border equivalent]
 """
+
 from __future__ import annotations
 
 import math
@@ -49,13 +50,13 @@ class FileDialog(Widget):
         super().__init__(**kwargs)
         self.hl = hl
         self._files: list[str] = []
-        self._sel: int = 0          # 0-based selected index into _files
-        self._sel_col: int = 0      # horizontal scroll (matches filedlg sel_col)
+        self._sel: int = 0  # 0-based selected index into _files
+        self._sel_col: int = 0  # horizontal scroll (matches filedlg sel_col)
         self._search_active: bool = False
         self._search_buf: str = ""
         self._search_forward: bool = True
         self._search_pattern: str = ""
-        self._search_origin: int = 0   # cgdb sel_rline: fixed start while typing
+        self._search_origin: int = 0  # cgdb sel_rline: fixed start while typing
         self.ignorecase: bool = False
         self.wrapscan: bool = True
         self._num_buf: str = ""
@@ -168,7 +169,7 @@ class FileDialog(Widget):
         if count == 0:
             return 0
         if count < height:
-            return (count - height) // 2   # may be negative → clamp below
+            return (count - height) // 2  # may be negative → clamp below
         start = self._sel - height // 2
         start = max(0, min(count - height, start))
         return start
@@ -213,11 +214,7 @@ class FileDialog(Widget):
         except re.error:
             return False
         start = self._sel if origin is None else origin
-        order = (
-            list(range(start + 1, n)) + (list(range(0, start + 1)) if self.wrapscan else [])
-            if forward else
-            list(range(start - 1, -1, -1)) + (list(range(n - 1, start - 1, -1)) if self.wrapscan else [])
-        )
+        order = list(range(start + 1, n)) + (list(range(0, start + 1)) if self.wrapscan else []) if forward else list(range(start - 1, -1, -1)) + (list(range(n - 1, start - 1, -1)) if self.wrapscan else [])
         for idx in order:
             if rx.search(self._files[idx]):
                 self._sel = idx
@@ -231,7 +228,6 @@ class FileDialog(Widget):
 
     def render(self) -> Text:
         w = self._w()
-        h = self._h()
         lh = self._list_height()
         lwidth = self._lwidth()
         count = len(self._files)
@@ -241,8 +237,7 @@ class FileDialog(Widget):
         label = self._LABEL
         pad = max(0, (w - len(label)) // 2)
         result.append(" " * pad + label, style=self.hl.style("StatusLine"))
-        result.append(" " * max(0, w - pad - len(label)),
-                      style=self.hl.style("StatusLine"))
+        result.append(" " * max(0, w - pad - len(label)), style=self.hl.style("StatusLine"))
         result.append("\n")
 
         if self._query_pending or (count == 0 and self._body_message):
@@ -284,20 +279,16 @@ class FileDialog(Widget):
 
             filename = self._files[file_idx]
             # Horizontal scroll
-            display_name = filename[self._sel_col:] if self._sel_col < len(filename) else ""
+            display_name = filename[self._sel_col :] if self._sel_col < len(filename) else ""
 
             if file_idx == self._sel:
                 # Selected line: bold number + "→" arrow (cgdb uses '->')
-                result.append(f"{file_idx + 1:{lwidth}d}",
-                              style="bold " + self.hl.style("SelectedLineNr"))
-                result.append("->",
-                              style="bold " + self.hl.style("SelectedLineArrow"))
-                result.append(display_name,
-                              style=self.hl.style("SelectedLineHighlight"))
+                result.append(f"{file_idx + 1:{lwidth}d}", style="bold " + self.hl.style("SelectedLineNr"))
+                result.append("->", style="bold " + self.hl.style("SelectedLineArrow"))
+                result.append(display_name, style=self.hl.style("SelectedLineHighlight"))
             else:
                 # Normal line: number + bold "│" + space + filename
-                result.append(f"{file_idx + 1:{lwidth}d}",
-                              style=self.hl.style("LineNumber"))
+                result.append(f"{file_idx + 1:{lwidth}d}", style=self.hl.style("LineNumber"))
                 result.append("│", style="bold")
                 result.append(" " + display_name)
 
@@ -380,13 +371,13 @@ class FileDialog(Widget):
             self._search_active = True
             self._search_forward = True
             self._search_buf = ""
-            self._search_origin = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
+            self._search_origin = self._sel  # cgdb: filedlg_search_regex_init → sel_rline = sel_line
             self.refresh()
         elif key == "question_mark":
             self._search_active = True
             self._search_forward = False
             self._search_buf = ""
-            self._search_origin = self._sel   # cgdb: filedlg_search_regex_init → sel_rline = sel_line
+            self._search_origin = self._sel  # cgdb: filedlg_search_regex_init → sel_rline = sel_line
             self.refresh()
         elif char == "n":
             self._search(self._search_pattern, self._search_forward)
@@ -408,7 +399,7 @@ class FileDialog(Widget):
             self._search_active = False
             self._search_pattern = self._search_buf
             self._search(self._search_pattern, self._search_forward, origin=self._search_origin)
-            self._search_origin = self._sel   # update for subsequent n/N
+            self._search_origin = self._sel  # update for subsequent n/N
         elif key in ("backspace", "ctrl+h"):
             self._search_buf = self._search_buf[:-1]
             # Re-search from origin so shorter pattern finds first match again
@@ -424,6 +415,7 @@ class FileDialog(Widget):
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
+
 
 class FileSelected(Message):
     def __init__(self, path: str) -> None:

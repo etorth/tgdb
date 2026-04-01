@@ -12,10 +12,10 @@ The source pane itself reserves its bottom row for the current file path.
 
 Modes: TGDB | GDB | SCROLL | CMD | MESSAGE | FILEDLG
 """
+
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Optional
 
 from textual.app import App, ComposeResult
@@ -27,7 +27,6 @@ from .key_mapper import KeyMapper
 from .config import Config, ConfigParser
 from .gdb_controller import (
     GDBController,
-    Breakpoint,
     Frame,
     LocalVariable,
     RegisterInfo,
@@ -35,16 +34,12 @@ from .gdb_controller import (
 )
 from .source_widget import (
     SourceView,
-    ToggleBreakpoint, OpenFileDialog, AwaitMarkJump, AwaitMarkSet,
-    JumpGlobalMark, SearchStart, SearchUpdate, SearchCommit, SearchCancel,
-    StatusMessage, OpenTTY, GDBCommand, ShowHelp,
 )
 from .gdb_widget import (
-    GDBWidget, ScrollModeChange,
-    ScrollSearchStart, ScrollSearchUpdate, ScrollSearchCommit, ScrollSearchCancel,
+    GDBWidget,
 )
-from .command_line_bar import CommandLineBar, CommandSubmit, CommandCancel, MessageDismissed
-from .file_dialog import FileDialog, FileSelected, FileDialogClosed
+from .command_line_bar import CommandLineBar
+from .file_dialog import FileDialog
 from .context_menu import ContextMenu
 from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
@@ -115,10 +110,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
     }
     """
 
-    def __init__(self, gdb_path: str = "gdb",
-                 gdb_args: list[str] | None = None,
-                 rc_file: Optional[str] = None,
-                 **kwargs) -> None:
+    def __init__(self, gdb_path: str = "gdb", gdb_args: list[str] | None = None, rc_file: Optional[str] = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = HighlightGroups()
         self.km = KeyMapper()
@@ -131,6 +123,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         # This makes ``import tgdb; tgdb.screen.split(...)`` work inside
         # :python blocks without exposing any internal tgdb classes.
         import tgdb as _tgdb_pkg
+
         _tgdb_pkg.screen._set_app(self)
         self.cp.set_py_globals({"app": self, "tgdb": _tgdb_pkg})
 
@@ -138,8 +131,8 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: Optional[asyncio.Task] = None
-        self._cmd_task: Optional[asyncio.Task] = None   # running CommandLineBar command
-        self._pending_replay_tokens: list[str] = []     # map tokens queued after async <CR>
+        self._cmd_task: Optional[asyncio.Task] = None  # running CommandLineBar command
+        self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
 
         self._mode: str = "GDB"
         self._await_mark_jump: bool = False
@@ -252,8 +245,8 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         # Configure GDB widget
         gdb_w.ignorecase = self.cfg.ignorecase
         gdb_w.wrapscan = self.cfg.wrapscan
-        gdb_w.send_to_gdb = self.gdb.send_input        # bytes → primary PTY
-        gdb_w.resize_gdb = self.gdb.resize             # keep pyte in sync
+        gdb_w.send_to_gdb = self.gdb.send_input  # bytes → primary PTY
+        gdb_w.resize_gdb = self.gdb.resize  # keep pyte in sync
         gdb_w.on_switch_to_tgdb = self._switch_to_tgdb
         gdb_w.imap_feed = self._imap_feed
         gdb_w.imap_replay = self._replay_gdb_key_sequence
@@ -271,6 +264,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
             cmdline.load_history()
             # Session delimiter — recorded in history so sessions are visible when browsing
             from datetime import datetime
+
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cmdline._add_to_history(f"# tgdb begins {ts}", max_size=self.cfg.historysize)
         except NoMatches:
@@ -283,7 +277,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self.gdb.on_running = lambda: self.call_later(self._ui_on_running)
         self.gdb.on_breakpoints = lambda b: self.call_later(self._ui_set_breakpoints, b)
         self.gdb.on_source_files = lambda f: self.call_later(self._ui_set_source_files, f)
-        self.gdb.on_source_file = lambda f, l: self.call_later(self._ui_load_source_file, f, l)
+        self.gdb.on_source_file = lambda f, ln: self.call_later(self._ui_load_source_file, f, ln)
         self.gdb.on_locals = lambda v: self.call_later(self._ui_set_locals, v)
         self.gdb.on_registers = lambda v: self.call_later(self._ui_set_registers, v)
         self.gdb.on_stack = lambda v: self.call_later(self._ui_set_stack, v)
@@ -365,7 +359,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — hide GDB cursor when not focused
         gdb_w = self._get_gdb_widget()
         if gdb_w is not None:
-            gdb_w.gdb_focused = (mode in ("GDB", "SCROLL"))
+            gdb_w.gdb_focused = mode in ("GDB", "SCROLL")
             gdb_w.refresh()
 
     def _switch_to_tgdb(self) -> None:
@@ -441,10 +435,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
     def _first_workspace_leaf(self, widget: Optional[Widget] = None) -> Optional[Widget]:
         if widget is None:
             if not self._workspace_dynamic:
-                return (
-                    self._get_source_view(mounted_only=True)
-                    or self._get_gdb_widget(mounted_only=True)
-                )
+                return self._get_source_view(mounted_only=True) or self._get_gdb_widget(mounted_only=True)
             try:
                 widget = self.query_one("#split-container", PaneContainer)
             except NoMatches:
@@ -465,29 +456,22 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
     # Source widget messages
     # ------------------------------------------------------------------
 
-
     # ------------------------------------------------------------------
     # GDB widget messages
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # Status bar command handling
     # ------------------------------------------------------------------
 
-
     # ------------------------------------------------------------------
     # File dialog
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # GDB UI callbacks (scheduled via call_later — runs on main event loop)
     # ------------------------------------------------------------------
 
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-

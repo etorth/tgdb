@@ -1,6 +1,7 @@
 """
 Thread list pane widget.
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -62,11 +63,7 @@ class ThreadPane(Widget):
         visible_rows = max(0, height - 1)
         for thread in self._threads[:visible_rows]:
             result.append("\n")
-            style = (
-                self.hl.style("SelectedLineHighlight")
-                if thread.is_current
-                else self.hl.style("Normal")
-            )
+            style = self.hl.style("SelectedLineHighlight") if thread.is_current else self.hl.style("Normal")
             result.append(fit_cells(self._thread_text(thread), width), style=style)
 
         remaining_rows = height - 1 - min(visible_rows, len(self._threads))

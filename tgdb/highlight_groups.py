@@ -1,13 +1,15 @@
 """Highlight group definitions — mirrors cgdb's highlight_groups.cpp."""
+
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
 @dataclass
 class HighlightStyle:
     """One highlight group (foreground, background, attributes)."""
-    fg: Optional[str] = None      # Textual/Rich color name or None
+
+    fg: Optional[str] = None  # Textual/Rich color name or None
     bg: Optional[str] = None
     bold: bool = False
     underline: bool = False
@@ -137,9 +139,7 @@ class HighlightGroups:
     """Runtime table of highlight groups, configurable via :highlight."""
 
     def __init__(self) -> None:
-        self._groups: dict[str, HighlightStyle] = {
-            k: HighlightStyle(**vars(v)) for k, v in DEFAULT_GROUPS.items()
-        }
+        self._groups: dict[str, HighlightStyle] = {k: HighlightStyle(**vars(v)) for k, v in DEFAULT_GROUPS.items()}
 
     # Legacy cgdb aliases — accepted in :highlight command
     _ALIASES: dict[str, str] = {
@@ -156,8 +156,7 @@ class HighlightGroups:
         name = self._resolve_name(name)
         return self._groups.get(name, HighlightStyle())
 
-    def set(self, name: str, *, fg: str = "", bg: str = "",
-            attrs: str = "") -> None:
+    def set(self, name: str, *, fg: str = "", bg: str = "", attrs: str = "") -> None:
         """Apply :highlight command values to a group."""
         name = self._resolve_name(name)
         grp = self._groups.setdefault(name, HighlightStyle())

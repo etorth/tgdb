@@ -12,6 +12,7 @@ a (pattern, replacement) pair.  Rules are intentionally kept in a flat,
 data-driven table so they are easy to audit, extend, and maintain as
 C++ ABIs evolve.
 """
+
 from __future__ import annotations
 
 import re
@@ -99,79 +100,93 @@ def _strip_default_allocator(m: re.Match) -> str:
     return f"{container}<{inner}>"
 
 
-_RULES.append((
-    re.compile(
-        r"\b(vector|list|deque|forward_list|set|multiset|unordered_set|"
-        r"unordered_multiset)"
-        r"<(.+?),\s*std::allocator<\2>\s*>"
-    ),
-    _strip_default_allocator,
-))
+_RULES.append(
+    (
+        re.compile(
+            r"\b(vector|list|deque|forward_list|set|multiset|unordered_set|"
+            r"unordered_multiset)"
+            r"<(.+?),\s*std::allocator<\2>\s*>"
+        ),
+        _strip_default_allocator,
+    )
+)
 
 # -- Step 10: Strip default comparator + allocator from ordered maps/sets --
 # map<K, V, std::less<K>, std::allocator<std::pair<const K, V>>> → map<K, V>
 # Also handles std::less<> (transparent comparator)
-_RULES.append((
-    re.compile(
-        r"\b(map|multimap)"
-        r"<(.+?),\s*(.+?),\s*std::less<(?:\2)?>,\s*std::allocator<std::pair<const \2,\s*\3>\s*>\s*>"
-    ),
-    lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
-))
+_RULES.append(
+    (
+        re.compile(
+            r"\b(map|multimap)"
+            r"<(.+?),\s*(.+?),\s*std::less<(?:\2)?>,\s*std::allocator<std::pair<const \2,\s*\3>\s*>\s*>"
+        ),
+        lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
+    )
+)
 
 # map/multimap with just less<> or less<K> stripped (allocator already gone)
-_RULES.append((
-    re.compile(
-        r"\b(map|multimap)"
-        r"<(.+?),\s*(.+?),\s*std::less<(?:\2)?>\s*>"
-    ),
-    lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
-))
+_RULES.append(
+    (
+        re.compile(
+            r"\b(map|multimap)"
+            r"<(.+?),\s*(.+?),\s*std::less<(?:\2)?>\s*>"
+        ),
+        lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
+    )
+)
 
 # set/multiset with std::less
-_RULES.append((
-    re.compile(
-        r"\b(set|multiset)"
-        r"<(.+?),\s*std::less<(?:\2)?>,\s*std::allocator<\2>\s*>"
-    ),
-    lambda m: f"{m.group(1)}<{m.group(2)}>",
-))
+_RULES.append(
+    (
+        re.compile(
+            r"\b(set|multiset)"
+            r"<(.+?),\s*std::less<(?:\2)?>,\s*std::allocator<\2>\s*>"
+        ),
+        lambda m: f"{m.group(1)}<{m.group(2)}>",
+    )
+)
 
-_RULES.append((
-    re.compile(
-        r"\b(set|multiset)"
-        r"<(.+?),\s*std::less<(?:\2)?>\s*>"
-    ),
-    lambda m: f"{m.group(1)}<{m.group(2)}>",
-))
+_RULES.append(
+    (
+        re.compile(
+            r"\b(set|multiset)"
+            r"<(.+?),\s*std::less<(?:\2)?>\s*>"
+        ),
+        lambda m: f"{m.group(1)}<{m.group(2)}>",
+    )
+)
 
 # -- Step 11: Strip hash/equal/allocator from unordered containers ---------
 # unordered_map<K, V, std::hash<K>, std::equal_to<K>, std::allocator<...>>
-_RULES.append((
-    re.compile(
-        r"\b(unordered_map|unordered_multimap)"
-        r"<(.+?),\s*(.+?),\s*std::hash<\2>,\s*std::equal_to<\2>,\s*"
-        r"std::allocator<std::pair<const \2,\s*\3>\s*>\s*>"
-    ),
-    lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
-))
+_RULES.append(
+    (
+        re.compile(
+            r"\b(unordered_map|unordered_multimap)"
+            r"<(.+?),\s*(.+?),\s*std::hash<\2>,\s*std::equal_to<\2>,\s*"
+            r"std::allocator<std::pair<const \2,\s*\3>\s*>\s*>"
+        ),
+        lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
+    )
+)
 
-_RULES.append((
-    re.compile(
-        r"\b(unordered_set|unordered_multiset)"
-        r"<(.+?),\s*std::hash<\2>,\s*std::equal_to<\2>,\s*"
-        r"std::allocator<\2>\s*>"
-    ),
-    lambda m: f"{m.group(1)}<{m.group(2)}>",
-))
+_RULES.append(
+    (
+        re.compile(
+            r"\b(unordered_set|unordered_multiset)"
+            r"<(.+?),\s*std::hash<\2>,\s*std::equal_to<\2>,\s*"
+            r"std::allocator<\2>\s*>"
+        ),
+        lambda m: f"{m.group(1)}<{m.group(2)}>",
+    )
+)
 
 # -- Step 12: unique_ptr<T, std::default_delete<T>> → unique_ptr<T> -------
-_RULES.append((
-    re.compile(
-        r"\bunique_ptr<(.+?),\s*std::default_delete<\1>\s*>"
-    ),
-    lambda m: f"unique_ptr<{m.group(1)}>",
-))
+_RULES.append(
+    (
+        re.compile(r"\bunique_ptr<(.+?),\s*std::default_delete<\1>\s*>"),
+        lambda m: f"unique_ptr<{m.group(1)}>",
+    )
+)
 
 # -- Step 13: shared_ptr internal detail types ----------------------------
 # Skip __shared_ptr_access, __shared_ptr etc.

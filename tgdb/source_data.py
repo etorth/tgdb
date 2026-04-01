@@ -1,4 +1,5 @@
 """Data structures and helpers for source file handling."""
+
 from __future__ import annotations
 
 import os
@@ -50,7 +51,7 @@ class SourceFile:
         except OSError:
             pass
         self.bp_flags: list[int] = [BP_NONE] * len(lines)
-        self.marks_local: dict[str, int] = {}   # 'a'-'z' → 1-based line
+        self.marks_local: dict[str, int] = {}  # 'a'-'z' → 1-based line
         self._tokens: Optional[list[list[tuple]]] = None
 
     def tokenize(self, tabstop: int = 8) -> list[list[tuple]]:
@@ -78,7 +79,7 @@ class SourceFile:
             lines_toks.append(current)
         while len(lines_toks) < len(self.lines):
             lines_toks.append([])
-        self._tokens = lines_toks[:len(self.lines)]
+        self._tokens = lines_toks[: len(self.lines)]
         return self._tokens
 
 

@@ -5,6 +5,7 @@ Normally renders as one row.  Expands vertically during:
 - Heredoc multi-line :python << MARKER input (collection phase)
 - Multi-line command output / error display (dismiss phase)
 """
+
 from __future__ import annotations
 
 import re
@@ -14,16 +15,17 @@ from typing import Callable, Optional
 from textual.widget import Widget
 from textual.message import Message
 from textual import events
-from rich.text import Text
 
 from .highlight_groups import HighlightGroups
 
 # Matches ":python << EOF" / ":py << MYMARKER" (heredoc trigger)
-_HEREDOC_RE = re.compile(r'^(python|py)\s+<<\s+(\S+)\s*$', re.IGNORECASE)
+_HEREDOC_RE = re.compile(r"^(python|py)\s+<<\s+(\S+)\s*$", re.IGNORECASE)
 
 
 from .cmdline_history import HistoryMixin
 from .cmdline_render import RenderMixin
+
+
 class CommandLineBar(HistoryMixin, RenderMixin, Widget):
     """Command-line bar at the bottom of the screen.
 
@@ -59,17 +61,17 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
 
         # ── Multiline (heredoc) input state ──────────────────────────
         self._ml_active: bool = False
-        self._ml_buf: list[str] = []        # lines collected so far
-        self._ml_marker: str = ""           # e.g. "EOF"
-        self._ml_cmd: str = ""              # e.g. "python"
-        self._ml_header: str = ""           # original header as typed
+        self._ml_buf: list[str] = []  # lines collected so far
+        self._ml_marker: str = ""  # e.g. "EOF"
+        self._ml_cmd: str = ""  # e.g. "python"
+        self._ml_header: str = ""  # original header as typed
         self._ml_history_recall: bool = False  # True when showing a recalled heredoc entry
-        self._ml_history_full: str = ""        # full multiline command for recall
+        self._ml_history_full: str = ""  # full multiline command for recall
 
         # ── Multiline message display state ──────────────────────────
         self._msg_lines: list[str] = []
-        self._msg_scroll: int = 0           # index of first visible line
-        self._msg_visible_rows: int = 0     # how many content rows are shown
+        self._msg_scroll: int = 0  # index of first visible line
+        self._msg_visible_rows: int = 0  # how many content rows are shown
 
         # ── Tab completion state ──────────────────────────────────────
         self._completion_provider = completion_provider
@@ -78,21 +80,21 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         self._completion_arg_start: int = 0
 
         # ── Command history ───────────────────────────────────────────
-        self._history: list[str] = []       # all recorded commands (oldest first)
-        self._history_idx: int = -1         # -1 = not browsing; 0 = oldest
-        self._history_prefix: str = ""      # prefix typed before Up was pressed
+        self._history: list[str] = []  # all recorded commands (oldest first)
+        self._history_idx: int = -1  # -1 = not browsing; 0 = oldest
+        self._history_prefix: str = ""  # prefix typed before Up was pressed
         self._history_file: Optional[Path] = history_file
 
         # ── Cursor position (within _input_buf) ──────────────────────
-        self._cursor_pos: int = 0           # 0 = before first char; len(buf) = after last
+        self._cursor_pos: int = 0  # 0 = before first char; len(buf) = after last
 
         # ── Async task state ─────────────────────────────────────────
         # While a command task is running the bar is locked; all key input
         # is blocked and streaming output from the task is shown.
         self._task_running: bool = False
-        self._streaming_buf: str = ""       # accumulated output from running task
+        self._streaming_buf: str = ""  # accumulated output from running task
         self._collected_lines: list[str] = []  # all output lines collected during task
-        self._task_gen: int = 0             # generation counter for task isolation
+        self._task_gen: int = 0  # generation counter for task isolation
 
     # ------------------------------------------------------------------
     # Height management
@@ -227,7 +229,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
             return
 
         # Buffer only if this output belongs to the current task
-        is_current = (task_gen == self._task_gen)
+        is_current = task_gen == self._task_gen
         if is_current:
             raw = chunk.rstrip("\n")
             if raw:
@@ -276,7 +278,6 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
     # ------------------------------------------------------------------
     # Command history — public API
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # Key dispatch
@@ -434,10 +435,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         elif key in ("backspace", "ctrl+h"):
             self._commit_history_browse()  # adopt retrieved entry, don't revert
             if self._cursor_pos > 0:
-                self._input_buf = (
-                    self._input_buf[: self._cursor_pos - 1]
-                    + self._input_buf[self._cursor_pos:]
-                )
+                self._input_buf = self._input_buf[: self._cursor_pos - 1] + self._input_buf[self._cursor_pos :]
                 self._cursor_pos -= 1
             if not self._input_buf:
                 self._input_active = False
@@ -446,11 +444,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
 
         elif char and char.isprintable():
             self._commit_history_browse()  # adopt retrieved entry, don't revert
-            self._input_buf = (
-                self._input_buf[: self._cursor_pos]
-                + char
-                + self._input_buf[self._cursor_pos:]
-            )
+            self._input_buf = self._input_buf[: self._cursor_pos] + char + self._input_buf[self._cursor_pos :]
             self._cursor_pos += 1
             self.refresh()
 
@@ -462,7 +456,6 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
     # ------------------------------------------------------------------
     # History navigation helpers
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -476,7 +469,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         self._ml_header = original if original else f"{cmd} << {marker}"
         self._ml_buf = []
         self._input_buf = ""
-        self._set_height(2)     # header row + current-input row
+        self._set_height(2)  # header row + current-input row
         self.refresh()
 
     def _cancel_multiline(self) -> None:
@@ -502,11 +495,9 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
             self._msg_scroll -= 1
             self.refresh()
 
-
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # Key handling when the widget has focus
@@ -535,4 +526,5 @@ class MessageDismissed(Message):
     so that stale dismissal events don't kill a CMD session entered during
     map replay after the message was already cleared.
     """
+
     pass

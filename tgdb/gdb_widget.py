@@ -12,18 +12,16 @@ The widget is a real terminal connected to GDB's PTY master:
 Scroll mode (PageUp): vi-like navigation + regex search over
 a scrollback buffer of lines captured as they scroll off the screen.
 """
+
 from __future__ import annotations
 
-import re
 from collections import deque
 from typing import Callable, Optional
 
 import pyte
 from textual.widget import Widget
 from textual import events
-from textual.message import Message
 from rich.text import Text
-from rich.style import Style
 
 from .highlight_groups import HighlightGroups
 
@@ -40,9 +38,14 @@ from .highlight_groups import HighlightGroups
 from .gdb_screen import _GDBScreen, _row_to_text  # noqa: F401
 from .gdb_scroll import ScrollMixin  # noqa: F401
 from .gdb_scroll import (  # noqa: F401 — re-exported
-    ScrollModeChange, ScrollSearchStart, ScrollSearchUpdate,
-    ScrollSearchCommit, ScrollSearchCancel,
+    ScrollModeChange,
+    ScrollSearchStart,
+    ScrollSearchUpdate,
+    ScrollSearchCommit,
+    ScrollSearchCancel,
 )
+
+
 class GDBWidget(ScrollMixin, Widget):
     """
     Bottom pane: real VT100 terminal emulator (pyte) connected to GDB's PTY.
@@ -56,8 +59,7 @@ class GDBWidget(ScrollMixin, Widget):
     }
     """
 
-    def __init__(self, hl: HighlightGroups,
-                 max_scrollback: int = 10000, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
         self.max_scrollback = max_scrollback
@@ -90,7 +92,6 @@ class GDBWidget(ScrollMixin, Widget):
         self._dot_pending: bool = False
         self._gdb_resize_notified: tuple[int, int] = (24, 80)
 
-
     # ------------------------------------------------------------------
     # Scrollback helpers
     # ------------------------------------------------------------------
@@ -98,7 +99,7 @@ class GDBWidget(ScrollMixin, Widget):
     def _push_to_scrollback(self, text: Text, raw=None) -> None:
         """Append one line to both scrollback deques (text for display, raw for restoration)."""
         self._scrollback.append(text)
-        self._scrollback_raw.append(raw)   # dict copy of pyte row, or None
+        self._scrollback_raw.append(raw)  # dict copy of pyte row, or None
 
     # ------------------------------------------------------------------
     # pyte initialisation / resize
@@ -142,7 +143,7 @@ class GDBWidget(ScrollMixin, Widget):
                     row = buf.get(r)
                     self._push_to_scrollback(
                         _row_to_text(row, self._pyte_cols, use_color=use_color),
-                        row,   # save reference, not a copy
+                        row,  # save reference, not a copy
                     )
 
                 # Shift the buffer up by top_scroll rows in-place.
@@ -177,7 +178,7 @@ class GDBWidget(ScrollMixin, Widget):
                     # most-recent goes to row n_restore-1 (just above content).
                     to_restore: list[Optional[dict]] = []
                     for _ in range(n_restore):
-                        self._scrollback.pop()           # keep display deque in sync
+                        self._scrollback.pop()  # keep display deque in sync
                         to_restore.append(self._scrollback_raw.pop())
                     # to_restore[0] = most recently pushed → row n_restore-1
                     # to_restore[-1] = oldest restored    → row 0
@@ -263,9 +264,7 @@ class GDBWidget(ScrollMixin, Widget):
             buf = self._screen.buffer
             for r in range(self._pyte_rows):
                 cursor_col = cx if (r == cy and not self._scroll_mode and self.gdb_focused) else -1
-                lines.append(_row_to_text(buf.get(r),
-                                          self._pyte_cols, cursor_col,
-                                          use_color=self.debugwincolor))
+                lines.append(_row_to_text(buf.get(r), self._pyte_cols, cursor_col, use_color=self.debugwincolor))
         return lines
 
     def render(self) -> Text:
@@ -300,15 +299,11 @@ class GDBWidget(ScrollMixin, Widget):
             # entries in pyte's defaultdict buffer.  Phantom entries confuse
             # pyte's delete_lines logic on the next resize: it sees them as
             # "content" and displaces real rows, clearing the screen.
-            result.append_text(
-                _row_to_text(buf.get(r), self._pyte_cols, cursor_col,
-                             use_color=self.debugwincolor)
-            )
+            result.append_text(_row_to_text(buf.get(r), self._pyte_cols, cursor_col, use_color=self.debugwincolor))
         # Pad remaining rows if widget is taller than pyte screen
         for r in range(self._pyte_rows, h):
             result.append("\n")
         return result
-
 
     # ------------------------------------------------------------------
     # Resize — keep pyte screen in sync with widget size
@@ -330,7 +325,6 @@ class GDBWidget(ScrollMixin, Widget):
     # ------------------------------------------------------------------
     # Scroll helpers
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # Key handling
@@ -366,11 +360,16 @@ class GDBWidget(ScrollMixin, Widget):
         "pageup": b"\x1b[5~",
         "pagedown": b"\x1b[6~",
         "delete": b"\x1b[3~",
-        "f1": b"\x1bOP", "f2": b"\x1bOQ",
-        "f3": b"\x1bOR", "f4": b"\x1bOS",
-        "f5": b"\x1b[15~", "f6": b"\x1b[17~",
-        "f7": b"\x1b[18~", "f8": b"\x1b[19~",
-        "f10": b"\x1b[21~", "f11": b"\x1b[23~",
+        "f1": b"\x1bOP",
+        "f2": b"\x1bOQ",
+        "f3": b"\x1bOR",
+        "f4": b"\x1bOS",
+        "f5": b"\x1b[15~",
+        "f6": b"\x1b[17~",
+        "f7": b"\x1b[18~",
+        "f8": b"\x1b[19~",
+        "f10": b"\x1b[21~",
+        "f11": b"\x1b[23~",
         "f12": b"\x1b[24~",
     }
 
@@ -440,5 +439,3 @@ class GDBWidget(ScrollMixin, Widget):
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
-
-

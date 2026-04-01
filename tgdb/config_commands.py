@@ -4,6 +4,7 @@ User-defined command mixin for ConfigParser.
 Provides :command registration, lookup, expansion, execution,
 and Tab-completion support.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,31 +40,30 @@ class UserCommandMixin:
         nargs = "0"
         complete_func = ""
         while remaining.startswith("-"):
-            m = re.match(r'-nargs=([01*?+])\s*', remaining)
+            m = re.match(r"-nargs=([01*?+])\s*", remaining)
             if m:
                 nargs = m.group(1)
-                remaining = remaining[m.end():]
+                remaining = remaining[m.end() :]
                 continue
-            m = re.match(r'-complete=(\S+)\s*', remaining)
+            m = re.match(r"-complete=(\S+)\s*", remaining)
             if m:
                 complete_func = m.group(1)
-                remaining = remaining[m.end():]
+                remaining = remaining[m.end() :]
                 continue
-            m = re.match(r'-bang\s*', remaining)
+            m = re.match(r"-bang\s*", remaining)
             if m:
-                remaining = remaining[m.end():]
+                remaining = remaining[m.end() :]
                 continue
-            m = re.match(r'(-\S+)', remaining)
+            m = re.match(r"(-\S+)", remaining)
             token = m.group(1) if m else remaining.split()[0]
             return f"command: unknown attribute: {token!r}"
-        m = re.match(r'(\S+)\s*', remaining)
+        m = re.match(r"(\S+)\s*", remaining)
         if not m:
             return self._list_user_commands("")
         name = m.group(1)
-        after_name = remaining[m.end():]
+        after_name = remaining[m.end() :]
         if not _CMD_NAME_RE.match(name):
-            return (f"command: name must start with an uppercase letter and contain "
-                    f"only letters/digits: {name!r}")
+            return f"command: name must start with an uppercase letter and contain only letters/digits: {name!r}"
         if not after_name.strip():
             return self._list_user_commands(name)
         if complete_func and nargs == "0":
@@ -103,8 +103,7 @@ class UserCommandMixin:
             return self._user_commands[matches[0]], None
         return None, f"Ambiguous command: '{name}' (matches: {', '.join(sorted(matches))})"
 
-    async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str,
-                                       print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str, print_fn: Optional[Callable] = None) -> Optional[str]:
         if self._exec_depth >= 20:
             return f"{ucmd.name}: maximum command recursion depth exceeded"
         try:
@@ -158,7 +157,7 @@ class UserCommandMixin:
                 return "<"
             return m.group(0)
 
-        return re.sub(r'<([^>]+)>', replacer, template)
+        return re.sub(r"<([^>]+)>", replacer, template)
 
     @staticmethod
     def _f_args_split(text: str) -> list[str]:
@@ -203,7 +202,7 @@ class UserCommandMixin:
     def get_completions(self, arg_lead: str, cmd_line: str, cursor_pos: int) -> list[str]:
         """Return completion candidates for Tab completion in the status bar."""
         line = cmd_line.lstrip(":")
-        m = re.match(r'([A-Z][A-Za-z0-9]*)', line)
+        m = re.match(r"([A-Z][A-Za-z0-9]*)", line)
         if not m:
             return []
         cmd_name = m.group(1)

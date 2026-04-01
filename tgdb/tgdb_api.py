@@ -34,6 +34,7 @@ container tree starting from the root PaneContainer:
   [1, 0]      → first child of the second child of root (which must be a container)
   [1, 1, 2]   → second child of first child of second child of root
 """
+
 from __future__ import annotations
 
 import enum
@@ -47,14 +48,17 @@ if TYPE_CHECKING:
 # Public enumerations
 # ---------------------------------------------------------------------------
 
+
 class SplitMode(enum.Enum):
     """Orientation of a split operation."""
-    HORIZONTAL = "horizontal"   # left / right  (vertical divider line)
-    VERTICAL = "vertical"       # top / bottom  (horizontal divider line)
+
+    HORIZONTAL = "horizontal"  # left / right  (vertical divider line)
+    VERTICAL = "vertical"  # top / bottom  (horizontal divider line)
 
 
 class Pane(enum.Enum):
     """Named pane types that can be attached to workspace cells."""
+
     SOURCE = "source"
     GDB = "gdb"
     LOCALS = "locals"
@@ -66,6 +70,7 @@ class Pane(enum.Enum):
 # ---------------------------------------------------------------------------
 # PaneHandle
 # ---------------------------------------------------------------------------
+
 
 class PaneHandle:
     """A lazy reference to a workspace cell identified by its address.
@@ -94,6 +99,7 @@ class PaneHandle:
 # ---------------------------------------------------------------------------
 # TGDBScreen
 # ---------------------------------------------------------------------------
+
 
 class TGDBScreen:
     """
@@ -145,8 +151,7 @@ class TGDBScreen:
         """Remove all workspace panes and reset to a single empty cell."""
         await self._do_close_all()
 
-    async def split(self, pane: list[int] | None = None,
-                    mode: SplitMode = SplitMode.HORIZONTAL) -> None:
+    async def split(self, pane: list[int] | None = None, mode: SplitMode = SplitMode.HORIZONTAL) -> None:
         """Add a new empty cell relative to the cell at *pane*.
 
         If *pane* is ``[]`` (or omitted), the new cell is added to the root
@@ -172,6 +177,7 @@ class TGDBScreen:
     def _get_widget_at(self, address: list[int]):
         """Synchronously navigate the live widget tree to the node at *address*."""
         from .workspace import PaneContainer
+
         try:
             root = self._app.query_one("#split-container", PaneContainer)
         except Exception as exc:
@@ -180,21 +186,16 @@ class TGDBScreen:
         current = root
         for step, i in enumerate(address):
             if not isinstance(current, PaneContainer):
-                raise ValueError(
-                    f"Path element [{step}]={i}: expected PaneContainer, "
-                    f"got {type(current).__name__}"
-                )
+                raise ValueError(f"Path element [{step}]={i}: expected PaneContainer, got {type(current).__name__}")
             items = current.items
             if i < 0 or i >= len(items):
-                raise IndexError(
-                    f"Path element [{step}]={i}: index out of range "
-                    f"(container has {len(items)} items)"
-                )
+                raise IndexError(f"Path element [{step}]={i}: index out of range (container has {len(items)} items)")
             current = items[i]
         return current
 
     async def _do_close_all(self) -> None:
-        from .workspace import EmptyPane, PaneContainer
+        from .workspace import EmptyPane
+
         app = self._app
         if app is None:
             return
@@ -207,6 +208,7 @@ class TGDBScreen:
 
     async def _do_split(self, pane: list[int], mode: SplitMode) -> None:
         from .workspace import EmptyPane, PaneContainer
+
         app = self._app
         if app is None:
             return
@@ -239,6 +241,7 @@ class TGDBScreen:
 
     async def _do_attach(self, address: list[int], pane_type: Pane) -> None:
         from .workspace import PaneContainer
+
         app = self._app
         if app is None:
             return
@@ -255,7 +258,6 @@ class TGDBScreen:
             descriptor.requester()
 
     async def _do_detach(self, address: list[int]) -> None:
-        from .workspace import EmptyPane, PaneContainer
         app = self._app
         if app is None:
             return

@@ -5,6 +5,7 @@ Keys are represented as Textual key-name tokens (e.g. ``"escape"``,
 own token (``"s"``, ``":"``, ``"("``).  This makes the trie compatible with
 the key names Textual delivers via ``event.key``.
 """
+
 from __future__ import annotations
 
 import time
@@ -14,7 +15,7 @@ from typing import Optional
 class TrieNode:
     def __init__(self) -> None:
         self.children: dict[str, "TrieNode"] = {}
-        self.value: Optional[list[str]] = None   # Leaf: RHS token list
+        self.value: Optional[list[str]] = None  # Leaf: RHS token list
 
 
 class KeyMapper:
@@ -115,7 +116,7 @@ class KeyMapper:
         if node.value is not None:
             # Exact match — but might be a prefix of a longer map
             if node.children:
-                return []   # wait for more input / timeout
+                return []  # wait for more input / timeout
             # Definite leaf: fire the map
             expansion = list(node.value)
             buf.clear()

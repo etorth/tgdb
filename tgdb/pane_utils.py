@@ -1,6 +1,7 @@
 """
 Shared helpers for pane rendering.
 """
+
 from __future__ import annotations
 
 import os

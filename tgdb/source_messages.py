@@ -1,4 +1,5 @@
 """Message classes emitted by the source view widget."""
+
 from __future__ import annotations
 
 from textual.message import Message
@@ -65,13 +66,12 @@ class ResizeSource(Message):
     jump=True : delta is ±1 quarter-mark step (cgdb '+' / '_')
     """
 
-    def __init__(self, delta: int, rows: bool = False, jump: bool = False,
-                 percent: bool = False) -> None:
+    def __init__(self, delta: int, rows: bool = False, jump: bool = False, percent: bool = False) -> None:
         super().__init__()
         self.delta = delta
         self.rows = rows
         self.jump = jump
-        self.percent = percent   # legacy, kept for compatibility
+        self.percent = percent  # legacy, kept for compatibility
 
 
 class ToggleOrientation(Message):

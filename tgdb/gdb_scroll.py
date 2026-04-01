@@ -5,6 +5,7 @@ Extracts all scroll-mode rendering, navigation, search, and key handling
 into a mixin class so gdb_widget.py stays focused on core terminal
 emulation and live rendering.
 """
+
 from __future__ import annotations
 
 import re
@@ -16,6 +17,7 @@ from rich.text import Text
 # ---------------------------------------------------------------------------
 # Messages (posted by scroll-mode methods)
 # ---------------------------------------------------------------------------
+
 
 class ScrollModeChange(Message):
     def __init__(self, active: bool) -> None:
@@ -48,6 +50,7 @@ class ScrollSearchCancel(Message):
 # ---------------------------------------------------------------------------
 # ScrollMixin — mixed into GDBWidget
 # ---------------------------------------------------------------------------
+
 
 class ScrollMixin:
     """Scroll-mode rendering, navigation, search, and key handling."""
@@ -126,8 +129,7 @@ class ScrollMixin:
                         flags = re.IGNORECASE if self.ignorecase else 0
                         rx = re.compile(self._search_pattern, flags)
                         for m in rx.finditer(line.plain):
-                            line.stylize(self.hl.style("Search"),
-                                         m.start(), m.end())
+                            line.stylize(self.hl.style("Search"), m.start(), m.end())
                     except re.error:
                         pass
                 # Apply horizontal offset (cgdb scroll_cursor_col)
@@ -135,7 +137,7 @@ class ScrollMixin:
                     # Trim _h_offset chars from the left
                     plain = line.plain
                     if self._h_offset < len(plain):
-                        line = line[self._h_offset:]
+                        line = line[self._h_offset :]
                     else:
                         line = Text()
                 rendered_lines.append(line)
@@ -177,13 +179,7 @@ class ScrollMixin:
             return False
         h = self._visible_height()
         cur = max(0, total - h - self._scroll_offset)
-        order = (
-            list(range(cur + 1, total)) +
-            (list(range(0, cur + 1)) if self.wrapscan else [])
-        ) if forward else (
-            list(range(cur - 1, -1, -1)) +
-            (list(range(total - 1, cur - 1, -1)) if self.wrapscan else [])
-        )
+        order = (list(range(cur + 1, total)) + (list(range(0, cur + 1)) if self.wrapscan else [])) if forward else (list(range(cur - 1, -1, -1)) + (list(range(total - 1, cur - 1, -1)) if self.wrapscan else []))
         for idx in order:
             if rx.search(lines[idx].plain):
                 self._scroll_offset = max(0, total - h - idx)

@@ -1,4 +1,5 @@
 """LayoutMixin — split / resize management extracted from TGDBApp."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -89,7 +90,7 @@ class LayoutMixin:
     def on_resize_source(self: TGDBApp, msg: ResizeSource) -> None:
         if self._workspace_dynamic:
             return
-        is_horizontal = (self.cfg.winsplitorientation == "horizontal")
+        is_horizontal = self.cfg.winsplitorientation == "horizontal"
         half_axis = self._split_axis(is_horizontal) // 2
 
         if msg.rows:
@@ -135,10 +136,7 @@ class LayoutMixin:
             self._apply_split()
 
     def on_toggle_orientation(self: TGDBApp, _: ToggleOrientation) -> None:
-        new_orientation = (
-            "vertical" if self.cfg.winsplitorientation == "horizontal"
-            else "horizontal"
-        )
+        new_orientation = "vertical" if self.cfg.winsplitorientation == "horizontal" else "horizontal"
         self.cfg.winsplitorientation = new_orientation
         if self._workspace_dynamic:
             try:
@@ -157,20 +155,16 @@ class LayoutMixin:
     def _apply_split(self: TGDBApp) -> None:
         if self._workspace_dynamic:
             try:
-                self.query_one("#split-container", PaneContainer).set_orientation(
-                    self.cfg.winsplitorientation
-                )
+                self.query_one("#split-container", PaneContainer).set_orientation(self.cfg.winsplitorientation)
             except (NoMatches, Exception):
                 # WrongType or missing: dynamic workspace is in transition, skip
                 pass
             self._last_orientation = self.cfg.winsplitorientation
             return
         split = self.cfg.winsplit.lower()
-        is_horizontal = (self.cfg.winsplitorientation == "horizontal")
+        is_horizontal = self.cfg.winsplitorientation == "horizontal"
         split_changed = split != self._last_split_setting
-        orientation_changed = (
-            self.cfg.winsplitorientation != self._last_orientation
-        )
+        orientation_changed = self.cfg.winsplitorientation != self._last_orientation
 
         if split in self._SPLIT_MARKS:
             self._cur_win_split = self._SPLIT_MARKS[split]
@@ -184,7 +178,7 @@ class LayoutMixin:
         self._validate_window_shift(is_horizontal)
         total_axis = max(1, self._split_axis(is_horizontal))
         src_size, gdb_size = self._compute_split_sizes(is_horizontal)
-        show_splitter = (src_size > 0 and gdb_size > 0)
+        show_splitter = src_size > 0 and gdb_size > 0
         if not show_splitter:
             src_size, gdb_size = self._compute_split_sizes(is_horizontal, total_axis)
         pane_total = max(1, src_size + gdb_size)
@@ -227,7 +221,7 @@ class LayoutMixin:
     def on_drag_resize(self: TGDBApp, msg: DragResize) -> None:
         if self._workspace_dynamic:
             return
-        is_horizontal = (self.cfg.winsplitorientation == "horizontal")
+        is_horizontal = self.cfg.winsplitorientation == "horizontal"
         axis = self._pane_axis(is_horizontal)
         if axis <= 0:
             return

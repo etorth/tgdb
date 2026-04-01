@@ -12,39 +12,51 @@ Features:
   • Auto-reload on file change
   • Footer row showing the current file path
 """
+
 from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
 from typing import Optional
 
-from pygments.lexers import get_lexer_for_filename, TextLexer
-from pygments.token import Token
 from textual.widget import Widget
 from textual import events
-from textual.message import Message
-from rich.cells import cell_len, split_graphemes
-from rich.text import Text
-from rich.style import Style
 
 from .highlight_groups import HighlightGroups
 from .gdb_controller import Breakpoint
 from .source_rendering import SourceViewRendering
 from .source_data import (  # noqa: F401 — re-exported
-    SourceFile, BP_NONE, BP_ENABLED, BP_DISABLED,
-    _token_group, _TOKEN_GROUPS, _LOGO_LINES,
+    SourceFile,
+    BP_NONE,
+    BP_ENABLED,
+    BP_DISABLED,
+    _token_group,
+    _TOKEN_GROUPS,
+    _LOGO_LINES,
 )
 from .source_messages import (  # noqa: F401 — re-exported
-    ToggleBreakpoint, OpenFileDialog, AwaitMarkJump, AwaitMarkSet,
-    JumpGlobalMark, SearchStart, SearchUpdate, SearchCommit, SearchCancel,
-    StatusMessage, ResizeSource, ToggleOrientation, OpenTTY, ShowHelp, GDBCommand,
+    ToggleBreakpoint,
+    OpenFileDialog,
+    AwaitMarkJump,
+    AwaitMarkSet,
+    JumpGlobalMark,
+    SearchStart,
+    SearchUpdate,
+    SearchCommit,
+    SearchCancel,
+    StatusMessage,
+    ResizeSource,
+    ToggleOrientation,
+    OpenTTY,
+    ShowHelp,
+    GDBCommand,
 )
 
 
 # ---------------------------------------------------------------------------
 # Source view widget
 # ---------------------------------------------------------------------------
+
 
 class SourceView(SourceViewRendering, Widget):
     """Scrollable, syntax-highlighted source viewer with vi keybindings."""
@@ -60,9 +72,9 @@ class SourceView(SourceViewRendering, Widget):
         super().__init__(**kwargs)
         self.hl = hl
         self.source_file: Optional[SourceFile] = None
-        self.exe_line: int = 0           # 1-based; 0 = none
-        self.sel_line: int = 1           # 1-based cursor
-        self._scroll_top: int = 0        # 0-based first visible line
+        self.exe_line: int = 0  # 1-based; 0 = none
+        self.sel_line: int = 1  # 1-based cursor
+        self._scroll_top: int = 0  # 0-based first visible line
         self._search_pattern: str = ""
         self._search_forward: bool = True
         self._search_active: bool = False
@@ -74,13 +86,13 @@ class SourceView(SourceViewRendering, Widget):
         self.ignorecase: bool = False
         self.wrapscan: bool = True
         self.showmarks: bool = True
-        self.color: bool = True          # :set color — enables/disables syntax colors
+        self.color: bool = True  # :set color — enables/disables syntax colors
         self._global_marks: dict[str, tuple[str, int]] = {}
         self._last_jump_line: int = 1
         self._num_buf: str = ""
-        self._await_g: bool = False      # true after first 'g' (for 'gg')
-        self._col_offset: int = 0        # horizontal scroll (cgdb sel_col)
-        self._show_logo: bool = False    # force logo display (:logo command)
+        self._await_g: bool = False  # true after first 'g' (for 'gg')
+        self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)
+        self._show_logo: bool = False  # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}
         self._pending_search: Optional[tuple[str, bool]] = None
         self.can_focus = True
@@ -102,7 +114,7 @@ class SourceView(SourceViewRendering, Widget):
                 lines = [""]
             sf = SourceFile(path, lines)
             if previous and previous.path == path:
-                sf.bp_flags = list(previous.bp_flags[:len(lines)])
+                sf.bp_flags = list(previous.bp_flags[: len(lines)])
                 while len(sf.bp_flags) < len(lines):
                     sf.bp_flags.append(BP_NONE)
                 sf.marks_local = dict(previous.marks_local)
@@ -139,14 +151,11 @@ class SourceView(SourceViewRendering, Widget):
             if not fullname:
                 continue
             try:
-                same = (os.path.abspath(fullname) == os.path.abspath(sf.path)
-                        or os.path.basename(fullname) == os.path.basename(sf.path))
+                same = os.path.abspath(fullname) == os.path.abspath(sf.path) or os.path.basename(fullname) == os.path.basename(sf.path)
             except Exception:
                 same = False
             if same and 1 <= bp.line <= len(sf.lines):
-                sf.bp_flags[bp.line - 1] = (
-                    BP_ENABLED if bp.enabled else BP_DISABLED
-                )
+                sf.bp_flags[bp.line - 1] = BP_ENABLED if bp.enabled else BP_DISABLED
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -178,8 +187,11 @@ class SourceView(SourceViewRendering, Widget):
         self._ensure_visible(self.sel_line)
         self.refresh()
 
-    def scroll_up(self, n: int = 1) -> None: self.move_to(self.sel_line - n)
-    def scroll_down(self, n: int = 1) -> None: self.move_to(self.sel_line + n)
+    def scroll_up(self, n: int = 1) -> None:
+        self.move_to(self.sel_line - n)
+
+    def scroll_down(self, n: int = 1) -> None:
+        self.move_to(self.sel_line + n)
 
     def scroll_col(self, delta: int) -> None:
         """Horizontal scroll — cgdb sel_col."""
@@ -194,6 +206,7 @@ class SourceView(SourceViewRendering, Widget):
         if col >= 999999:
             if self.source_file and 1 <= self.sel_line <= len(self.source_file.lines):
                 from rich.cells import cell_len as _cell_len
+
                 line_text = self.source_file.lines[self.sel_line - 1]
                 line_cells = _cell_len(line_text)
                 # Account for line-number gutter (approx 4–6 cols); use width−6
@@ -217,9 +230,14 @@ class SourceView(SourceViewRendering, Widget):
         self._ensure_visible(self.sel_line)
         self.refresh()
 
-    def half_page_up(self) -> None: self.scroll_up(self._visible_height() // 2)
-    def half_page_down(self) -> None: self.scroll_down(self._visible_height() // 2)
-    def goto_top(self) -> None: self.move_to(1)
+    def half_page_up(self) -> None:
+        self.scroll_up(self._visible_height() // 2)
+
+    def half_page_down(self) -> None:
+        self.scroll_down(self._visible_height() // 2)
+
+    def goto_top(self) -> None:
+        self.move_to(1)
 
     def goto_bottom(self, line: Optional[int] = None) -> None:
         self.move_to(line if line is not None else self._line_count())
@@ -239,7 +257,8 @@ class SourceView(SourceViewRendering, Widget):
         self._show_logo = True
         self.refresh()
 
-    def goto_screen_top(self) -> None: self.move_to(self._scroll_top + 1)
+    def goto_screen_top(self) -> None:
+        self.move_to(self._scroll_top + 1)
 
     def goto_screen_middle(self) -> None:
         self.move_to(self._scroll_top + self._visible_height() // 2 + 1)
@@ -251,8 +270,7 @@ class SourceView(SourceViewRendering, Widget):
     # Search
     # ------------------------------------------------------------------
 
-    def search(self, pattern: str, forward: bool = True,
-               start: Optional[int] = None) -> bool:
+    def search(self, pattern: str, forward: bool = True, start: Optional[int] = None) -> bool:
         sf = self.source_file
         lines = sf.lines if sf else _LOGO_LINES
         if not lines or not pattern:
@@ -275,8 +293,11 @@ class SourceView(SourceViewRendering, Widget):
                 return True
         return False
 
-    def search_next(self) -> bool: return self.search(self._search_pattern, self._search_forward)
-    def search_prev(self) -> bool: return self.search(self._search_pattern, not self._search_forward)
+    def search_next(self) -> bool:
+        return self.search(self._search_pattern, self._search_forward)
+
+    def search_prev(self) -> bool:
+        return self.search(self._search_pattern, not self._search_forward)
 
     def run_pending_search(self) -> bool:
         if not self._pending_search:
@@ -325,9 +346,7 @@ class SourceView(SourceViewRendering, Widget):
     # Rendering — render() only, no render_line() override
     # ------------------------------------------------------------------
 
-
     # Width of the line-number field (minimum 1, grows with file size)
-
 
     def on_resize(self, event: events.Resize) -> None:
         self._ensure_visible(self.sel_line)
@@ -391,7 +410,7 @@ class SourceView(SourceViewRendering, Widget):
         elif key == "L":
             self.goto_screen_bottom()
         elif char == "g":
-            self._await_g = True           # wait for second 'g'
+            self._await_g = True  # wait for second 'g'
         elif key == "slash":
             self._search_active = True
             self._search_forward = True
@@ -491,10 +510,7 @@ class SourceView(SourceViewRendering, Widget):
             self._search_active = False
             self._search_pattern = self._search_buf
             if self._search_pattern:
-                if (
-                    self.source_file is None
-                    and getattr(self.app, "_initial_source_pending", False)
-                ):
+                if self.source_file is None and getattr(self.app, "_initial_source_pending", False):
                     self._pending_search = (self._search_pattern, self._search_forward)
                 else:
                     self.search(self._search_pattern, self._search_forward)
@@ -510,5 +526,3 @@ class SourceView(SourceViewRendering, Widget):
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
-
-

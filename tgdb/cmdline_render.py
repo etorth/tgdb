@@ -1,4 +1,5 @@
 """Rendering mixin for CommandLineBar."""
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -145,7 +146,7 @@ class RenderMixin:
     def _render_msg(self, w: int, style: str) -> Text:
         """Render the visible window of the scrollable message display."""
         visible = max(1, self._msg_visible_rows)
-        window = self._msg_lines[self._msg_scroll: self._msg_scroll + visible]
+        window = self._msg_lines[self._msg_scroll : self._msg_scroll + visible]
         lines = [_pad_crop(ln, w) for ln in window]
 
         # Pad blank rows if the window is taller than remaining content

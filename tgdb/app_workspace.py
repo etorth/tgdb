@@ -1,4 +1,5 @@
 """WorkspaceMixin — dynamic workspace / pane management extracted from TGDBApp."""
+
 from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING

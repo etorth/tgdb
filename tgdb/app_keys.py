@@ -1,4 +1,5 @@
 """KeyRoutingMixin — key dispatch extracted from TGDBApp."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -84,7 +85,7 @@ class KeyRoutingMixin:
         try:
             for i, token in enumerate(tokens):
                 if self._dispatch_key_internal(token):
-                    remaining = tokens[i + 1:]
+                    remaining = tokens[i + 1 :]
                     if remaining:
                         self._pending_replay_tokens.extend(remaining)
                     break
@@ -114,7 +115,7 @@ class KeyRoutingMixin:
             return [key]
         result = self.km.feed("gdb", key)
         if result == []:
-            return None     # still buffering
+            return None  # still buffering
         return result
 
     def _replay_gdb_key_sequence(self: TGDBApp, tokens: list[str]) -> None:
@@ -168,7 +169,7 @@ class KeyRoutingMixin:
         if key == "escape" or key.lower() == tgdb_key:
             if self._mode in ("GDB", "CMD", "SCROLL", "MESSAGE"):
                 self._switch_to_tgdb()
-            return False      # no-op when already in TGDB
+            return False  # no-op when already in TGDB
 
         if self._mode == "MESSAGE":
             try:

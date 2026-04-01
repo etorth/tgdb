@@ -4,6 +4,7 @@ Local variables pane widget — tree view with lazy varobj expansion.
 Uses GDB's ``-var-create`` / ``-var-list-children`` MI commands to build
 a structured, expandable tree of local variables and their members.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -12,11 +13,9 @@ from typing import Callable, Coroutine, Optional
 from textual.widget import Widget
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
-from rich.text import Text
 
 from .gdb_controller import LocalVariable
 from .highlight_groups import HighlightGroups
-from .pane_utils import center_cells
 
 
 class LocalVariablePane(Widget):
@@ -270,5 +269,5 @@ class LocalVariablePane(Widget):
     def _truncate(s: str, max_len: int = 60) -> str:
         s = s.replace("\n", " ")
         if len(s) > max_len:
-            return s[:max_len - 1] + "…"
+            return s[: max_len - 1] + "…"
         return s

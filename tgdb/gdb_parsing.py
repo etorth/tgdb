@@ -5,6 +5,7 @@ Provides ``ParsingMixin``, which handles async notification dispatch,
 MI result parsing (frames, locals, threads, registers, breakpoints,
 source files), and the ``_safe_int`` utility.  Mixed into GDBController.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -178,7 +179,7 @@ class ParsingMixin:
 
     def _emit_threads(self) -> None:
         for thread in self.threads:
-            thread.is_current = (thread.id == self.current_thread_id)
+            thread.is_current = thread.id == self.current_thread_id
         self.on_threads(list(self.threads))
 
     def _parse_register_values(self, data) -> dict[int, str]:
@@ -241,15 +242,17 @@ class ParsingMixin:
             bkpt_data = raw.get("bkpt", raw)
             num = self._safe_int(bkpt_data.get("number", 0))
             if num:
-                new_bps.append(Breakpoint(
-                    number=num,
-                    file=bkpt_data.get("file", ""),
-                    fullname=bkpt_data.get("fullname", ""),
-                    line=self._safe_int(bkpt_data.get("line", 0)),
-                    addr=bkpt_data.get("addr", ""),
-                    enabled=bkpt_data.get("enabled", "y") == "y",
-                    temporary=bkpt_data.get("disp", "") == "del",
-                ))
+                new_bps.append(
+                    Breakpoint(
+                        number=num,
+                        file=bkpt_data.get("file", ""),
+                        fullname=bkpt_data.get("fullname", ""),
+                        line=self._safe_int(bkpt_data.get("line", 0)),
+                        addr=bkpt_data.get("addr", ""),
+                        enabled=bkpt_data.get("enabled", "y") == "y",
+                        temporary=bkpt_data.get("disp", "") == "del",
+                    )
+                )
         self.breakpoints = new_bps
         self.on_breakpoints(list(self.breakpoints))
 

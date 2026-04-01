@@ -5,6 +5,7 @@ These classes were split out of ``app.py`` so the main application module can
 focus on orchestration while the reusable workspace layout widgets live in
 their own module.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -231,10 +232,7 @@ class PaneContainer(Widget):
         if not self._items:
             self._weights = []
             return
-        self._weights = [
-            max(1, item.size.width if is_horizontal else item.size.height)
-            for item in self._items
-        ]
+        self._weights = [max(1, item.size.width if is_horizontal else item.size.height) for item in self._items]
 
     def _resize_from_drag(self, splitter: "Splitter", screen_x: int, screen_y: int) -> bool:
         adjacent = self._adjacent_items(splitter)

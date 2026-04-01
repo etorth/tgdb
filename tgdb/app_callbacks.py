@@ -1,30 +1,40 @@
 """CallbacksMixin — message handlers and GDB UI callbacks extracted from TGDBApp."""
+
 from __future__ import annotations
 
 import asyncio
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+from textual.css.query import NoMatches
 
 if TYPE_CHECKING:
-    from .app import TGDBApp
+    pass
 
 from .source_widget import (
-    SourceView, ToggleBreakpoint, OpenFileDialog, OpenTTY,
-    AwaitMarkJump, AwaitMarkSet, JumpGlobalMark,
-    SearchStart, SearchUpdate, SearchCommit, SearchCancel,
-    StatusMessage, GDBCommand, ShowHelp,
+    ToggleBreakpoint,
+    OpenFileDialog,
+    OpenTTY,
+    AwaitMarkJump,
+    AwaitMarkSet,
+    JumpGlobalMark,
+    SearchStart,
+    SearchUpdate,
+    SearchCommit,
+    SearchCancel,
+    StatusMessage,
+    GDBCommand,
+    ShowHelp,
 )
 from .gdb_widget import (
-    GDBWidget, ScrollModeChange,
-    ScrollSearchStart, ScrollSearchUpdate, ScrollSearchCommit, ScrollSearchCancel,
+    ScrollModeChange,
+    ScrollSearchStart,
+    ScrollSearchUpdate,
+    ScrollSearchCommit,
+    ScrollSearchCancel,
 )
 from .command_line_bar import CommandLineBar, CommandSubmit, CommandCancel, MessageDismissed
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 from .gdb_controller import Breakpoint, Frame, LocalVariable, ThreadInfo, RegisterInfo
-from .local_variable_pane import LocalVariablePane
-from .register_pane import RegisterPane
-from .stack_pane import StackPane
-from .thread_pane import ThreadPane
 
 
 class CallbacksMixin:
@@ -39,17 +49,11 @@ class CallbacksMixin:
         if not sf:
             self._show_status("No source file loaded")
             return
-        existing = next(
-            (b for b in self.gdb.breakpoints
-             if b.line == msg.line and
-             os.path.basename(b.fullname or b.file) == os.path.basename(sf.path)),
-            None
-        )
+        existing = next((b for b in self.gdb.breakpoints if b.line == msg.line and os.path.basename(b.fullname or b.file) == os.path.basename(sf.path)), None)
         if existing:
             self.gdb.delete_breakpoint(existing.number)
         else:
-            self.gdb.set_breakpoint(f"{sf.path}:{msg.line}",
-                                    temporary=msg.temporary)
+            self.gdb.set_breakpoint(f"{sf.path}:{msg.line}", temporary=msg.temporary)
 
     def on_open_file_dialog(self, msg: OpenFileDialog) -> None:
         # Open immediately and show a pending state while GDB enumerates files.
@@ -72,7 +76,7 @@ class CallbacksMixin:
             slave_path = os.ttyname(slave_fd)
             os.close(slave_fd)
             # Store master_fd so it stays open (inferior can write to slave)
-            if hasattr(self, '_inf_tty_fd') and self._inf_tty_fd is not None:
+            if hasattr(self, "_inf_tty_fd") and self._inf_tty_fd is not None:
                 try:
                     os.close(self._inf_tty_fd)
                 except OSError:
@@ -163,8 +167,7 @@ class CallbacksMixin:
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
             return
-        self._cmd_task = asyncio.create_task(
-            self._run_cmd_task(msg.command, history_text=msg.history_text))
+        self._cmd_task = asyncio.create_task(self._run_cmd_task(msg.command, history_text=msg.history_text))
 
     async def _run_cmd_task(self, cmd: str, *, history_text: str = "") -> None:
         """Run one CommandLineBar command as an async task (one-at-a-time)."""
@@ -395,4 +398,3 @@ class CallbacksMixin:
             )
             self._preserve_window_shift_once = True
         self._apply_split()
-

@@ -4,6 +4,7 @@ Data classes for GDB/MI structured records.
 These types are used across the tgdb package to represent debugger state
 (breakpoints, frames, local variables, threads, registers).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

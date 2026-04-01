@@ -5,21 +5,15 @@ Supports $XDG_CONFIG_HOME/tgdb/tgdbrc (default: ~/.config/tgdb/tgdbrc)
 as the initialization file.
 Supports all :set options, :highlight, :map, :imap, :unmap, :iunmap.
 """
+
 from __future__ import annotations
 
-import asyncio
 import builtins
-import contextlib
-import io
-import json
 import os
 import re
 import shlex
-import textwrap
-import traceback
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .highlight_groups import HighlightGroups
@@ -27,9 +21,14 @@ if TYPE_CHECKING:
 
 from .xdg_path import XDGPath
 from .config_types import (  # noqa: F401 — re-exported
-    Config, UserCommandDef,
-    _BOOL_OPTIONS, _INT_OPTIONS, _STR_OPTIONS, _VALID_NARGS,
-    _TGDB_RESERVED_PREFIX, _CMD_NAME_RE,
+    Config,
+    UserCommandDef,
+    _BOOL_OPTIONS,
+    _INT_OPTIONS,
+    _STR_OPTIONS,
+    _VALID_NARGS,
+    _TGDB_RESERVED_PREFIX,
+    _CMD_NAME_RE,
 )
 from .config_commands import UserCommandMixin
 from .config_python import PythonExecMixin
@@ -39,7 +38,7 @@ from .config_python import PythonExecMixin
 _ALIASES: dict[str, str] = {
     "asr": "autosourcereload",
     "arrowstyle": "executinglinedisplay",  # deprecated alias (cgdb cgdbrc.cpp)
-    "as": "executinglinedisplay",         # short form of arrowstyle
+    "as": "executinglinedisplay",  # short form of arrowstyle
     "dwc": "debugwincolor",
     "dis": "disasm",
     "eld": "executinglinedisplay",
@@ -62,6 +61,7 @@ _ALIASES: dict[str, str] = {
 
 # Valid -nargs values for :command
 
+
 class ConfigParser(UserCommandMixin, PythonExecMixin):
     """
     Parses cgdbrc-style config commands and updates a Config object.
@@ -69,10 +69,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
     Pass in the live Config, HighlightGroups, and KeyMapper objects.
     """
 
-    def __init__(self,
-                 config: Config,
-                 highlight_groups: "HighlightGroups",
-                 key_mapper: "KeyMapper") -> None:
+    def __init__(self, config: Config, highlight_groups: "HighlightGroups", key_mapper: "KeyMapper") -> None:
         self.config = config
         self.hl = highlight_groups
         self.km = key_mapper
@@ -87,13 +84,11 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         self._exec_depth: int = 0
         self._cmdline_bar = None
 
-
     def set_cmdline_bar(self, bar) -> None:
         """Inject a reference to the CommandLineBar for history operations."""
         self._cmdline_bar = bar
 
-    def register_handler(self, name: str,
-                         fn: Callable[[list[str]], Optional[str]]) -> None:
+    def register_handler(self, name: str, fn: Callable[[list[str]], Optional[str]]) -> None:
         """Register an extra command handler (e.g., GDB debug commands)."""
         self._handlers[name] = fn
 
@@ -114,8 +109,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         path = XDGPath.config_home() / "tgdb" / "tgdbrc"
         return path if path.exists() else None
 
-    async def load_file_async(self, path: str,
-                              print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def load_file_async(self, path: str, print_fn: Optional[Callable] = None) -> Optional[str]:
         """Load and execute every non-blank line in *path* asynchronously.
 
         Supports heredoc blocks (``python << MARKER`` … ``MARKER``) so that
@@ -143,7 +137,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
 
             # Detect heredoc: [:]python << MARKER
             check = stripped.lstrip(":")
-            m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', check, re.IGNORECASE)
+            m = re.match(r"^(python|py)\s+<<\s+(\S+)\s*$", check, re.IGNORECASE)
             if m:
                 cmd_name = m.group(1).lower()
                 marker = m.group(2)
@@ -188,16 +182,16 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             return None
 
         # Comment: leading whitespace + '#' is a no-op.
-        if re.match(r'^\s*#', line):
+        if re.match(r"^\s*#", line):
             return None
 
         # :python / :py and :pyfile / :pyf take raw (un-tokenised) argument.
-        _raw = re.match(r'^(python|pyfile|pyf|py)\s*(.*)', line, re.DOTALL | re.IGNORECASE)
+        _raw = re.match(r"^(python|pyfile|pyf|py)\s*(.*)", line, re.DOTALL | re.IGNORECASE)
         if _raw:
             _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
             if _cmd in ("python", "py"):
                 # Handle heredoc format: "<<  MARKER\n...\nMARKER"
-                _hd = re.match(r'^<<\s*(\S+)\s*\n(.*)', _raw_arg, re.DOTALL)
+                _hd = re.match(r"^<<\s*(\S+)\s*\n(.*)", _raw_arg, re.DOTALL)
                 if _hd:
                     _marker, _body = _hd.group(1), _hd.group(2)
                     # Strip the closing marker line
@@ -213,12 +207,12 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
                 return await self._exec_pyfile_async(_raw_arg.strip(), print_fn)
 
         # :command needs raw handling to preserve the replacement template.
-        _cmd_m = re.match(r'^command\b\s*(.*)', line, re.DOTALL | re.IGNORECASE)
+        _cmd_m = re.match(r"^command\b\s*(.*)", line, re.DOTALL | re.IGNORECASE)
         if _cmd_m:
             return await self._cmd_command(_cmd_m.group(1))
 
         # :map / :imap need raw handling so spaces in the RHS are preserved.
-        _map_m = re.match(r'^(imap|im|map)\b\s*(\S+)\s*(.*)', line, re.DOTALL | re.IGNORECASE)
+        _map_m = re.match(r"^(imap|im|map)\b\s*(\S+)\s*(.*)", line, re.DOTALL | re.IGNORECASE)
         if _map_m:
             _mcmd = _map_m.group(1).lower()
             _mode = "gdb" if _mcmd in ("imap", "im") else "tgdb"
@@ -236,12 +230,12 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         if not parts:
             return None
 
-        raw_cmd = parts[0]      # original case — needed for user-command lookup
+        raw_cmd = parts[0]  # original case — needed for user-command lookup
         cmd = raw_cmd.lower()
         args = parts[1:]
 
         # Pure number: :12 → goto line; :+5 → scroll down; :-3 → scroll up
-        if re.match(r'^[+-]?\d+$', raw_cmd):
+        if re.match(r"^[+-]?\d+$", raw_cmd):
             handler = self._handlers.get("_goto_line")
             if handler is not None:
                 return handler([raw_cmd])
@@ -289,7 +283,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             if amb_err:
                 return amb_err
             if ucmd is not None:
-                m = re.match(r'\S+\s*(.*)', line, re.DOTALL)
+                m = re.match(r"\S+\s*(.*)", line, re.DOTALL)
                 raw_args = m.group(1) if m else ""
                 return await self._exec_user_command_async(
                     ucmd,
@@ -299,11 +293,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
 
         return f"Unknown command: {cmd}"
 
-
     # ------------------------------------------------------------------
     # :command — user-defined commands
     # ------------------------------------------------------------------
-
 
     # ------------------------------------------------------------------
     # :set
@@ -464,7 +456,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             return "unmap: empty lhs"
         found = self.km.unmap(mode, lhs)
         if not found:
-            return f"unmap: no such mapping"
+            return "unmap: no such mapping"
         return None
 
     # ------------------------------------------------------------------
@@ -474,23 +466,42 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
     # Maps lower-cased cgdb <Name> identifiers to Textual event.key strings
     _KEY_TOKENS: dict[str, str] = {
         "space": "space",
-        "enter": "enter", "return": "enter", "cr": "enter",
+        "enter": "enter",
+        "return": "enter",
+        "cr": "enter",
         "nl": "ctrl+j",
         "tab": "tab",
-        "esc": "escape", "escape": "escape",
-        "bs": "backspace", "backspace": "backspace",
-        "del": "delete", "delete": "delete",
+        "esc": "escape",
+        "escape": "escape",
+        "bs": "backspace",
+        "backspace": "backspace",
+        "del": "delete",
+        "delete": "delete",
         "insert": "insert",
         "nul": "ctrl+@",
         "lt": "<",
         "bslash": "\\",
         "bar": "|",
-        "up": "up", "down": "down", "left": "left", "right": "right",
-        "pageup": "pageup", "pagedown": "pagedown",
-        "home": "home", "end": "end",
-        "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4",
-        "f5": "f5", "f6": "f6", "f7": "f7", "f8": "f8",
-        "f9": "f9", "f10": "f10", "f11": "f11", "f12": "f12",
+        "up": "up",
+        "down": "down",
+        "left": "left",
+        "right": "right",
+        "pageup": "pageup",
+        "pagedown": "pagedown",
+        "home": "home",
+        "end": "end",
+        "f1": "f1",
+        "f2": "f2",
+        "f3": "f3",
+        "f4": "f4",
+        "f5": "f5",
+        "f6": "f6",
+        "f7": "f7",
+        "f8": "f8",
+        "f9": "f9",
+        "f10": "f10",
+        "f11": "f11",
+        "f12": "f12",
     }
 
     def _decode_keyseq_tokens(self, s: str) -> list[str]:
@@ -511,7 +522,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             if s[i] == "<":
                 end = s.find(">", i)
                 if end != -1:
-                    name = s[i + 1:end].lower()
+                    name = s[i + 1 : end].lower()
                     tokens.append(self._key_token(name))
                     i = end + 1
                     continue

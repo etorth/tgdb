@@ -1,14 +1,15 @@
 """tgdb entry point — command-line interface."""
+
 from __future__ import annotations
 
 import argparse
 import os
 import sys
-import time
 
 
 def _wait_for_debugger() -> None:
     from pudb.remote import set_trace
+
     set_trace()
 
 
@@ -26,33 +27,43 @@ Examples:
 """,
     )
     parser.add_argument(
-        "-d", "--debugger", metavar="DEBUGGER",
+        "-d",
+        "--debugger",
+        metavar="DEBUGGER",
         default="gdb",
         help="Path to GDB executable (default: gdb)",
     )
     parser.add_argument(
-        "-w", "--wait", action="store_true",
+        "-w",
+        "--wait",
+        action="store_true",
         help="Wait for debugger before continuing startup",
     )
     parser.add_argument(
-        "-r", "--rcfile", metavar="FILE",
+        "-r",
+        "--rcfile",
+        metavar="FILE",
         default=None,
         help="Read configuration from FILE instead of ~/.config/tgdb/tgdbrc; use NONE to skip",
     )
     parser.add_argument(
-        "--args", action="store_true",
+        "--args",
+        action="store_true",
         help="Pass remaining arguments as program + arguments to GDB",
     )
     parser.add_argument(
-        "--cd", metavar="DIR",
+        "--cd",
+        metavar="DIR",
         help="Change to DIR before starting GDB",
     )
     parser.add_argument(
-        "program", nargs="?",
+        "program",
+        nargs="?",
         help="Program to debug",
     )
     parser.add_argument(
-        "core_or_pid", nargs="?",
+        "core_or_pid",
+        nargs="?",
         help="Core file or PID to attach",
     )
 
@@ -60,7 +71,7 @@ Examples:
     if "--args" in sys.argv:
         idx = sys.argv.index("--args")
         pre_args = sys.argv[1:idx]
-        post_args = sys.argv[idx + 1:]
+        post_args = sys.argv[idx + 1 :]
         args = parser.parse_args(pre_args)
         gdb_args = ["--args"] + post_args
     else:

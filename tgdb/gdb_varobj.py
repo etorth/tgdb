@@ -4,6 +4,7 @@ VarobjMixin — varobj-related async MI commands.
 Provides var_create, var_list_children, var_delete, var_update, and the
 underlying mi_command_async helper.  Mixed into GDBController.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,9 +60,7 @@ class VarobjMixin:
 
         Keys include ``name``, ``numchild``, ``value``, ``type``, etc.
         """
-        result = await self.mi_command_async(
-            f'-var-create - {frame} "{expr}"'
-        )
+        result = await self.mi_command_async(f'-var-create - {frame} "{expr}"')
         return result.get("payload") or {}
 
     async def var_list_children(self, varobj_name: str) -> list[dict]:
@@ -70,9 +69,7 @@ class VarobjMixin:
         Each child dict has keys: ``name``, ``exp``, ``numchild``, ``value``,
         ``type``, etc.
         """
-        result = await self.mi_command_async(
-            f"-var-list-children --all-values {varobj_name}"
-        )
+        result = await self.mi_command_async(f"-var-list-children --all-values {varobj_name}")
         payload = result.get("payload") or {}
         children_raw = payload.get("children", [])
         children: list[dict] = []
@@ -97,9 +94,7 @@ class VarobjMixin:
 
     async def var_update(self, varobj_name: str = "*") -> list[dict]:
         """Update varobjs and return changed ones."""
-        result = await self.mi_command_async(
-            f"-var-update --all-values {varobj_name}"
-        )
+        result = await self.mi_command_async(f"-var-update --all-values {varobj_name}")
         payload = result.get("payload") or {}
         changelist = payload.get("changelist", [])
         return changelist if isinstance(changelist, list) else []

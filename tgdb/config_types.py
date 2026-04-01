@@ -5,6 +5,7 @@ This module defines the Config dataclass, UserCommandDef, and all
 option-set / alias constants used by ConfigParser and the rest of
 the application.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,6 +20,7 @@ _TGDB_RESERVED_PREFIX = "_tgdb_RSVD"
 # ---------------------------------------------------------------------------
 # Config state
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Config:
@@ -36,7 +38,7 @@ class Config:
     wrapscan: bool = True
 
     # History options
-    historysize: int = 1024         # set history=N  (0 = disabled)
+    historysize: int = 1024  # set history=N  (0 = disabled)
 
     # Integer options
     scrollbackbuffersize: int = 10000
@@ -47,19 +49,19 @@ class Config:
     winminwidth: int = 0
 
     # String / enum options
-    cgdbmodekey: str = "escape"     # key name
-    executinglinedisplay: str = "longarrow"   # shortarrow|longarrow|highlight|block
+    cgdbmodekey: str = "escape"  # key name
+    executinglinedisplay: str = "longarrow"  # shortarrow|longarrow|highlight|block
     selectedlinedisplay: str = "block"
-    winsplit: str = "even"          # src_full|src_big|even|gdb_big|gdb_full
-    winsplitorientation: str = "vertical"   # horizontal|vertical
-    syntax: str = "on"              # on|off|c|asm|…
+    winsplit: str = "even"  # src_full|src_big|even|gdb_big|gdb_full
+    winsplitorientation: str = "vertical"  # horizontal|vertical
+    syntax: str = "on"  # on|off|c|asm|…
 
 
 # Abbreviation → canonical name
 _ALIASES: dict[str, str] = {
     "asr": "autosourcereload",
     "arrowstyle": "executinglinedisplay",  # deprecated alias (cgdb cgdbrc.cpp)
-    "as": "executinglinedisplay",         # short form of arrowstyle
+    "as": "executinglinedisplay",  # short form of arrowstyle
     "dwc": "debugwincolor",
     "dis": "disasm",
     "eld": "executinglinedisplay",
@@ -80,30 +82,48 @@ _ALIASES: dict[str, str] = {
 }
 
 _BOOL_OPTIONS = {
-    "autosourcereload", "color", "debugwincolor", "disasm", "hlsearch",
-    "ignorecase", "showmarks", "showdebugcommands", "timeout",
-    "ttimeout", "wrapscan",
+    "autosourcereload",
+    "color",
+    "debugwincolor",
+    "disasm",
+    "hlsearch",
+    "ignorecase",
+    "showmarks",
+    "showdebugcommands",
+    "timeout",
+    "ttimeout",
+    "wrapscan",
 }
 _INT_OPTIONS = {
-    "historysize", "scrollbackbuffersize", "tabstop", "timeoutlen",
-    "ttimeoutlen", "winminheight", "winminwidth",
+    "historysize",
+    "scrollbackbuffersize",
+    "tabstop",
+    "timeoutlen",
+    "ttimeoutlen",
+    "winminheight",
+    "winminwidth",
 }
 _STR_OPTIONS = {
-    "cgdbmodekey", "executinglinedisplay", "selectedlinedisplay",
-    "winsplit", "winsplitorientation", "syntax",
+    "cgdbmodekey",
+    "executinglinedisplay",
+    "selectedlinedisplay",
+    "winsplit",
+    "winsplitorientation",
+    "syntax",
 }
 
 # Valid -nargs values for :command
 _VALID_NARGS = {"0", "1", "*", "?", "+"}
 
 # User command name must start with uppercase, rest uppercase/lowercase/digits
-_CMD_NAME_RE = re.compile(r'^[A-Z][A-Za-z0-9]*$')
+_CMD_NAME_RE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
 
 @dataclass
 class UserCommandDef:
     """One user-defined command registered via :command."""
+
     name: str
-    nargs: str          # "0" | "1" | "*" | "?" | "+"
+    nargs: str  # "0" | "1" | "*" | "?" | "+"
     complete_func: str  # name of Python function in _py_namespace, or ""
-    replacement: str    # raw replacement template with <args>/<q-args>/<f-args>/<lt>
+    replacement: str  # raw replacement template with <args>/<q-args>/<f-args>/<lt>

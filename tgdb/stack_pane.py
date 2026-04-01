@@ -1,6 +1,7 @@
 """
 Call stack pane widget.
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -55,11 +56,7 @@ class StackPane(Widget):
         visible_rows = max(0, height - 1)
         for frame in self._frames[:visible_rows]:
             result.append("\n")
-            style = (
-                self.hl.style("SelectedLineHighlight")
-                if frame.level == self._current_level
-                else self.hl.style("Normal")
-            )
+            style = self.hl.style("SelectedLineHighlight") if frame.level == self._current_level else self.hl.style("Normal")
             result.append(fit_cells(self._frame_text(frame), width), style=style)
 
         remaining_rows = height - 1 - min(visible_rows, len(self._frames))

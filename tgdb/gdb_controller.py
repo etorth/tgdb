@@ -11,20 +11,23 @@ Secondary PTY: GDB machine-interface channel opened via "new-ui mi <device>".
                Structured output (breakpoints, frames, source) parsed here.
                MI commands sent here; user input goes to primary PTY only.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
-import re
 import signal
 import termios
-from dataclasses import dataclass
 from typing import Callable, Optional
 
 import ptyprocess
 
 from .gdb_types import (  # noqa: F401 — re-exported
-    Breakpoint, Frame, LocalVariable, ThreadInfo, RegisterInfo,
+    Breakpoint,
+    Frame,
+    LocalVariable,
+    ThreadInfo,
+    RegisterInfo,
 )
 from .gdb_varobj import VarobjMixin
 from .gdb_parsing import ParsingMixin
@@ -37,6 +40,7 @@ from .gdb_miparser import GDBMIParser
 # ---------------------------------------------------------------------------
 # GDB Controller
 # ---------------------------------------------------------------------------
+
 
 class GDBController(ParsingMixin, VarobjMixin):
     """
@@ -57,16 +61,14 @@ class GDBController(ParsingMixin, VarobjMixin):
         on_error(msg: str)                   — user-visible ^error
     """
 
-    def __init__(self, gdb_path: str = "gdb",
-                 args: list[str] | None = None,
-                 init_commands: list[str] | None = None) -> None:
+    def __init__(self, gdb_path: str = "gdb", args: list[str] | None = None, init_commands: list[str] | None = None) -> None:
         self.gdb_path = gdb_path
         self.gdb_args = args or []
         self.init_commands = init_commands or []
 
         self._proc: Optional[ptyprocess.PtyProcess] = None
         self._mi_master_fd: int = -1
-        self._mi_slave_fd: int = -1   # kept open to prevent master EIO
+        self._mi_slave_fd: int = -1  # kept open to prevent master EIO
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
@@ -90,7 +92,7 @@ class GDBController(ParsingMixin, VarobjMixin):
         self.on_running: Callable[[], None] = lambda: None
         self.on_breakpoints: Callable[[list[Breakpoint]], None] = lambda b: None
         self.on_source_files: Callable[[list[str]], None] = lambda f: None
-        self.on_source_file: Callable[[str, int], None] = lambda f, l: None
+        self.on_source_file: Callable[[str, int], None] = lambda f, ln: None
         self.on_locals: Callable[[list[LocalVariable]], None] = lambda v: None
         self.on_stack: Callable[[list[Frame]], None] = lambda v: None
         self.on_threads: Callable[[list[ThreadInfo]], None] = lambda v: None
@@ -115,8 +117,7 @@ class GDBController(ParsingMixin, VarobjMixin):
             # Disable echo on MI slave so our written commands don't echo back
             try:
                 attrs = termios.tcgetattr(mi_slave_fd)
-                attrs[3] &= ~(termios.ECHO | termios.ECHOE |
-                              termios.ECHOK | termios.ECHONL)
+                attrs[3] &= ~(termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ECHONL)
                 termios.tcsetattr(mi_slave_fd, termios.TCSANOW, attrs)
             except Exception:
                 pass
@@ -380,15 +381,12 @@ class GDBController(ParsingMixin, VarobjMixin):
     # MI command helpers (sent on MI channel, not primary console)
     # ------------------------------------------------------------------
 
-    def mi_command(self, cmd: str, *, report_error: bool = True,
-                   kind: str | None = None) -> int | None:
+    def mi_command(self, cmd: str, *, report_error: bool = True, kind: str | None = None) -> int | None:
         return self._send_mi_command(cmd, report_error=report_error, kind=kind)
-
 
     # ------------------------------------------------------------------
     # Varobj commands — structured variable inspection
     # ------------------------------------------------------------------
-
 
     def request_source_files(self) -> None:
         self.mi_command("-file-list-exec-source-files")
@@ -458,9 +456,6 @@ class GDBController(ParsingMixin, VarobjMixin):
     def disable_breakpoint(self, number: int) -> None:
         self.mi_command(f"-break-disable {number}")
 
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-

@@ -5,6 +5,7 @@ Colour conversion (pyte → Rich), row-to-Text rendering, and a custom
 pyte.Screen subclass that captures lines scrolling off the top into a
 scrollback buffer.
 """
+
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -45,7 +46,7 @@ def _pyte_color(c: str) -> Optional[str]:
         return _PYTE_NAMED[c]
     if c.isdigit():
         return f"color({c})"
-    if ";" in c:           # truecolor r;g;b
+    if ";" in c:  # truecolor r;g;b
         parts = c.split(";")
         if len(parts) == 3:
             try:
@@ -56,8 +57,7 @@ def _pyte_color(c: str) -> Optional[str]:
     return None
 
 
-def _row_to_text(row, width: int, cursor_col: int = -1,
-                 use_color: bool = True) -> Text:
+def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) -> Text:
     """Convert one pyte screen row to a Rich Text line.
 
     ``row`` may be None (row was never written to in pyte's buffer).
@@ -90,7 +90,8 @@ def _row_to_text(row, width: int, cursor_col: int = -1,
                 if char.reverse:
                     fg, bg = bg, fg
                 st = Style(
-                    color=fg, bgcolor=bg,
+                    color=fg,
+                    bgcolor=bg,
                     bold=char.bold,
                     italic=char.italics,
                     underline=char.underscore,
@@ -114,14 +115,14 @@ def _row_to_text(row, width: int, cursor_col: int = -1,
 # pyte.Screen subclass that captures lines scrolling off the top
 # ---------------------------------------------------------------------------
 
+
 class _GDBScreen(pyte.Screen):
     """Intercept index() to save lines that scroll off into a deque."""
 
-    def __init__(self, columns: int, lines: int,
-                 push_fn: "Callable[[Text, Optional[dict]], None]") -> None:
+    def __init__(self, columns: int, lines: int, push_fn: "Callable[[Text, Optional[dict]], None]") -> None:
         super().__init__(columns, lines)
         self._push_scrollback = push_fn
-        self.use_color: bool = True   # set by GDBWidget to honour debugwincolor
+        self.use_color: bool = True  # set by GDBWidget to honour debugwincolor
 
     def index(self) -> None:
         if self.cursor.y == self.lines - 1:

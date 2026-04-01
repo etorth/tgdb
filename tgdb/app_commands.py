@@ -1,4 +1,5 @@
 """CommandsMixin — :command handlers extracted from TGDBApp."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,26 +24,37 @@ class CommandsMixin:
 
         cmds = {
             "bang": self._cmd_bang,
-            "quit": self._cmd_quit, "q": self._cmd_quit,
+            "quit": self._cmd_quit,
+            "q": self._cmd_quit,
             "help": self._cmd_help,
-            "edit": self._cmd_edit, "e": self._cmd_edit,
+            "edit": self._cmd_edit,
+            "e": self._cmd_edit,
             "focus": self._cmd_focus,
             "insert": lambda a: self._switch_to_gdb() or None,
             "noh": self._cmd_noh,
-            "shell": self._cmd_shell, "sh": self._cmd_shell,
+            "shell": self._cmd_shell,
+            "sh": self._cmd_shell,
             "logo": self._cmd_logo,
             "syntax": self._cmd_syntax,
-            "capturescreen": self._cmd_capturescreen, "cs": self._cmd_capturescreen,
-            "continue": gdb_cmd("continue"), "c": gdb_cmd("continue"),
-            "next": gdb_cmd("next"), "n": gdb_cmd("next"),
+            "capturescreen": self._cmd_capturescreen,
+            "cs": self._cmd_capturescreen,
+            "continue": gdb_cmd("continue"),
+            "c": gdb_cmd("continue"),
+            "next": gdb_cmd("next"),
+            "n": gdb_cmd("next"),
             "nexti": gdb_cmd("nexti"),
-            "step": gdb_cmd("step"), "s": gdb_cmd("step"),
+            "step": gdb_cmd("step"),
+            "s": gdb_cmd("step"),
             "stepi": gdb_cmd("stepi"),
-            "finish": gdb_cmd("finish"), "f": gdb_cmd("finish"),
-            "run": gdb_cmd("run"), "r": gdb_cmd("run"),
+            "finish": gdb_cmd("finish"),
+            "f": gdb_cmd("finish"),
+            "run": gdb_cmd("run"),
+            "r": gdb_cmd("run"),
             "start": gdb_cmd("start"),
-            "kill": gdb_cmd("kill"), "k": gdb_cmd("kill"),
-            "until": gdb_cmd("until"), "u": gdb_cmd("until"),
+            "kill": gdb_cmd("kill"),
+            "k": gdb_cmd("kill"),
+            "until": gdb_cmd("until"),
+            "u": gdb_cmd("until"),
             "up": gdb_cmd("up"),
             "down": gdb_cmd("down"),
             "_goto_line": self._cmd_goto_line,
@@ -152,7 +164,7 @@ class CommandsMixin:
                 ns = time.time_ns()
                 dt = datetime.fromtimestamp(ns // 1_000_000_000)
                 nano = ns % 1_000_000_000
-                ts = dt.strftime('%Y-%m-%d-%H-%M-%S-') + f"{nano:09d}"
+                ts = dt.strftime("%Y-%m-%d-%H-%M-%S-") + f"{nano:09d}"
                 filename = f"tgdb-{ts}.svg"
             path = self.save_screenshot(filename=filename)
             self._show_status(f"Screenshot saved: {path}")

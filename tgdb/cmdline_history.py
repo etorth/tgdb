@@ -1,4 +1,5 @@
 """History management and tab-completion mixin for CommandLineBar."""
+
 from __future__ import annotations
 
 import re
@@ -41,7 +42,7 @@ class HistoryMixin:
             if not stripped:
                 continue
             # Heredoc entry: "python << EOF" … "EOF"
-            m = re.match(r'^(python|py)\s+<<\s+(\S+)\s*$', stripped, re.IGNORECASE)
+            m = re.match(r"^(python|py)\s+<<\s+(\S+)\s*$", stripped, re.IGNORECASE)
             if m:
                 marker = m.group(2)
                 # Collect verbatim: header + body lines + closing marker
@@ -243,7 +244,7 @@ class HistoryMixin:
                 arg_lead = buf
                 arg_lead_start = 0
             else:
-                arg_lead = buf[last_space + 1:]
+                arg_lead = buf[last_space + 1 :]
                 arg_lead_start = last_space + 1
         try:
             candidates = self._completion_provider(arg_lead, buf, len(buf))
@@ -260,6 +261,6 @@ class HistoryMixin:
         if not self._completions:
             return
         cand = self._completions[self._completion_idx]
-        self._input_buf = self._input_buf[:self._completion_arg_start] + cand
+        self._input_buf = self._input_buf[: self._completion_arg_start] + cand
         self._cursor_pos = len(self._input_buf)
         self.refresh()

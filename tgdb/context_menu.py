@@ -6,6 +6,7 @@ match that panel's rectangle.  This means there are no "empty" cells
 between panels, so underlying content (e.g. the status bar) is visible
 through the gaps — no transparency hacks needed.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from .highlight_groups import HighlightGroups
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ContextMenuItem:
@@ -93,6 +95,7 @@ def _item_row_text(panel: _PanelLayout, item: ContextMenuItem) -> str:
 # _PanelWidget — one widget per panel, sized to exactly cover the panel box
 # ---------------------------------------------------------------------------
 
+
 class _PanelWidget(Widget):
     """
     Renders a single panel box of the cascade menu.
@@ -124,8 +127,7 @@ class _PanelWidget(Widget):
         self._depth = depth
         self.can_focus = False
 
-    def update(self, panel: _PanelLayout, depth: int,
-               abs_x: int, abs_y: int) -> None:
+    def update(self, panel: _PanelLayout, depth: int, abs_x: int, abs_y: int) -> None:
         """Update in-place (no remount → no flicker)."""
         self._panel = panel
         self._depth = depth
@@ -162,11 +164,7 @@ class _PanelWidget(Widget):
         item = panel.items[row.item_index]
         row_rich = sel_rich if row.item_index == panel.selected_index else border_rich
         inner = _item_row_text(panel, item)
-        segs = (
-            [Segment("│", border_rich)]
-            + [Segment(ch, row_rich) for ch in inner]
-            + [Segment("│", border_rich)]
-        )
+        segs = [Segment("│", border_rich)] + [Segment(ch, row_rich) for ch in inner] + [Segment("│", border_rich)]
         return Strip(segs, width)
 
     def _item_at(self, lx: int, ly: int) -> Optional[tuple[int, int]]:
@@ -201,6 +199,7 @@ class _PanelWidget(Widget):
 # ---------------------------------------------------------------------------
 # ContextMenu — state manager, keyboard handler, public API
 # ---------------------------------------------------------------------------
+
 
 class ContextMenu(Widget):
     """
@@ -294,9 +293,7 @@ class ContextMenu(Widget):
     # ------------------------------------------------------------------
 
     def _handle_panel_hover(self, depth: int, item_index: int) -> None:
-        if (depth < len(self._selection_path)
-                and self._selection_path[depth] == item_index
-                and depth == len(self._selection_path) - 1):
+        if depth < len(self._selection_path) and self._selection_path[depth] == item_index and depth == len(self._selection_path) - 1:
             return  # selection unchanged
         self._set_selection(depth, item_index, open_child=True)
 
@@ -349,10 +346,7 @@ class ContextMenu(Widget):
         base_padding = _PADDING_LEFT + _PADDING_RIGHT
         submenu_tail = 3
         return max(
-            (
-                cell_len(item.label) + base_padding + (submenu_tail if item.has_children else 0)
-                for item in items
-            ),
+            (cell_len(item.label) + base_padding + (submenu_tail if item.has_children else 0) for item in items),
             default=1,
         )
 
@@ -438,7 +432,8 @@ class ContextMenu(Widget):
             panel = _PanelLayout(
                 items=items,
                 selected_index=selected_index,
-                x=x, y=y,
+                x=x,
+                y=y,
                 inner_width=self._inner_width(items),
                 rows=self._row_layout(items),
             )
@@ -536,6 +531,7 @@ class ContextMenu(Widget):
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
+
 
 class ContextMenuSelected(Message):
     def __init__(self, action: str) -> None:
