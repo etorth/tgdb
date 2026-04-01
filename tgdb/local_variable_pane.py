@@ -122,12 +122,12 @@ class LocalVariablePane(Widget):
                 self._varobj_names.append(varobj_name)
 
             numchild = self._safe_int(info.get("numchild", "0"))
+            has_children = numchild > 0 or info.get("dynamic", "0") == "1"
             value = info.get("value", "")
             var_type = info.get("type", var.type)
-            prefix = "[arg] " if var.is_arg else ""
 
-            if numchild > 0:
-                label = f"{prefix}{var.name}: {var_type}"
+            if has_children:
+                label = f"{var.name}: {var_type}"
                 if value:
                     label += f" = {self._truncate(value)}"
                 node = tree.root.add(label, expand=False)
@@ -136,7 +136,7 @@ class LocalVariablePane(Widget):
                 # Add a placeholder so the node is expandable
                 node.add_leaf("⏳ loading...")
             else:
-                label = f"{prefix}{var.name}: {var_type} = {value}"
+                label = f"{var.name}: {var_type} = {value}"
                 tree.root.add_leaf(label)
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
@@ -179,11 +179,13 @@ class LocalVariablePane(Widget):
             child_name = child.get("name", "")
             exp = child.get("exp", "")
             numchild = self._safe_int(child.get("numchild", "0"))
+            dynamic = child.get("dynamic", "0") == "1"
+            has_children = numchild > 0 or dynamic
             value = child.get("value", "")
             child_type = child.get("type", "")
 
             # Access specifier pseudo-nodes — expand inline
-            if exp in _ACCESS and numchild > 0:
+            if exp in _ACCESS and has_children:
                 try:
                     grandchildren = await self._var_list_children(child_name)
                     await self._add_children(node, grandchildren)
@@ -191,7 +193,7 @@ class LocalVariablePane(Widget):
                     pass
                 continue
 
-            if numchild > 0:
+            if has_children:
                 label = f"{exp}: {child_type}" if child_type else exp
                 if value:
                     label += f" = {self._truncate(value)}"
