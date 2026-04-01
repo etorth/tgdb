@@ -247,6 +247,10 @@ class GDBController:
         loop.add_reader(self._proc.fd, self._on_console_readable, loop)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
 
+        # Enable pretty-printing so varobj operations return logical children
+        # (e.g. vector elements, map key-value pairs) instead of raw internals.
+        self.mi_command("-enable-pretty-printing", report_error=False)
+
         # Wait for GDB's console PTY to close (GDB exited)
         try:
             await self._console_done

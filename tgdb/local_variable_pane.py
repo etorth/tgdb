@@ -168,6 +168,13 @@ class LocalVariablePane(Widget):
             node.add_leaf("(empty)")
             return
 
+        # Skip access specifier nodes (public/private/protected) — flatten
+        # their children directly into the parent node.
+        await self._add_children(node, children)
+
+    async def _add_children(self, node: TreeNode, children: list[dict]) -> None:
+        """Add child nodes, transparently flattening access specifier groups."""
+        _ACCESS = {"public", "private", "protected"}
         for child in children:
             child_name = child.get("name", "")
             exp = child.get("exp", "")
@@ -175,15 +182,27 @@ class LocalVariablePane(Widget):
             value = child.get("value", "")
             child_type = child.get("type", "")
 
+            # Access specifier pseudo-nodes — expand inline
+            if exp in _ACCESS and numchild > 0:
+                try:
+                    grandchildren = await self._var_list_children(child_name)
+                    await self._add_children(node, grandchildren)
+                except Exception:
+                    pass
+                continue
+
             if numchild > 0:
-                label = f"{exp}: {child_type}"
+                label = f"{exp}: {child_type}" if child_type else exp
                 if value:
                     label += f" = {self._truncate(value)}"
                 child_node = node.add(label, expand=False)
                 child_node.data = {"varobj": child_name, "loaded": False}
                 child_node.add_leaf("⏳ loading...")
             else:
-                label = f"{exp}: {child_type} = {value}" if child_type else f"{exp} = {value}"
+                if child_type:
+                    label = f"{exp}: {child_type} = {value}"
+                else:
+                    label = f"{exp} = {value}" if value else exp
                 node.add_leaf(label)
 
     @staticmethod
