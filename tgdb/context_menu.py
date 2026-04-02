@@ -276,6 +276,7 @@ class ContextMenu(Widget):
     def close(self) -> None:
         self.remove_class("visible")
         for pw in self._panel_widgets:
+            pw.styles.display = "none"
             pw.remove()
         self._panel_widgets = []
 

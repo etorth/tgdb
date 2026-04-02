@@ -8,7 +8,6 @@ their own module.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -313,20 +312,6 @@ class PaneContainer(Widget):
             await self.remove_children()
             self.styles.layout = self.orientation
             if children:
-                # Textual's _mounted_event is a cached_property asyncio.Event
-                # that is never reset after a widget is pruned.  When a widget
-                # that was previously mounted (and pruned) is remounted, the
-                # event is already set, so AwaitMount resolves immediately
-                # without waiting for the widget's new _pre_process (compose +
-                # mount) to run.  The widget ends up with no children for
-                # several event-loop cycles, causing a blank/"stuck" pane.
-                #
-                # Reset the event for any child that has been mounted before
-                # (detected by presence of '_mounted_event' in __dict__) so
-                # AwaitMount correctly waits for each widget's compose cycle.
-                for child in children:
-                    if not isinstance(child, Splitter) and "_mounted_event" in child.__dict__:
-                        child.__dict__["_mounted_event"] = asyncio.Event()
                 await self.mount_all(children)
         await self._restore_nested_containers()
         self.refresh(layout=True)
