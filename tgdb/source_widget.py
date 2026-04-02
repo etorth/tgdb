@@ -77,6 +77,13 @@ class _SourceContent(SourceViewRendering, Widget):
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
+        # Set by SourceView after construction so that post_message bubbles
+        # from SourceView rather than _SourceContent.  When SourceView.on_key
+        # dispatches keys directly, the active_message_pump context var is
+        # SourceView; messages created here would therefore have _sender ==
+        # SourceView == _SourceContent._parent, which causes Textual to stop
+        # propagation at SourceView and never reach TGDBApp handlers.
+        self._pane: Optional["SourceView"] = None
         self.source_file: Optional[SourceFile] = None
         self.exe_line: int = 0  # 1-based; 0 = none
         self.sel_line: int = 1  # 1-based cursor
@@ -102,6 +109,25 @@ class _SourceContent(SourceViewRendering, Widget):
         self._file_positions: dict[str, int] = {}
         self._pending_search: Optional[tuple[str, bool]] = None
         self.can_focus = False
+
+    def post_message(self, message) -> bool:
+        """Forward through the SourceView wrapper so messages bubble correctly.
+
+        SourceView.on_key calls _content.on_key() directly, which means the
+        active_message_pump context var is set to SourceView.  Any Message()
+        created inside that call therefore has _sender == SourceView, which
+        equals _SourceContent._parent.  Textual's _on_message logic then calls
+        message.stop() before bubbling, killing propagation at SourceView and
+        preventing TGDBApp handlers from ever seeing the message.
+
+        Posting via _pane (SourceView) avoids the parent-is-sender trap: the
+        message starts its journey at SourceView, whose parent is PaneContainer,
+        and _sender != PaneContainer, so bubbling proceeds normally.
+        """
+        pane = self.__dict__.get("_pane")
+        if pane is not None and pane.is_attached:
+            return pane.post_message(message)
+        return super().post_message(message)
 
     # ------------------------------------------------------------------
     # File management
@@ -555,6 +581,7 @@ class SourceView(PaneBase):
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(hl, **kwargs)
         self._content = _SourceContent(hl)
+        self._content._pane = self  # so _content.post_message bubbles through us
 
     def title(self) -> Optional[str]:
         content = self.__dict__.get("_content")
