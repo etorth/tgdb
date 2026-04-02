@@ -123,7 +123,16 @@ class _SourceContent(SourceViewRendering, Widget):
         Posting via _pane (SourceView) avoids the parent-is-sender trap: the
         message starts its journey at SourceView, whose parent is PaneContainer,
         and _sender != PaneContainer, so bubbling proceeds normally.
+
+        Internal Textual messages (Prune, CloseMessages, etc.) must NOT be
+        redirected — they must reach _SourceContent directly so Textual's
+        widget lifecycle (remove_children, _message_loop_exit) works correctly.
         """
+        # Only redirect application-level messages (those defined outside textual).
+        # Textual-internal messages (Prune, CloseMessages, etc.) go directly to
+        # this widget so that _message_loop_exit can properly shut down this task.
+        if type(message).__module__.startswith("textual."):
+            return super().post_message(message)
         pane = self.__dict__.get("_pane")
         if pane is not None and pane.is_attached:
             return pane.post_message(message)
