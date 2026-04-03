@@ -59,9 +59,6 @@ _ALIASES: dict[str, str] = {
 }
 
 
-# Valid -nargs values for :command
-
-
 class ConfigParser(UserCommandMixin, PythonExecMixin):
     """
     Parses cgdbrc-style config commands and updates a Config object.

@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 from textual.css.query import NoMatches
-
-if TYPE_CHECKING:
-    pass
 
 from .source_widget import (
     ToggleBreakpoint,
@@ -76,7 +73,7 @@ class CallbacksMixin:
             slave_path = os.ttyname(slave_fd)
             os.close(slave_fd)
             # Store master_fd so it stays open (inferior can write to slave)
-            if hasattr(self, "_inf_tty_fd") and self._inf_tty_fd is not None:
+            if self._inf_tty_fd is not None:
                 try:
                     os.close(self._inf_tty_fd)
                 except OSError:

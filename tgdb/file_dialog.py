@@ -268,7 +268,8 @@ class FileDialog(Widget):
 
         for i in range(1, lh + 1):
             file_idx = start + (i - 1)
-            result.append("\n") if i > 1 else None
+            if i > 1:
+                result.append("\n")
 
             if file_idx < 0 or file_idx >= count:
                 # Filler: "   ~│" (cgdb draws spaces then '~' then VLINE)

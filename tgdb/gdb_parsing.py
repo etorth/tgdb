@@ -65,7 +65,7 @@ class ParsingMixin:
                             thread.state = "running"
                 self._emit_threads()
             self.on_running()
-        elif cls == "thread-created" or cls == "thread-exited":
+        elif cls in ("thread-created", "thread-exited"):
             if not self._inferior_running:
                 self.request_current_threads(report_error=False)
         elif cls == "thread-selected":

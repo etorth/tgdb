@@ -57,30 +57,6 @@ class Config:
     syntax: str = "on"  # on|off|c|asm|…
 
 
-# Abbreviation → canonical name
-_ALIASES: dict[str, str] = {
-    "asr": "autosourcereload",
-    "arrowstyle": "executinglinedisplay",  # deprecated alias (cgdb cgdbrc.cpp)
-    "as": "executinglinedisplay",  # short form of arrowstyle
-    "dwc": "debugwincolor",
-    "dis": "disasm",
-    "eld": "executinglinedisplay",
-    "hls": "hlsearch",
-    "ic": "ignorecase",
-    "sbbs": "scrollbackbuffersize",
-    "sld": "selectedlinedisplay",
-    "sdc": "showdebugcommands",
-    "syn": "syntax",
-    "to": "timeout",
-    "tm": "timeoutlen",
-    "ttm": "ttimeoutlen",
-    "ts": "tabstop",
-    "wmh": "winminheight",
-    "wmw": "winminwidth",
-    "wso": "winsplitorientation",
-    "ws": "wrapscan",
-}
-
 _BOOL_OPTIONS = {
     "autosourcereload",
     "color",

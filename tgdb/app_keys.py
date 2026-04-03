@@ -160,7 +160,6 @@ class KeyRoutingMixin:
             char = key
         elif key == "space":
             char = " "
-            key = "space"
         else:
             char = ""
 

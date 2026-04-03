@@ -228,8 +228,5 @@ def simplify_type(type_str: str) -> str:
             break
         prev = type_str
         for pattern, repl in _RULES:
-            if callable(repl) and not isinstance(repl, str):
-                type_str = pattern.sub(repl, type_str)
-            else:
-                type_str = pattern.sub(repl, type_str)
+            type_str = pattern.sub(repl, type_str)
     return type_str.strip()

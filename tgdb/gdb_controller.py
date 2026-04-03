@@ -177,16 +177,11 @@ class GDBController(ParsingMixin, VarobjMixin):
                 setattr(self, attr, -1)
 
     # ------------------------------------------------------------------
-    # Async read loops (two concurrent tasks, mirrors cgdb's select loop)
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
     # Async read loops — event-driven via loop.add_reader(), no polling
     # ------------------------------------------------------------------
 
     async def run_async(self) -> None:
-        loop = asyncio.get_event_loop()
-        self._loop = loop
+        loop = asyncio.get_running_loop()
 
         # Use a Future to signal when GDB's primary PTY closes (EOF/error).
         # add_reader on the console fd wakes instantly when data is available,
