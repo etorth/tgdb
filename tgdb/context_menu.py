@@ -537,7 +537,6 @@ class ContextMenuSelected(Message):
     def __init__(self, action: str) -> None:
         super().__init__()
         self.action = action
-        self.item = action
 
 
 class ContextMenuClosed(Message):

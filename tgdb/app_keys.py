@@ -48,7 +48,7 @@ class KeyRoutingMixin:
         # Consult the TGDB-mode key mapper (unless we're already replaying a map)
         if not self._in_map_replay:
             result = self.km.feed("tgdb", key)
-            if result is None or result == []:
+            if result == []:
                 # Buffering — key consumed but no action yet
                 return True
             if result != [key]:

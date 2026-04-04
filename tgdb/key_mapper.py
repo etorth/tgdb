@@ -30,8 +30,8 @@ class KeyMapper:
     """
 
     def __init__(self, timeout_ms: int = 1000, ttimeout_ms: int = 100) -> None:
-        self._roots: dict[str, TrieNode] = {"cgdb": TrieNode(), "gdb": TrieNode()}
-        self._buf: dict[str, list[str]] = {"cgdb": [], "gdb": []}
+        self._roots: dict[str, TrieNode] = {"tgdb": TrieNode(), "gdb": TrieNode()}
+        self._buf: dict[str, list[str]] = {"tgdb": [], "gdb": []}
         self._last_key_time: float = 0.0
         self.timeout_ms = timeout_ms
         self.ttimeout_ms = ttimeout_ms

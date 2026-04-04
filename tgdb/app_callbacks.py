@@ -201,7 +201,7 @@ class CallbacksMixin:
         self._cmd_task = None
 
         if cancelled:
-            text = "\n".join(collected) + "\n[Interrupted]" if collected else "[Interrupted]"
+            text = ("\n".join(collected) + "\n[Interrupted]") if collected else "[Interrupted]"
             error_output = text.strip()
             collected = []  # already merged into error_output
 

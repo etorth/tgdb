@@ -154,7 +154,7 @@ class GDBController(ParsingMixin, VarobjMixin):
         if self._proc and self._proc.isalive():
             self._proc.kill(signal.SIGINT)
 
-    def send_input(self, data) -> None:
+    def send_input(self, data: str | bytes) -> None:
         """Write to GDB's primary PTY (user input / CLI commands)."""
         if self._proc and self._proc.isalive():
             if isinstance(data, str):

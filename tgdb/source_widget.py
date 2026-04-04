@@ -430,9 +430,11 @@ class _SourceContent(SourceViewRendering, Widget):
         elif key in ("l", "right"):
             self.scroll_col(count)
         elif key in ("ctrl+f", "pagedown"):
-            [self.page_down() for _ in range(count)]
+            for _ in range(count):
+                self.page_down()
         elif key in ("ctrl+b", "pageup"):
-            [self.page_up() for _ in range(count)]
+            for _ in range(count):
+                self.page_up()
         elif key == "ctrl+d":
             self.half_page_down()
         elif key == "ctrl+u":
