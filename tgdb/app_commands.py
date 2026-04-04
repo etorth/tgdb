@@ -246,6 +246,7 @@ class CommandsMixin:
             "  :map <F8> :next<Enter>  :imap <F8> :next<Enter>",
             "  :break :continue :next :step :finish :run :quit",
             "  :shell [cmd]  run shell command    :capturescreen [file.svg]",
+            "  :set clipboardpath=/path/to/xclip  (sets pyperclip backend + PATH)",
         ]
         sf = SourceFile("<help>", lines)
         src.source_file = sf

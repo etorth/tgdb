@@ -1102,6 +1102,25 @@ See <a href="#Configuring-TGDB">Configuring TGDB</a>.
 <dd><p>Searches wrap around the end of file.  The default is on.
 </p>
 </dd>
+<dt><kbd>:set clipboardpath=<var>/path/to/tool</var></kbd></dt>
+<dd><p>Configures the clipboard tool used for right-click copy/paste in the GDB
+window.  Setting this option does two things immediately:
+</p>
+<ol>
+<li>The directory part of the path is prepended to <code>$PATH</code> (if not
+already present), so the tool can be found by the clipboard library.</li>
+<li><code>pyperclip.set_clipboard(<var>toolname</var>)</code> is called to
+select the backend explicitly, bypassing auto-detection.</li>
+</ol>
+<p>This is useful when <code>xclip</code> is installed in a non-standard location
+or when pyperclip&rsquo;s auto-detection picks the wrong tool.  Example:
+</p>
+<pre class="example">:set clipboardpath=/usr/local/bin/xclip
+</pre>
+<p>Setting an empty value is a no-op.  <code>xsel</code> typically works without
+this option; <code>xclip</code> often requires it.
+</p>
+</dd>
 <dt><kbd>:c</kbd></dt>
 <dt><kbd>:continue</kbd></dt>
 <dd><p>Send a continue command to GDB.

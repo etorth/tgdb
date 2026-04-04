@@ -56,6 +56,9 @@ class Config:
     winsplitorientation: str = "vertical"  # horizontal|vertical
     syntax: str = "on"  # on|off|c|asm|…
 
+    # Path options (stored verbatim — no lowercasing)
+    clipboardpath: str = ""  # e.g. /usr/local/bin/xclip
+
 
 _BOOL_OPTIONS = {
     "autosourcereload",
@@ -87,6 +90,8 @@ _STR_OPTIONS = {
     "winsplitorientation",
     "syntax",
 }
+# Path options: stored verbatim (no lowercasing); setting one may have side-effects.
+_PATH_OPTIONS = {"clipboardpath"}
 
 # Valid -nargs values for :command
 _VALID_NARGS = {"0", "1", "*", "?", "+"}

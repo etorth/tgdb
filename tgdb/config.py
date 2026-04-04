@@ -26,6 +26,7 @@ from .config_types import (  # noqa: F401 — re-exported
     _BOOL_OPTIONS,
     _INT_OPTIONS,
     _STR_OPTIONS,
+    _PATH_OPTIONS,
     _VALID_NARGS,
     _TGDB_RESERVED_PREFIX,
     _CMD_NAME_RE,
@@ -57,6 +58,30 @@ _ALIASES: dict[str, str] = {
     "wso": "winsplitorientation",
     "ws": "wrapscan",
 }
+
+
+def _apply_clipboard_path(path: str) -> None:
+    """Apply a clipboardpath setting immediately.
+
+    1. Prepends dirname(path) to $PATH so the tool is findable.
+    2. Calls pyperclip.set_clipboard(basename(path)) to select the backend.
+
+    Both steps are idempotent: the directory is only prepended once, and
+    set_clipboard replaces the previous selection each time.
+    """
+    dirname = os.path.dirname(path)
+    basename = os.path.basename(path)
+    if dirname:
+        current = os.environ.get("PATH", "")
+        parts = current.split(os.pathsep)
+        if dirname not in parts:
+            os.environ["PATH"] = dirname + os.pathsep + current
+    if basename:
+        try:
+            import pyperclip
+            pyperclip.set_clipboard(basename)
+        except Exception:
+            pass
 
 
 class ConfigParser(UserCommandMixin, PythonExecMixin):
@@ -359,6 +384,11 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             return None
         elif name in _STR_OPTIONS:
             setattr(self.config, name, value.lower())
+            return None
+        elif name in _PATH_OPTIONS:
+            setattr(self.config, name, value)  # preserve case
+            if value:
+                _apply_clipboard_path(value)
             return None
         return f"set: unknown option '{name}'"
 
