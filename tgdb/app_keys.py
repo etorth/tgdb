@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 from textual import events
@@ -11,6 +12,30 @@ from .command_line_bar import CommandLineBar, CommandSubmit
 
 if TYPE_CHECKING:
     from .app import TGDBApp
+
+
+def _read_clipboard(app: "TGDBApp") -> str:
+    """Read text from the OS clipboard.
+
+    Tries common system clipboard tools in order and falls back to
+    Textual's local clipboard (which holds whatever was last copied
+    within the app via copy_to_clipboard / OSC 52).
+    """
+    for cmd in (
+        ["xclip", "-selection", "clipboard", "-o"],
+        ["xsel", "--clipboard", "--output"],
+        ["wl-paste", "--no-newline"],
+        ["pbpaste"],
+        # WSL2: read via Windows PowerShell
+        ["powershell.exe", "-Command", "Get-Clipboard"],
+    ):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                return result.stdout
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    return app.clipboard
 
 
 class KeyRoutingMixin:
@@ -331,6 +356,23 @@ class KeyRoutingMixin:
             except Exception:
                 clicked_widget = event.widget
             target = self._find_workspace_item(clicked_widget)
+
+            selected = self.screen.get_selected_text()
+            if selected:
+                # Selected text anywhere → copy to system clipboard.
+                self.copy_to_clipboard(selected)
+                self.screen.clear_selection()
+                event.stop()
+                return
+
+            if target is self._gdb_widget and self._mode == "GDB_PROMPT":
+                # No selection + GDB prompt → paste from system clipboard.
+                text = _read_clipboard(self)
+                if text:
+                    self.gdb.send_input(text)
+                event.stop()
+                return
+
             if target is not None:
                 self._context_menu_target = target
                 self._open_context_menu(screen_x, screen_y)
