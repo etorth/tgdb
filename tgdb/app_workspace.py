@@ -304,7 +304,6 @@ class WorkspaceMixin:
             return
 
         action = msg.action
-        focus_target: Optional[Widget] = None
 
         if action.startswith("add:"):
             pane_kind = action.split(":", 1)[1]
@@ -312,39 +311,36 @@ class WorkspaceMixin:
                 self._show_status(f"{self._pane_label(pane_kind)} is already shown")
                 self._restore_focus_after_context_menu()
                 return
-            focus_target = await self._add_pane_to_workspace(target, pane_kind)
-            if focus_target is None:
+            if await self._add_pane_to_workspace(target, pane_kind) is None:
                 self._show_status(f"Unable to add {self._pane_label(pane_kind)}")
                 self._restore_focus_after_context_menu()
                 return
             self._show_status(f"Added {self._pane_label(pane_kind)}")
-            self._focus_widget(focus_target)
+            self._restore_focus_after_context_menu()
             return
 
         if action == "hide":
             pane_kind = self._pane_kind_for_widget(target)
             if isinstance(target, EmptyPane):
                 self._show_status("Cell is already empty")
-                self._focus_widget(target)
+                self._restore_focus_after_context_menu()
                 return
-            focus_target = await self._hide_workspace_item(target)
-            if focus_target is None:
+            if await self._hide_workspace_item(target) is None:
                 self._show_status("Unable to hide cell")
                 self._restore_focus_after_context_menu()
                 return
             label = self._pane_label(pane_kind) if pane_kind is not None else "pane"
             self._show_status(f"Hid {label}")
-            self._focus_widget(focus_target)
+            self._restore_focus_after_context_menu()
             return
 
         if action == "delete":
-            focus_target = await self._delete_workspace_item(target)
-            if focus_target is None:
+            if await self._delete_workspace_item(target) is None:
                 self._show_status("Unable to delete cell")
                 self._restore_focus_after_context_menu()
                 return
             self._show_status("Deleted cell")
-            self._focus_widget(focus_target)
+            self._restore_focus_after_context_menu()
             return
 
         direction = action.split(":", 1)[1] if action.startswith("split:") else None
@@ -355,10 +351,9 @@ class WorkspaceMixin:
 
         if await self._apply_context_menu_action(target, direction):
             self._show_status(f"Added window {direction}")
-            self._focus_widget(target)
         else:
             self._show_status(f"Unable to add window {direction}")
-            self._restore_focus_after_context_menu()
+        self._restore_focus_after_context_menu()
 
     def on_context_menu_closed(self: TGDBApp, _: ContextMenuClosed) -> None:
         self._close_context_menu()
