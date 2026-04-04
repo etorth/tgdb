@@ -109,12 +109,11 @@ DEFAULT_GROUPS: dict[str, HighlightStyle] = {
     "CommandLine": HighlightStyle(reverse=True),
     "Search": HighlightStyle(fg="black", bg="yellow"),
     "IncSearch": HighlightStyle(reverse=True),
-    # Selected line — cgdb: HLG_SELECTED_LINE_ARROW=bold white,
-    #   HLG_SELECTED_LINE_HIGHLIGHT=bold black on white,
-    #   HLG_SELECTED_LINE_BLOCK=reverse+white fg (bg becomes white when reversed)
+    # Selected line — explicit gray (color 240) so it is visually distinct
+    # from the title bar's reverse-video white.
     "SelectedLineArrow": HighlightStyle(fg="bright_white", bold=True),
-    "SelectedLineHighlight": HighlightStyle(fg="black", bg="white", bold=True),
-    "SelectedLineBlock": HighlightStyle(fg="white", reverse=True),
+    "SelectedLineHighlight": HighlightStyle(fg="bright_white", bg="color(240)", bold=True),
+    "SelectedLineBlock": HighlightStyle(fg="bright_white", bg="color(240)"),
     "SelectedLineNr": HighlightStyle(fg="bright_white", bold=True),
     # Executing line — cgdb: HLG_EXECUTING_LINE_ARROW=bold green,
     #   HLG_EXECUTING_LINE_HIGHLIGHT=bold black on green,

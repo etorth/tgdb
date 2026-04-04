@@ -217,6 +217,13 @@ class SourceViewRendering:
                 pass
 
         out.append_text(src_t)
+        # Pad the remainder of the row with the background style so the
+        # selection/execution highlight extends to the full pane width.
+        if line_bg:
+            full_w = max(1, self.size.width or 80)
+            used = cell_len(out.plain)
+            if used < full_w:
+                out.append(" " * (full_w - used), style=line_bg)
         # Match cgdb: source rows are clipped to the pane width instead of
         # soft-wrapping onto following rows.
         out.truncate(max(1, self.size.width or 80), overflow="crop")
