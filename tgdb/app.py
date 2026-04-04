@@ -366,6 +366,15 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
             gdb_w.gdb_focused = mode in ("GDB", "SCROLL")
             gdb_w.refresh()
 
+    def action_help_quit(self) -> None:
+        """Suppress Textual's default Ctrl+C 'press Ctrl+Q to quit' notification.
+
+        Textual 8.x binds Ctrl+C to this action (priority=False) and calls it
+        via App._on_key after forwarding the key to the focused widget.
+        In tgdb Ctrl+C is always an interrupt signal for GDB — never a quit
+        prompt — so we override this to a no-op.
+        """
+
     def _switch_to_tgdb(self) -> None:
         self._set_mode("TGDB")
         if self._focus_widget(self._get_source_view(mounted_only=True)):
