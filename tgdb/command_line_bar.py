@@ -50,7 +50,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
     ) -> None:
         super().__init__(**kwargs)
         self.hl = hl
-        self._mode: str = "GDB"
+        self._mode: str = "GDB_PROMPT"
         self._message: str = ""
         self._input_active: bool = False
         self._input_buf: str = ""

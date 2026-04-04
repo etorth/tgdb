@@ -168,7 +168,7 @@ class WorkspaceMixin:
                 return
             except NoMatches:
                 return
-        if self._mode in ("GDB", "SCROLL"):
+        if self._mode in ("GDB_PROMPT", "GDB_SCROLL"):
             if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
                 return
         if self._focus_widget(self._get_source_view(mounted_only=True)):

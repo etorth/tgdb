@@ -131,7 +131,7 @@ class CallbacksMixin:
         self._show_help_in_source()
 
     def on_scroll_mode_change(self, msg: ScrollModeChange) -> None:
-        self._set_mode("SCROLL" if msg.active else "GDB")
+        self._set_mode("GDB_SCROLL" if msg.active else "GDB_PROMPT")
 
     def on_scroll_search_start(self, msg: ScrollSearchStart) -> None:
         try:
@@ -150,14 +150,14 @@ class CallbacksMixin:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
-        self._set_mode("SCROLL")
+        self._set_mode("GDB_SCROLL")
 
     def on_scroll_search_cancel(self, msg: ScrollSearchCancel) -> None:
         try:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
-        self._set_mode("SCROLL")
+        self._set_mode("GDB_SCROLL")
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
         # If a command task is already running, reject new submissions.
@@ -214,7 +214,7 @@ class CallbacksMixin:
                 captured = error_output
             if self._show_status(captured):
                 self._resume_pending_replay()
-                return  # MESSAGE mode — stay until user dismisses
+                return  # ML_MESSAGE mode — stay until user dismisses
         elif collected:
             if len(collected) == 1:
                 # Single line: show briefly, no "Press ENTER" prompt
@@ -224,7 +224,7 @@ class CallbacksMixin:
                 captured = "\n".join(collected)
                 if self._show_status(captured):
                     self._resume_pending_replay()
-                    return  # MESSAGE mode
+                    return  # ML_MESSAGE mode
         else:
             self._sync_config()
 
@@ -236,10 +236,10 @@ class CallbacksMixin:
         self._switch_to_tgdb()
 
     def on_message_dismissed(self, msg: MessageDismissed) -> None:
-        # Only act if still in MESSAGE mode.  During map replay the synchronous
-        # mode switch in _dispatch_key_internal already moved us out of MESSAGE;
+        # Only act if still in ML_MESSAGE mode.  During map replay the synchronous
+        # mode switch in _dispatch_key_internal already moved us out of ML_MESSAGE;
         # this handler becomes a no-op so it can't kill a subsequent CMD entry.
-        if self._mode == "MESSAGE":
+        if self._mode == "ML_MESSAGE":
             self._switch_to_tgdb()
 
     def on_file_selected(self, msg: FileSelected) -> None:
@@ -281,7 +281,7 @@ class CallbacksMixin:
         self.gdb.mi_command("-break-list")
 
     def _ui_on_running(self) -> None:
-        self._set_mode("GDB")
+        self._set_mode("GDB_PROMPT")
         if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
             return
         self._focus_widget(self._first_workspace_leaf())

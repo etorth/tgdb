@@ -10,7 +10,7 @@ Global layout:
 
 The source pane itself reserves its bottom row for the current file path.
 
-Modes: TGDB | GDB | SCROLL | CMD | MESSAGE | FILEDLG
+Modes: TGDB | GDB_PROMPT | GDB_SCROLL | CMD | ML_MESSAGE | FILEDLG
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self._cmd_task: Optional[asyncio.Task] = None  # running CommandLineBar command
         self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
 
-        self._mode: str = "GDB"
+        self._mode: str = "GDB_PROMPT"
         self._await_mark_jump: bool = False
         self._await_mark_set: bool = False
         self._split_ratio: float = 0.5
@@ -301,7 +301,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         asyncio.create_task(self._request_initial_location())
 
         # Initial mode: GDB focused.
-        self._set_mode("GDB")
+        self._set_mode("GDB_PROMPT")
         gdb_w.focus()
 
         # Source the rc file before handing control to the user.
@@ -363,7 +363,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — hide GDB cursor when not focused
         gdb_w = self._get_gdb_widget()
         if gdb_w is not None:
-            gdb_w.gdb_focused = mode in ("GDB", "SCROLL")
+            gdb_w.gdb_focused = mode in ("GDB_PROMPT", "GDB_SCROLL")
             gdb_w.refresh()
 
     def action_help_quit(self) -> None:
@@ -382,7 +382,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self._focus_widget(self._first_workspace_leaf())
 
     def _switch_to_gdb(self) -> None:
-        self._set_mode("GDB")
+        self._set_mode("GDB_PROMPT")
         if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
             return
         self._focus_widget(self._first_workspace_leaf())
@@ -402,14 +402,14 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         """Show *msg* in the status bar.
 
         If the message spans multiple lines the bar expands and the app enters
-        MESSAGE mode (waiting for user to dismiss).  Returns True in that case
+        ML_MESSAGE mode (waiting for user to dismiss).  Returns True in that case
         so the caller knows not to switch focus away.
         """
         try:
             status = self.query_one("#cmdline", CommandLineBar)
             if "\n" in msg:
                 status.show_multiline_message(msg)
-                self._set_mode("MESSAGE")
+                self._set_mode("ML_MESSAGE")
                 status.focus()
                 return True
             else:

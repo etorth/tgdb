@@ -166,11 +166,11 @@ class KeyRoutingMixin:
         # ESC / tgdb-mode key → switch to TGDB (already in TGDB = no-op)
         tgdb_key = self.cfg.cgdbmodekey.lower()
         if key == "escape" or key.lower() == tgdb_key:
-            if self._mode in ("GDB", "CMD", "SCROLL", "MESSAGE"):
+            if self._mode in ("GDB_PROMPT", "CMD", "GDB_SCROLL", "ML_MESSAGE"):
                 self._switch_to_tgdb()
             return False  # no-op when already in TGDB
 
-        if self._mode == "MESSAGE":
+        if self._mode == "ML_MESSAGE":
             try:
                 bar = self.query_one("#cmdline", CommandLineBar)
                 bar.feed_key(key, char)
@@ -225,7 +225,7 @@ class KeyRoutingMixin:
                 return False
 
         # GDB mode — send char or Enter to the terminal
-        if self._mode == "GDB":
+        if self._mode == "GDB_PROMPT":
             if char:
                 self.gdb.send_input(char.encode())
             elif key == "enter":
@@ -244,7 +244,7 @@ class KeyRoutingMixin:
                 pass
             return True
 
-        if self._mode == "MESSAGE":
+        if self._mode == "ML_MESSAGE":
             try:
                 status = self.query_one("#cmdline", CommandLineBar)
                 if not status.feed_key(key, char):
@@ -291,15 +291,15 @@ class KeyRoutingMixin:
             event.stop()
             return
 
-        # ESC / cgdb mode key → switch to CGDB from GDB/STATUS/SCROLL/MESSAGE
+        # ESC / cgdb mode key → switch to CGDB from GDB_PROMPT/CMD/GDB_SCROLL/ML_MESSAGE
         cgdb_key = self.cfg.cgdbmodekey.lower()
         if key == "escape" or key.lower() == cgdb_key:
-            if self._mode in ("GDB", "CMD", "SCROLL"):
+            if self._mode in ("GDB_PROMPT", "CMD", "GDB_SCROLL"):
                 self._switch_to_tgdb()
                 event.stop()
                 return
 
-        if self._mode == "MESSAGE":
+        if self._mode == "ML_MESSAGE":
             try:
                 status = self.query_one("#cmdline", CommandLineBar)
                 status.feed_key(key, char)
