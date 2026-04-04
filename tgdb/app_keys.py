@@ -59,7 +59,7 @@ class KeyRoutingMixin:
 
         src = self._get_source_view(mounted_only=True)
 
-        if src is not None and src.handle_key(key, char):
+        if src is not None and src.handle_tgdb_key(key, char):
             return True
 
         # ":" enters CMD mode even when source pane is absent
@@ -208,7 +208,7 @@ class KeyRoutingMixin:
 
         if self._mode == "TGDB":
             src = self._get_source_view(mounted_only=True)
-            if src is not None and src.handle_key(key, char):
+            if src is not None and src.handle_tgdb_key(key, char):
                 return False
             # ":" enters CMD mode even when source pane is absent
             if key == "colon" or char == ":":
