@@ -98,12 +98,11 @@ class CommandsMixin:
     def _cmd_edit(self: TGDBApp, _: list) -> None:
         src = self._get_source_view()
         if src is not None and src.source_file:
-            src.source_file._tokens = None
             src.load_file(src.source_file.path)
 
     def _cmd_bang(self: TGDBApp, _: list) -> None:
         # cgdb registers :bang, but command_do_bang() is currently a no-op.
-        return None
+        pass
 
     def _cmd_focus(self: TGDBApp, args: list) -> Optional[str]:
         if len(args) != 1:

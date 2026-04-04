@@ -430,9 +430,6 @@ class GDBController(ParsingMixin, VarobjMixin):
             kind="register-values",
         )
 
-    async def _refresh_breakpoints(self) -> None:
-        self.mi_command("-break-list")
-
     def set_breakpoint(self, location: str, temporary: bool = False) -> None:
         flag = "-t " if temporary else ""
         self.mi_command(f"-break-insert {flag}{location}")

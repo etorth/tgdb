@@ -178,8 +178,8 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         if not line:
             return None
 
-        # Comment: leading whitespace + '#' is a no-op.
-        if re.match(r"^\s*#", line):
+        # Comment: lines starting with '#' are a no-op.
+        if line.startswith("#"):
             return None
 
         # :python / :py and :pyfile / :pyf take raw (un-tokenised) argument.

@@ -8,8 +8,6 @@ source files), and the ``_safe_int`` utility.  Mixed into GDBController.
 
 from __future__ import annotations
 
-import asyncio
-
 from .gdb_types import (
     Breakpoint,
     Frame,
@@ -47,7 +45,7 @@ class ParsingMixin:
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)
-            asyncio.create_task(self._refresh_breakpoints())
+            self.mi_command("-break-list")
         elif cls == "running":
             self._inferior_running = True
             self.locals = []

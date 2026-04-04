@@ -202,9 +202,7 @@ class TGDBScreen:
         root = await app._ensure_dynamic_workspace()
         if root is None:
             return
-        for item in list(root.items):
-            await root.take_item(item)
-        await root.insert_item(0, EmptyPane())
+        await root.set_items([EmptyPane(app.hl)])
 
     async def _do_split(self, pane: list[int], mode: SplitMode) -> None:
         from .workspace import EmptyPane, PaneContainer
@@ -221,14 +219,14 @@ class TGDBScreen:
             root = app.query_one("#split-container", PaneContainer)
             if root.orientation != orientation:
                 root.set_orientation(orientation)
-            await root.insert_item(len(root.items), EmptyPane())
+            await root.insert_item(len(root.items), EmptyPane(app.hl))
         else:
             widget = self._get_widget_at(pane)
             if isinstance(widget, PaneContainer):
                 # Directly address a sub-container: add a child to it
                 if widget.orientation != orientation:
                     widget.set_orientation(orientation)
-                await widget.insert_item(len(widget.items), EmptyPane())
+                await widget.insert_item(len(widget.items), EmptyPane(app.hl))
             else:
                 await app._apply_context_menu_action(widget, direction)
 

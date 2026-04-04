@@ -214,7 +214,10 @@ class FileDialog(Widget):
         except re.error:
             return False
         start = self._sel if origin is None else origin
-        order = list(range(start + 1, n)) + (list(range(0, start + 1)) if self.wrapscan else []) if forward else list(range(start - 1, -1, -1)) + (list(range(n - 1, start - 1, -1)) if self.wrapscan else [])
+        if forward:
+            order = list(range(start + 1, n)) + (list(range(0, start + 1)) if self.wrapscan else [])
+        else:
+            order = list(range(start - 1, -1, -1)) + (list(range(n - 1, start - 1, -1)) if self.wrapscan else [])
         for idx in order:
             if rx.search(self._files[idx]):
                 self._sel = idx
