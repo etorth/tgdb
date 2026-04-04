@@ -135,7 +135,7 @@ class PaneBase(Widget):
     def __init__(self, hl: Optional[HighlightGroups] = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
-        self.can_focus = True
+        self.can_focus = False
         self._title_bar: Optional[_TitleBar] = None
 
     def title(self) -> Optional[str]:

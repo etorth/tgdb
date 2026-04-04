@@ -467,6 +467,7 @@ class GDBWidget(PaneBase):
     def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
         super().__init__(hl, **kwargs)
         self._content = _GDBContent(hl, max_scrollback)
+        self.can_focus = True
 
     def title(self) -> Optional[str]:
         return None

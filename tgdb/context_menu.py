@@ -244,7 +244,7 @@ class ContextMenu(Widget):
         self._requested_y = 0
         self._panels: list[_PanelLayout] = []
         self._panel_widgets: list[_PanelWidget] = []
-        self.can_focus = True
+        self.can_focus = False
 
     def render(self) -> Text:
         # The ContextMenu widget itself is 1×1 and hidden under the root panel.
@@ -271,7 +271,6 @@ class ContextMenu(Widget):
             self._selection_path = [0]
         self._relayout()
         self.add_class("visible")
-        self.focus()
 
     def close(self) -> None:
         self.remove_class("visible")

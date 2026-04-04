@@ -163,7 +163,7 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
             "source": PaneDescriptor("Source", self._make_source_pane, lambda: self._source_view),
             "gdb": PaneDescriptor("GDB", self._make_gdb_pane, lambda: self._gdb_widget),
             "locals": PaneDescriptor(
-                "Local Variables",
+                "Locals",
                 self._make_local_variable_pane,
                 lambda: self._locals_pane,
                 lambda: self.gdb.request_current_frame_locals(report_error=False),

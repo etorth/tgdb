@@ -60,7 +60,7 @@ class RegisterPane(PaneBase):
         self._content = _RegisterContent(hl)
 
     def title(self) -> str:
-        return "Registers"
+        return "REGISTERS"
 
     def compose(self):
         yield from super().compose()

@@ -69,7 +69,7 @@ class StackPane(PaneBase):
         self._content = _StackContent(hl)
 
     def title(self) -> str:
-        return "Call Stack"
+        return "STACK"
 
     def compose(self):
         yield from super().compose()
