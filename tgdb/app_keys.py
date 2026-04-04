@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING
 
 from textual import events
@@ -14,27 +13,31 @@ if TYPE_CHECKING:
     from .app import TGDBApp
 
 
-def _read_clipboard(app: "TGDBApp") -> str:
-    """Read text from the OS clipboard.
+def _copy_clipboard(app: "TGDBApp", text: str) -> None:
+    """Copy *text* to the system clipboard.
 
-    Tries common system clipboard tools in order and falls back to
-    Textual's local clipboard (which holds whatever was last copied
-    within the app via copy_to_clipboard / OSC 52).
+    Tries pyperclip first; falls back to Textual's OSC 52 mechanism.
     """
-    for cmd in (
-        ["xclip", "-selection", "clipboard", "-o"],
-        ["xsel", "--clipboard", "--output"],
-        ["wl-paste", "--no-newline"],
-        ["pbpaste"],
-        # WSL2: read via Windows PowerShell
-        ["powershell.exe", "-Command", "Get-Clipboard"],
-    ):
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
-            if result.returncode == 0:
-                return result.stdout
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            continue
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        return
+    except Exception:
+        pass
+    app.copy_to_clipboard(text)
+
+
+def _read_clipboard(app: "TGDBApp") -> str:
+    """Read text from the system clipboard.
+
+    Tries pyperclip first; falls back to Textual's local clipboard
+    (holds whatever was last copied within the app via OSC 52).
+    """
+    try:
+        import pyperclip
+        return pyperclip.paste()
+    except Exception:
+        pass
     return app.clipboard
 
 
@@ -360,7 +363,7 @@ class KeyRoutingMixin:
             selected = self.screen.get_selected_text()
             if selected:
                 # Selected text anywhere → copy to system clipboard.
-                self.copy_to_clipboard(selected)
+                _copy_clipboard(self, selected)
                 self.screen.clear_selection()
                 event.stop()
                 return

@@ -12,6 +12,7 @@ dependencies = [
     "pygments>=2.18",
     "pyte>=0.8",
     "ptyprocess>=0.7",
+    "pyperclip>=1.8",
 ]
 
 [project.scripts]
