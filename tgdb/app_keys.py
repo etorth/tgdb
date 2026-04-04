@@ -59,7 +59,7 @@ class KeyRoutingMixin:
 
         src = self._get_source_view(mounted_only=True)
 
-        if src is not None and src.handle_cgdb_key(key, char):
+        if src is not None and src.handle_key(key, char):
             return True
 
         # ":" enters CMD mode even when source pane is absent
@@ -164,7 +164,7 @@ class KeyRoutingMixin:
             char = ""
 
         # ESC / tgdb-mode key → switch to TGDB (already in TGDB = no-op)
-        tgdb_key = self.cfg.cgdbmodekey.lower()
+        tgdb_key = self.cfg.tgdbmodekey.lower()
         if key == "escape" or key.lower() == tgdb_key:
             if self._mode in ("GDB_PROMPT", "CMD", "GDB_SCROLL", "ML_MESSAGE"):
                 self._switch_to_tgdb()
@@ -208,7 +208,7 @@ class KeyRoutingMixin:
 
         if self._mode == "TGDB":
             src = self._get_source_view(mounted_only=True)
-            if src is not None and src.handle_cgdb_key(key, char):
+            if src is not None and src.handle_key(key, char):
                 return False
             # ":" enters CMD mode even when source pane is absent
             if key == "colon" or char == ":":
@@ -291,9 +291,9 @@ class KeyRoutingMixin:
             event.stop()
             return
 
-        # ESC / cgdb mode key → switch to CGDB from GDB_PROMPT/CMD/GDB_SCROLL/ML_MESSAGE
-        cgdb_key = self.cfg.cgdbmodekey.lower()
-        if key == "escape" or key.lower() == cgdb_key:
+        # ESC / tgdb mode key → switch to TGDB from GDB_PROMPT/CMD/GDB_SCROLL/ML_MESSAGE
+        tgdb_key = self.cfg.tgdbmodekey.lower()
+        if key == "escape" or key.lower() == tgdb_key:
             if self._mode in ("GDB_PROMPT", "CMD", "GDB_SCROLL"):
                 self._switch_to_tgdb()
                 event.stop()

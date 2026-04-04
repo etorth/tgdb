@@ -106,11 +106,11 @@ class CommandsMixin:
 
     def _cmd_focus(self: TGDBApp, args: list) -> Optional[str]:
         if len(args) != 1:
-            return "focus: requires cgdb or gdb"
+            return "focus: requires tgdb or gdb"
         if args[0].lower() == "gdb":
             self._switch_to_gdb()
             return None
-        if args[0].lower() == "cgdb":
+        if args[0].lower() == "tgdb":
             self._switch_to_tgdb()
             return None
         return "focus: requires cgdb or gdb"

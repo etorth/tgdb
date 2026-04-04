@@ -20,11 +20,11 @@ class TrieNode:
 
 class KeyMapper:
     """
-    Maintains separate maps for CGDB mode and GDB/insert mode.
+    Maintains separate maps for TGDB mode and GDB/insert mode.
 
     Usage::
         km = KeyMapper()
-        km.map("cgdb", ["s"], ["escape", ":", "s", "t", "e", "p", "enter"])
+        km.map("tgdb", ["s"], ["escape", ":", "s", "t", "e", "p", "enter"])
         tokens = km.feed("tgdb", key_token)   # returns [] while buffering,
                                                # or list of tokens to dispatch
     """

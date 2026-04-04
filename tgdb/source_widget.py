@@ -396,7 +396,7 @@ class _SourceContent(SourceViewRendering, Widget):
     # Key handling
     # ------------------------------------------------------------------
 
-    def handle_cgdb_key(self, key: str, char: str) -> bool:
+    def handle_key(self, key: str, char: str) -> bool:
         if self._search_active:
             self._handle_search_input(key, char)
             return True
@@ -541,7 +541,7 @@ class _SourceContent(SourceViewRendering, Widget):
             event.stop()
             return
 
-        if self.handle_cgdb_key(key, char):
+        if self.handle_key(key, char):
             event.stop()
 
     def _handle_search_input(self, key: str, char: str) -> None:

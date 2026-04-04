@@ -49,7 +49,7 @@ class Config:
     winminwidth: int = 0
 
     # String / enum options
-    cgdbmodekey: str = "escape"  # key name
+    tgdbmodekey: str = "escape"  # key name
     executinglinedisplay: str = "longarrow"  # shortarrow|longarrow|highlight|block
     selectedlinedisplay: str = "block"
     winsplit: str = "even"  # src_full|src_big|even|gdb_big|gdb_full
@@ -80,7 +80,7 @@ _INT_OPTIONS = {
     "winminwidth",
 }
 _STR_OPTIONS = {
-    "cgdbmodekey",
+    "tgdbmodekey",
     "executinglinedisplay",
     "selectedlinedisplay",
     "winsplit",
