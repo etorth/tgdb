@@ -181,15 +181,63 @@ class PaneContainer(Widget):
 
     async def insert_item(self, index: int, item: Widget) -> None:
         self._items.insert(index, item)
-        self._weights = [1] * len(self._items)
-        await self._rebuild()
+        if len(self._weights) == len(self._items) - 1:
+            self._weights.insert(index, 1)
+        else:
+            self._weights = [1] * len(self._items)
+        self._apply_item_style(item, self._weights[index])
+
+        if not self.is_mounted:
+            await self._rebuild()
+            return
+
+        is_horizontal = self.orientation == "horizontal"
+        n = len(self._items)
+
+        if n == 1:
+            await self.mount(item)
+        elif index == n - 1:
+            # Append after the current last item.
+            prev_item = self._items[n - 2]
+            if is_horizontal:
+                splitter = Splitter(self.hl, draggable=True)
+                splitter.set_orientation(True)
+                await self.mount(splitter, after=prev_item)
+                await self.mount(item, after=splitter)
+            else:
+                await self.mount(item)
+        else:
+            # Insert before the item that was previously at position `index`.
+            next_item = self._items[index + 1]
+            if is_horizontal:
+                splitter = Splitter(self.hl, draggable=True)
+                splitter.set_orientation(True)
+                await self.mount(item, before=next_item)
+                await self.mount(splitter, after=item)
+            else:
+                await self.mount(item, before=next_item)
+
+        self.refresh(layout=True)
 
     async def replace_item(self, old_item: Widget, new_item: Widget) -> None:
         index = self.index_of(old_item)
         self._items[index] = new_item
         if len(self._weights) != len(self._items):
             self._weights = [1] * len(self._items)
-        await self._rebuild()
+        self._apply_item_style(new_item, self._weights[index])
+
+        if not old_item.is_mounted:
+            await self._rebuild()
+            return
+
+        # Mount new item immediately after old item, then remove old item.
+        # Any splitters surrounding old_item automatically surround new_item.
+        await self.mount(new_item, after=old_item)
+        await old_item.remove()
+        # Restore any nested PaneContainer that lost its DOM children when
+        # old_item was removed (e.g. during _normalize_container_after_delete).
+        await self._restore_nested_containers()
+        self.refresh(layout=True)
 
     async def take_item(self, item: Widget) -> Widget:
         index = self.index_of(item)
@@ -198,7 +246,23 @@ class PaneContainer(Widget):
             self._weights.pop(index)
         else:
             self._weights = [1] * len(self._items)
-        await self._rebuild()
+
+        if item.is_mounted:
+            if self.orientation == "horizontal":
+                # Remove one adjacent Splitter: prefer the one after the item
+                # (handles all positions except last), fall back to before.
+                children = list(self.children)
+                try:
+                    pos = children.index(item)
+                    if pos + 1 < len(children) and isinstance(children[pos + 1], Splitter):
+                        await children[pos + 1].remove()
+                    elif pos > 0 and isinstance(children[pos - 1], Splitter):
+                        await children[pos - 1].remove()
+                except ValueError:
+                    pass
+            await item.remove()
+
+        self.refresh(layout=True)
         return removed
 
     def _apply_item_style(self, item: Widget, weight: int) -> None:
