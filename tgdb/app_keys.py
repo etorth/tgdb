@@ -354,6 +354,9 @@ class KeyRoutingMixin:
         screen_y = int(event.screen_y)
 
         if event.button == 3:
+            # Close an open context menu if the right-click lands outside it.
+            if menu and menu.is_open and not self._context_menu_contains(screen_x, screen_y):
+                self._close_context_menu(restore_focus=False)
             try:
                 clicked_widget, _ = self.get_widget_at(screen_x, screen_y)
             except Exception:
