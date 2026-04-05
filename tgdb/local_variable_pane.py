@@ -1,8 +1,15 @@
 """
 Local variables pane widget — tree view with lazy varobj expansion.
 
-Uses GDB's ``-var-create`` / ``-var-list-children`` MI commands to build
-a structured, expandable tree of local variables and their members.
+Uses GDB's ``-var-create`` / ``-var-list-children`` / ``-var-update`` MI
+commands to build a structured, expandable tree of local variables and their
+members.
+
+When GDB stops in the same frame (e.g. after a ``next`` command), the pane
+calls ``-var-update --all-values *`` and patches only the changed node labels
+in-place, preserving the user's expanded/collapsed state.  A full rebuild is
+done only when the set of top-level variable names changes (new frame, or
+entering/leaving a function).
 """
 
 from __future__ import annotations
@@ -23,7 +30,8 @@ class LocalVariablePane(PaneBase):
 
     Top-level variables are created via ``-var-create``.  When the user
     expands a node, ``-var-list-children`` is called lazily to populate
-    its children.
+    its children.  After a step command, ``-var-update`` refreshes only the
+    changed values without collapsing the tree.
     """
 
     DEFAULT_CSS = """
@@ -48,9 +56,12 @@ class LocalVariablePane(PaneBase):
         self._var_create: Optional[Callable[..., Coroutine]] = None
         self._var_list_children: Optional[Callable[..., Coroutine]] = None
         self._var_delete: Optional[Callable[..., Coroutine]] = None
-        # Track created varobj names so we can clean them up
+        self._var_update: Optional[Callable[..., Coroutine]] = None
+        # Track created varobj names for cleanup
         self._varobj_names: list[str] = []
-        # Generation counter to cancel stale rebuilds
+        # varobj name → TreeNode for in-place value updates
+        self._varobj_to_node: dict[str, TreeNode] = {}
+        # Generation counter — cancels stale async tasks
         self._rebuild_gen: int = 0
 
     def title(self) -> str:
@@ -70,20 +81,93 @@ class LocalVariablePane(PaneBase):
         var_create: Callable[..., Coroutine],
         var_list_children: Callable[..., Coroutine],
         var_delete: Callable[..., Coroutine],
+        var_update: Callable[..., Coroutine],
     ) -> None:
         """Set the async callbacks for varobj operations."""
         self._var_create = var_create
         self._var_list_children = var_list_children
         self._var_delete = var_delete
+        self._var_update = var_update
 
     def set_variables(self, variables: list[LocalVariable]) -> None:
-        """Called when the frame changes — rebuild the tree from scratch."""
+        """Called when GDB stops — update in-place or rebuild as needed.
+
+        If the set of top-level variable names is unchanged AND we already
+        have varobjs from a previous stop, use ``-var-update`` to refresh
+        only the changed values without collapsing the tree.
+
+        Otherwise (new frame, different locals) do a full rebuild.
+        """
+        old_names = {v.name for v in self._variables}
+        new_names = {v.name for v in variables}
         self._variables = list(variables)
         self._rebuild_gen += 1
-        asyncio.create_task(self._rebuild_tree(self._rebuild_gen))
+        gen = self._rebuild_gen
+
+        if old_names == new_names and self._varobj_names and self._var_update:
+            asyncio.create_task(self._update_tree(gen))
+        else:
+            asyncio.create_task(self._rebuild_tree(gen))
+
+    # ------------------------------------------------------------------
+    # In-place update (same frame, same variables)
+    # ------------------------------------------------------------------
+
+    async def _update_tree(self, gen: int) -> None:
+        """Refresh changed values using -var-update, preserving expand state."""
+        try:
+            changelist = await self._var_update("*")
+        except Exception:
+            await self._rebuild_tree(gen)
+            return
+
+        if self._rebuild_gen != gen:
+            return
+
+        for change in changelist:
+            varobj_name = change.get("name", "")
+            in_scope = change.get("in_scope", "true")
+            type_changed = change.get("type_changed", "false") == "true"
+
+            if in_scope != "true" or type_changed:
+                # Variable went out of scope or changed type — full rebuild.
+                await self._rebuild_tree(gen)
+                return
+
+            node = self._varobj_to_node.get(varobj_name)
+            if node is None:
+                continue
+
+            data = node.data
+            if not isinstance(data, dict):
+                continue
+
+            new_value = change.get("value", "")
+            exp = data.get("exp", "")
+            has_children = data.get("has_children", False)
+
+            # Reformat label with the new value.
+            if has_children:
+                label = exp
+                if new_value:
+                    label += f" = {self._truncate(new_value)}"
+            else:
+                label = f"{exp} = {new_value}" if new_value else exp
+            node.set_label(label)
+
+            # If the number of children changed, the cached children are stale.
+            new_num_children = change.get("new_num_children")
+            if new_num_children is not None and data.get("loaded"):
+                data["loaded"] = False
+                node.remove_children()
+                node.add_leaf("⏳ loading...")
+
+    # ------------------------------------------------------------------
+    # Full rebuild (new frame / different variable set)
+    # ------------------------------------------------------------------
 
     async def _cleanup_varobjs(self) -> None:
-        """Delete all existing varobjs."""
+        """Delete all existing varobjs from GDB."""
         if self._var_delete is None:
             return
         for name in self._varobj_names:
@@ -101,6 +185,7 @@ class LocalVariablePane(PaneBase):
             return
 
         await self._cleanup_varobjs()
+        self._varobj_to_node.clear()
         tree.clear()
 
         if self._rebuild_gen != gen:
@@ -137,12 +222,25 @@ class LocalVariablePane(PaneBase):
                 label = var.name
                 if value:
                     label += f" = {self._truncate(value)}"
-                node = tree.root.add(label, expand=False)
-                node.data = {"varobj": varobj_name, "loaded": False}
+                node = tree.root.add(
+                    label,
+                    expand=False,
+                    data={"varobj": varobj_name, "exp": var.name, "loaded": False, "has_children": True},
+                )
                 node.add_leaf("⏳ loading...")
             else:
                 label = f"{var.name} = {value}"
-                tree.root.add_leaf(label)
+                node = tree.root.add_leaf(
+                    label,
+                    data={"varobj": varobj_name, "exp": var.name, "has_children": False},
+                )
+
+            if varobj_name:
+                self._varobj_to_node[varobj_name] = node
+
+    # ------------------------------------------------------------------
+    # Lazy child loading
+    # ------------------------------------------------------------------
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
         """Lazily load children when a node is expanded."""
@@ -160,7 +258,6 @@ class LocalVariablePane(PaneBase):
 
     async def _load_children(self, node: TreeNode, varobj_name: str) -> None:
         """Fetch children from GDB and populate the tree node."""
-        # Remove placeholder
         node.remove_children()
 
         try:
@@ -173,23 +270,16 @@ class LocalVariablePane(PaneBase):
             node.add_leaf("(empty)")
             return
 
-        # Skip access specifier nodes (public/private/protected) — flatten
-        # their children directly into the parent node.
         await self._add_children(node, children)
 
     async def _add_children(self, node: TreeNode, children: list[dict]) -> None:
-        """Add child nodes, transparently flattening access specifier groups.
+        """Add child nodes, flattening access-specifiers and pairing map entries.
 
-        For map-like containers whose pretty-printer emits alternating
-        key/value children (``[0]``=key, ``[1]``=value, …), pairs them
-        into single nodes labeled ``[key] = value``.
+        Also registers every new node in ``_varobj_to_node`` so that
+        ``-var-update`` can patch values at any depth without a rebuild.
         """
         _ACCESS = {"public", "private", "protected"}
 
-        # Detect alternating key/value pattern from map pretty-printer:
-        # children come as [0]=key, [1]=value, [2]=key, [3]=value, ...
-        # Heuristic: even count, sequential numeric exp labels, odd
-        # children all have the same container-like type.
         paired = self._detect_map_pairs(children)
 
         if paired:
@@ -200,17 +290,27 @@ class LocalVariablePane(PaneBase):
                 val_dynamic = val_child.get("dynamic", "0") == "1"
                 val_has_children = val_numchild > 0 or val_dynamic
                 val_value = val_child.get("value", "")
+                exp = f"[{key_val}]"
 
                 if val_has_children:
-                    label = f"[{key_val}]"
+                    label = exp
                     if val_value:
                         label += f" = {self._truncate(val_value)}"
-                    child_node = node.add(label, expand=False)
-                    child_node.data = {"varobj": val_name, "loaded": False}
+                    child_node = node.add(
+                        label,
+                        expand=False,
+                        data={"varobj": val_name, "exp": exp, "loaded": False, "has_children": True},
+                    )
                     child_node.add_leaf("⏳ loading...")
                 else:
-                    label = f"[{key_val}] = {val_value}" if val_value else f"[{key_val}]"
-                    node.add_leaf(label)
+                    label = f"{exp} = {val_value}" if val_value else exp
+                    child_node = node.add_leaf(
+                        label,
+                        data={"varobj": val_name, "exp": exp, "has_children": False},
+                    )
+
+                if val_name:
+                    self._varobj_to_node[val_name] = child_node
             return
 
         for child in children:
@@ -221,7 +321,7 @@ class LocalVariablePane(PaneBase):
             has_children = numchild > 0 or dynamic
             value = child.get("value", "")
 
-            # Access specifier pseudo-nodes — expand inline
+            # Access-specifier pseudo-nodes — expand inline
             if exp in _ACCESS and has_children:
                 try:
                     grandchildren = await self._var_list_children(child_name)
@@ -234,31 +334,40 @@ class LocalVariablePane(PaneBase):
                 label = exp
                 if value:
                     label += f" = {self._truncate(value)}"
-                child_node = node.add(label, expand=False)
-                child_node.data = {"varobj": child_name, "loaded": False}
+                child_node = node.add(
+                    label,
+                    expand=False,
+                    data={"varobj": child_name, "exp": exp, "loaded": False, "has_children": True},
+                )
                 child_node.add_leaf("⏳ loading...")
             else:
                 label = f"{exp} = {value}" if value else exp
-                node.add_leaf(label)
+                child_node = node.add_leaf(
+                    label,
+                    data={"varobj": child_name, "exp": exp, "has_children": False},
+                )
+
+            if child_name:
+                self._varobj_to_node[child_name] = child_node
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _detect_map_pairs(
         children: list[dict],
     ) -> list[tuple[dict, dict]] | None:
-        """If *children* look like map pretty-printer output (alternating
-        key/value with sequential ``[0], [1], [2], [3], …`` labels),
-        return a list of ``(key_child, value_child)`` pairs.
+        """Detect alternating key/value pattern from map pretty-printer output.
 
-        Returns ``None`` if the pattern does not match.
+        Returns ``(key, value)`` pairs if the pattern matches, else ``None``.
         """
         n = len(children)
         if n == 0 or n % 2 != 0:
             return None
-        # Check that exp labels are sequential integers 0..n-1
         for i, c in enumerate(children):
             if c.get("exp", "") != str(i):
                 return None
-        # Pair them up
         return [(children[i], children[i + 1]) for i in range(0, n, 2)]
 
     @staticmethod
