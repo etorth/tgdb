@@ -97,7 +97,18 @@ class LocalVariablePane(PaneBase):
         only the changed values without collapsing the tree.
 
         Otherwise (new frame, different locals) do a full rebuild.
+
+        An empty *variables* list means the inferior is running (GDB sends
+        ``on_locals([])`` with every ``*running`` notification).  We cancel
+        any pending rebuild but keep ``_variables`` intact so the next stop
+        in the same frame can do an in-place update instead of a full rebuild.
         """
+        if not variables:
+            # GDB is running — cancel pending tasks but don't touch the tree
+            # or _variables; the next stop will compare against the current set.
+            self._rebuild_gen += 1
+            return
+
         old_names = {v.name for v in self._variables}
         new_names = {v.name for v in variables}
         self._variables = list(variables)
