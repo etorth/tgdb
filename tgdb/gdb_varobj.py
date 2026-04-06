@@ -92,6 +92,12 @@ class VarobjMixin:
         except RuntimeError:
             pass
 
+    async def eval_expr(self, expr: str) -> str:
+        """Evaluate a GDB expression and return its value string."""
+        result = await self.mi_command_async(f"-data-evaluate-expression {expr}")
+        payload = result.get("payload") or {}
+        return payload.get("value", "")
+
     async def var_update(self, varobj_name: str = "*") -> list[dict]:
         """Update varobjs and return changed ones."""
         result = await self.mi_command_async(f"-var-update --all-values {varobj_name}")

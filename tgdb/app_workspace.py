@@ -56,6 +56,7 @@ class WorkspaceMixin:
                 var_list_children=self.gdb.var_list_children,
                 var_delete=self.gdb.var_delete,
                 var_update=self.gdb.var_update,
+                var_eval=self.gdb.eval_expr,
             )
         self._locals_pane.set_variables(self._current_locals)
         return self._locals_pane

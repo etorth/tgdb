@@ -63,12 +63,12 @@ class LocalVariablePane(PaneBase):
         self._varobj_to_node: dict[str, TreeNode] = {}
         # Generation counter — cancels stale async tasks
         self._rebuild_gen: int = 0
-        # Current frame key — used to save expansion when leaving a frame.
-        # Type: (func, file, frozenset{(name, type)}) | None
+        # Callback to evaluate a GDB expression (e.g. "&varname" → address).
+        self._var_eval: Optional[Callable[..., Coroutine]] = None
+        # Current frame key — (func, file, frozenset{(name, addr)}) | None.
+        # Address-based so same-type shadows in nested scopes get distinct keys.
         self._frame_key: tuple | None = None
-        # Saved expansion state keyed by (func, file, var_sig).
-        # Including the variable-type signature means same-named variables
-        # in different scopes (or different functions) never share state.
+        # Saved expansion state keyed by frame key.
         self._saved_expansions: dict[tuple, set[tuple[str, ...]]] = {}
 
     def title(self) -> str:
@@ -89,69 +89,106 @@ class LocalVariablePane(PaneBase):
         var_list_children: Callable[..., Coroutine],
         var_delete: Callable[..., Coroutine],
         var_update: Callable[..., Coroutine],
+        var_eval: Callable[..., Coroutine],
     ) -> None:
         """Set the async callbacks for varobj operations."""
         self._var_create = var_create
         self._var_list_children = var_list_children
         self._var_delete = var_delete
         self._var_update = var_update
-
-    @staticmethod
-    def _make_frame_key(frame: "Frame | None", variables: list[LocalVariable]) -> tuple | None:
-        """Build a hashable key that uniquely identifies the current scope.
-
-        The key is ``(func, file, frozenset{(name, type)})``.  Including the
-        variable-type signature means:
-
-        * ``main()`` and ``f()`` with the same-named ``w`` get different keys
-          because ``func`` differs.
-        * Inner-scope ``int w`` shadowing outer ``TestWrapper w`` in the same
-          function gets a different key because the type differs.
-        * Same function, same variables → identical key → in-place update.
-        """
-        if not frame or not frame.func:
-            return None
-        var_sig = frozenset((v.name, v.type) for v in variables)
-        return (frame.func, frame.fullname or frame.file, var_sig)
+        self._var_eval = var_eval
 
     def set_variables(
         self,
         variables: list[LocalVariable],
         frame: Frame | None = None,
     ) -> None:
-        """Called when GDB stops — update in-place or rebuild as needed.
-
-        An empty *variables* list means the inferior is running; we cancel
-        any pending rebuild but keep state intact for the next stop.
-        """
+        """Called when GDB stops — schedule the async decision task."""
         if not variables:
+            # GDB is running — cancel pending tasks, preserve state.
             self._rebuild_gen += 1
             return
-
-        new_frame_key = self._make_frame_key(frame, variables)
         self._variables = list(variables)
         self._rebuild_gen += 1
-        gen = self._rebuild_gen
+        asyncio.create_task(self._decide_and_act(self._rebuild_gen, frame, variables))
 
-        if (new_frame_key is not None
-                and new_frame_key == self._frame_key
-                and self._varobj_names
-                and self._var_update):
-            # Identical frame+variables → update changed values in-place.
-            asyncio.create_task(self._update_tree(gen))
+    async def _decide_and_act(
+        self,
+        gen: int,
+        frame: Frame | None,
+        variables: list[LocalVariable],
+    ) -> None:
+        """Compute the address-based frame key, then update or rebuild.
+
+        The key is ``(func, file, frozenset{(name, addr)})``.
+        Evaluating ``&varname`` for each variable costs N GDB round-trips,
+        but is only done when the function+file matches the stored key
+        (i.e. when we're possibly still in the same function, making
+        inner-scope shadowing the only remaining ambiguity).  When the
+        function changes we know we must rebuild without querying addresses.
+        """
+        if self._rebuild_gen != gen:
+            return
+
+        # Base check: did the function or file change?
+        base = (frame.func, frame.fullname or frame.file) if (frame and frame.func) else None
+        stored_base = (self._frame_key[0], self._frame_key[1]) if self._frame_key else None
+
+        if base is None or base != stored_base or not self._varobj_names or not self._var_update:
+            # Function changed (or first stop) — skip address eval, just rebuild.
+            await self._do_rebuild_or_update(gen, frame, variables, new_key=None, force_rebuild=True)
+            return
+
+        # Same function/file — evaluate addresses to detect inner-scope shadows.
+        addrs: dict[str, str] = {}
+        if self._var_eval:
+            for var in variables:
+                if self._rebuild_gen != gen:
+                    return
+                try:
+                    addrs[var.name] = await self._var_eval(f"&{var.name}")
+                except Exception:
+                    addrs[var.name] = var.type  # fallback: type string
         else:
-            # Frame or variable set changed — save current state, then rebuild.
+            # No eval callback: use type as fallback (handles different-type shadows)
+            addrs = {v.name: v.type for v in variables}
+
+        if self._rebuild_gen != gen:
+            return
+
+        new_key = (base[0], base[1], frozenset(addrs.items()))
+        await self._do_rebuild_or_update(gen, frame, variables, new_key=new_key, force_rebuild=False)
+
+    async def _do_rebuild_or_update(
+        self,
+        gen: int,
+        frame: Frame | None,
+        variables: list[LocalVariable],
+        new_key: tuple | None,
+        force_rebuild: bool,
+    ) -> None:
+        """Final dispatch: update in-place if key matches, otherwise rebuild."""
+        if self._rebuild_gen != gen:
+            return
+
+        if (not force_rebuild
+                and new_key is not None
+                and new_key == self._frame_key
+                and self._var_update):
+            await self._update_tree(gen)
+        else:
+            # Save expansion under outgoing key, then rebuild for incoming key.
             if self._frame_key is not None:
                 paths = self._collect_expanded_paths()
                 if paths:
                     self._saved_expansions[self._frame_key] = paths
-            self._frame_key = new_frame_key
-            restore = (
-                self._saved_expansions.get(new_frame_key, set())
-                if new_frame_key is not None
-                else set()
-            )
-            asyncio.create_task(self._rebuild_tree(gen, restore))
+            # For a function change, compute the incoming key properly.
+            if force_rebuild and frame and frame.func:
+                var_sig = frozenset((v.name, v.type) for v in variables)
+                new_key = (frame.func, frame.fullname or frame.file, var_sig)
+            self._frame_key = new_key
+            restore = self._saved_expansions.get(new_key, set()) if new_key else set()
+            await self._rebuild_tree(gen, restore)
 
     # ------------------------------------------------------------------
     # In-place update (same frame, same variables)
