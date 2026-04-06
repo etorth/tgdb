@@ -55,5 +55,35 @@ int main()
     w.test.c = 4567890L;
     w.test.d = "Updated string in main()";
 
+    {
+        int w = 12;
+        {
+            float w = 23.0;
+            {
+                int w = 14;
+                {
+                    float w = 72.1;
+                    {
+                        TestWrapper w {};
+                        {
+                            std::string w {};
+                            {
+                                TestWrapper w {};
+                                {
+                                    std::map<int, std::string> w
+                                    {
+                                        {1, "one"},
+                                        {2, "two"},
+                                        {3, "three"}
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     return 0;
 }
