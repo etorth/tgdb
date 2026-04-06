@@ -63,6 +63,9 @@ class LocalVariablePane(PaneBase):
         self._varobj_to_node: dict[str, TreeNode] = {}
         # Generation counter — cancels stale async tasks
         self._rebuild_gen: int = 0
+        # Saved expansion state keyed by frozenset(variable_names).
+        # Allows restoring expanded nodes when returning to a previous frame.
+        self._saved_expansions: dict[frozenset, set[tuple[str, ...]]] = {}
 
     def title(self) -> str:
         return "LOCALS"
@@ -118,7 +121,14 @@ class LocalVariablePane(PaneBase):
         if old_names == new_names and self._varobj_names and self._var_update:
             asyncio.create_task(self._update_tree(gen))
         else:
-            asyncio.create_task(self._rebuild_tree(gen))
+            # Save the current expansion state before the rebuild wipes the tree.
+            if old_names:
+                paths = self._collect_expanded_paths()
+                if paths:
+                    self._saved_expansions[frozenset(old_names)] = paths
+            # If we have saved state for the incoming frame, restore it.
+            restore = self._saved_expansions.get(frozenset(new_names), set())
+            asyncio.create_task(self._rebuild_tree(gen, restore))
 
     # ------------------------------------------------------------------
     # In-place update (same frame, same variables)
@@ -174,6 +184,94 @@ class LocalVariablePane(PaneBase):
                 node.add_leaf("⏳ loading...")
 
     # ------------------------------------------------------------------
+    # Expansion save / restore helpers
+    # ------------------------------------------------------------------
+
+    def _collect_expanded_paths(self) -> set[tuple[str, ...]]:
+        """Walk the live tree and return the set of expanded node paths.
+
+        Each path is a tuple of ``exp`` (display-name) strings from the
+        root down to the expanded node, e.g. ``("w", "test")``.
+        Only expanded nodes are recorded; non-expanded subtrees are skipped.
+        """
+        try:
+            tree = self.query_one(Tree)
+        except Exception:
+            return set()
+
+        paths: set[tuple[str, ...]] = set()
+
+        def walk(node: TreeNode, path: tuple[str, ...]) -> None:
+            for child in node.children:
+                data = child.data
+                if not isinstance(data, dict):
+                    continue
+                exp = data.get("exp", "")
+                if not exp:
+                    continue
+                child_path = path + (exp,)
+                if child.is_expanded:
+                    paths.add(child_path)
+                    walk(child, child_path)  # only recurse into expanded nodes
+
+        walk(tree.root, ())
+        return paths
+
+    async def _ensure_children_loaded(self, node: TreeNode) -> bool:
+        """Load *node*'s children from GDB if they haven't been fetched yet.
+
+        Returns ``True`` when children are available (either already loaded
+        or just loaded now), ``False`` when the node has no children or the
+        load fails.
+        """
+        data = node.data
+        if not isinstance(data, dict) or not data.get("has_children"):
+            return False
+        if data.get("loaded"):
+            return True
+        varobj = data.get("varobj", "")
+        if not varobj or not self._var_list_children:
+            return False
+        data["loaded"] = True
+        node.remove_children()
+        try:
+            children = await self._var_list_children(varobj)
+            if children:
+                await self._add_children(node, children)
+            else:
+                node.add_leaf("(empty)")
+            return bool(children)
+        except Exception:
+            data["loaded"] = False
+            node.add_leaf("⚠ error fetching children")
+            return False
+
+    async def _restore_expansion(
+        self, node: TreeNode, path: tuple[str, ...], gen: int
+    ) -> None:
+        """Expand the node at *path* (relative to *node*), loading children
+        on demand at each level so the full path becomes visible.
+
+        ``path`` is a tuple of ``exp`` names, e.g. ``("w", "test")`` expands
+        the child named ``w`` and then the grandchild named ``test``.
+        """
+        if self._rebuild_gen != gen or not path:
+            return
+        target_exp, rest = path[0], path[1:]
+        for child in node.children:
+            data = child.data
+            if not isinstance(data, dict) or data.get("exp") != target_exp:
+                continue
+            if not await self._ensure_children_loaded(child):
+                break
+            if self._rebuild_gen != gen:
+                return
+            child.expand()
+            if rest:
+                await self._restore_expansion(child, rest, gen)
+            break
+
+    # ------------------------------------------------------------------
     # Full rebuild (new frame / different variable set)
     # ------------------------------------------------------------------
 
@@ -188,8 +286,16 @@ class LocalVariablePane(PaneBase):
                 pass
         self._varobj_names = []
 
-    async def _rebuild_tree(self, gen: int) -> None:
-        """Clear the tree and create varobjs for each local variable."""
+    async def _rebuild_tree(
+        self,
+        gen: int,
+        restore_paths: "set[tuple[str, ...]] | None" = None,
+    ) -> None:
+        """Clear the tree and create varobjs for each local variable.
+
+        After building the new tree, re-expand any nodes whose paths are
+        listed in *restore_paths* (saved from a previous visit to this frame).
+        """
         try:
             tree = self.query_one(Tree)
         except Exception:
@@ -248,6 +354,14 @@ class LocalVariablePane(PaneBase):
 
             if varobj_name:
                 self._varobj_to_node[varobj_name] = node
+
+        # Restore expansion state from a previous visit to this frame.
+        # Process shortest paths first so parents are expanded before children.
+        if restore_paths:
+            for path in sorted(restore_paths, key=len):
+                if self._rebuild_gen != gen:
+                    return
+                await self._restore_expansion(tree.root, path, gen)
 
     # ------------------------------------------------------------------
     # Lazy child loading
