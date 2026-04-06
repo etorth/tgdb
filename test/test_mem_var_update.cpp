@@ -37,19 +37,23 @@ void f()
 {
     TestWrapper fw {};
 
-    fw.test.a = 20;
-    fw.test.b = 45.6f;
-    fw.test.d = "Updated string";
+    fw.test.a = 30;
+    fw.test.b = 95.6f;
+    fw.test.c = 7890123L;
+    fw.test.d = "Updated string in f()";
 }
 
 int main()
 {
     TestWrapper w {};
 
-    w.test.a = 20;
+    w.test.a = 10;
     w.test.b = 45.6f;
-    w.test.d = "Updated string";
 
     f();
+
+    w.test.c = 4567890L;
+    w.test.d = "Updated string in main()";
+
     return 0;
 }
