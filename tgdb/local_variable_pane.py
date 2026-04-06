@@ -38,30 +38,24 @@ from .pane_base import PaneBase
 
 
 # ---------------------------------------------------------------------------
-# Varobj display helper
+# Varobj display helpers
 # ---------------------------------------------------------------------------
 
 
 def _suppress_children(varobj_info: dict) -> bool:
     """Return True when the varobj should be shown as a non-expandable leaf.
 
-    GDB's pretty-printer framework sets ``displayhint = "string"`` in the
-    ``-var-create`` / ``-var-list-children`` response for every string-like
-    type when ``-enable-pretty-printing`` is active.  This includes, but is
-    not limited to:
+    GDB's pretty-printer framework sets ``displayhint = "string"`` for every
+    string-like type whose printer returns ``display_hint() = 'string'``,
+    including ``std::string`` / ``std::wstring`` / ``std::u8string`` /
+    ``std::u16string`` / ``std::u32string`` and any future string type whose
+    pretty-printer follows the same convention.
 
-    * ``char *`` / ``const char *`` / ``wchar_t *`` / ``char8_t *`` /
-      ``char16_t *`` / ``char32_t *``
-    * ``std::string`` / ``std::wstring`` / ``std::u8string`` /
-      ``std::u16string`` / ``std::u32string`` and their ABI-mangled forms
-
-    ``char [N]`` fixed arrays are intentionally **not** suppressed: GDB does
-    not set ``displayhint = "string"`` for them, so individual bytes remain
-    accessible when the user expands the node.
-
-    Using the GDB-provided hint rather than type-string matching means this
-    function stays correct for any future string type that ships with a
-    proper pretty-printer, without any changes here.
+    Note: raw C-string pointer types (``char *``, ``const char *``, etc.) are
+    handled by GDB's *built-in* printer rather than a Python pretty-printer, so
+    they do **not** receive ``displayhint = "string"``.  They will appear as
+    expandable nodes; their value already shows the full string inline
+    (``0x... "hello"``), so expansion is simply unnecessary, not harmful.
     """
     return varobj_info.get("displayhint", "") == "string"
 
@@ -403,6 +397,7 @@ class LocalVariablePane(PaneBase):
                 )
                 value = info.get("value", "")
 
+                dh = info.get("displayhint", "")
                 if has_children:
                     label = var.name
                     if value:
@@ -411,7 +406,8 @@ class LocalVariablePane(PaneBase):
                         label,
                         expand=False,
                         data={"varobj": varobj_name, "exp": var.name,
-                              "loaded": False, "has_children": True},
+                              "loaded": False, "has_children": True,
+                              "displayhint": dh},
                     )
                     node.add_leaf("⏳ loading...")
                 else:
@@ -419,7 +415,7 @@ class LocalVariablePane(PaneBase):
                     node = tree.root.add_leaf(
                         label,
                         data={"varobj": varobj_name, "exp": var.name,
-                              "has_children": False},
+                              "has_children": False, "displayhint": dh},
                     )
 
                 if varobj_name:
@@ -527,6 +523,7 @@ class LocalVariablePane(PaneBase):
                 asyncio.create_task(self._load_children(node, new_varobj))
         else:
             # Old node was already removed; create a fresh one.
+            dh = info.get("displayhint", "")
             if has_children:
                 label = f"{name}"
                 if value:
@@ -535,14 +532,15 @@ class LocalVariablePane(PaneBase):
                     label + "  ← shadowed",
                     expand=False,
                     data={"varobj": new_varobj, "exp": name,
-                          "loaded": False, "has_children": True},
+                          "loaded": False, "has_children": True, "displayhint": dh},
                 )
                 node_new.add_leaf("⏳ loading...")
             else:
                 label = f"{name} = {value}" if value else name
                 node_new = tree.root.add_leaf(
                     label + "  ← shadowed",
-                    data={"varobj": new_varobj, "exp": name, "has_children": False},
+                    data={"varobj": new_varobj, "exp": name,
+                          "has_children": False, "displayhint": dh},
                 )
             if new_varobj:
                 self._varobj_to_node[new_varobj] = node_new
@@ -683,10 +681,11 @@ class LocalVariablePane(PaneBase):
             return False
         data["loaded"] = True
         node.remove_children()
+        dh = data.get("displayhint", "")
         try:
             children = await self._var_list_children(varobj)
             if children:
-                await self._add_children(node, children)
+                await self._add_children(node, children, dh)
             else:
                 node.add_leaf("(empty)")
             return bool(children)
@@ -742,15 +741,36 @@ class LocalVariablePane(PaneBase):
         if not children:
             node.add_leaf("(empty)")
             return
-        await self._add_children(node, children)
+        # Pass the parent node's displayhint so _add_children knows how to
+        # lay out the children (e.g. "map" → pair key-value, "array" → index).
+        parent_dh = node.data.get("displayhint", "") if isinstance(node.data, dict) else ""
+        await self._add_children(node, children, parent_dh)
 
-    async def _add_children(self, node: TreeNode, children: list[dict]) -> None:
-        """Add child nodes, flattening access specifiers and pairing map entries."""
-        _ACCESS = {"public", "private", "protected"}
+    async def _add_children(
+        self,
+        node: TreeNode,
+        children: list[dict],
+        displayhint: str = "",
+    ) -> None:
+        """Add child nodes to *node*.
 
-        paired = self._detect_map_pairs(children)
-        if paired:
-            for key_child, val_child in paired:
+        *displayhint* is the GDB pretty-printer hint on the **parent** varobj
+        and controls how children are laid out:
+
+        * ``"map"`` — children arrive as alternating key/value pairs
+          (``[0]``=key, ``[1]``=value, …).  Pair them as ``[key_val]=val``.
+        * ``"array"`` / ``""`` / anything else — show each child individually
+          with its ``exp`` label, flattening access-specifier pseudo-nodes
+          (``public`` / ``private`` / ``protected``) inline.
+        """
+        if displayhint == "map":
+            # GDB sends alternating key/value children.  Pair them.
+            it = iter(children)
+            for key_child in it:
+                try:
+                    val_child = next(it)
+                except StopIteration:
+                    break
                 key_val = key_child.get("value", "?")
                 val_name = val_child.get("name", "")
                 val_numchild = self._safe_int(val_child.get("numchild", "0"))
@@ -760,6 +780,7 @@ class LocalVariablePane(PaneBase):
                     and not _suppress_children(val_child)
                 )
                 val_value = val_child.get("value", "")
+                val_dh = val_child.get("displayhint", "")
                 exp = f"[{key_val}]"
                 if val_has_children:
                     label = exp
@@ -768,19 +789,23 @@ class LocalVariablePane(PaneBase):
                     child_node = node.add(
                         label, expand=False,
                         data={"varobj": val_name, "exp": exp,
-                              "loaded": False, "has_children": True},
+                              "loaded": False, "has_children": True,
+                              "displayhint": val_dh},
                     )
                     child_node.add_leaf("⏳ loading...")
                 else:
                     label = f"{exp} = {val_value}" if val_value else exp
                     child_node = node.add_leaf(
                         label,
-                        data={"varobj": val_name, "exp": exp, "has_children": False},
+                        data={"varobj": val_name, "exp": exp,
+                              "has_children": False, "displayhint": val_dh},
                     )
                 if val_name:
                     self._varobj_to_node[val_name] = child_node
             return
 
+        # Default: individual children, with access-specifier flattening.
+        _ACCESS = {"public", "private", "protected"}
         for child in children:
             child_name = child.get("name", "")
             exp = child.get("exp", "")
@@ -791,6 +816,7 @@ class LocalVariablePane(PaneBase):
                 and not _suppress_children(child)
             )
             value = child.get("value", "")
+            child_dh = child.get("displayhint", "")
 
             if exp in _ACCESS and has_children:
                 try:
@@ -807,14 +833,16 @@ class LocalVariablePane(PaneBase):
                 child_node = node.add(
                     label, expand=False,
                     data={"varobj": child_name, "exp": exp,
-                          "loaded": False, "has_children": True},
+                          "loaded": False, "has_children": True,
+                          "displayhint": child_dh},
                 )
                 child_node.add_leaf("⏳ loading...")
             else:
                 label = f"{exp} = {value}" if value else exp
                 child_node = node.add_leaf(
                     label,
-                    data={"varobj": child_name, "exp": exp, "has_children": False},
+                    data={"varobj": child_name, "exp": exp,
+                          "has_children": False, "displayhint": child_dh},
                 )
 
             if child_name:
@@ -823,16 +851,6 @@ class LocalVariablePane(PaneBase):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _detect_map_pairs(children: list[dict]) -> list[tuple[dict, dict]] | None:
-        n = len(children)
-        if n == 0 or n % 2 != 0:
-            return None
-        for i, c in enumerate(children):
-            if c.get("exp", "") != str(i):
-                return None
-        return [(children[i], children[i + 1]) for i in range(0, n, 2)]
 
     @staticmethod
     def _safe_int(val) -> int:
