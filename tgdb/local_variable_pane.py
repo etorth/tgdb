@@ -334,8 +334,13 @@ class LocalVariablePane(PaneBase):
                 return
 
         # ── 12. Leaf display for deeper shadowed vars (≥2 levels deep) ─────
-        # Vars in new_shadowed that are NOT in _shadows get a simple leaf.
-        leaf_shadowed = [v for v in new_shadowed if v.name not in self._shadows]
+        # Exclude names that were re-anchored (success or failure): the old
+        # tree node already serves as their display.
+        reanchor_names = {name for name, _, _, _ in to_reanchor}
+        leaf_shadowed = [
+            v for v in new_shadowed
+            if v.name not in self._shadows and v.name not in reanchor_names
+        ]
         await self._refresh_shadow_leaves(gen, tree, leaf_shadowed)
         if self._rebuild_gen != gen:
             return
@@ -441,9 +446,10 @@ class LocalVariablePane(PaneBase):
         try:
             info = await self._var_create(addr_expr)
         except Exception:
-            # Can't create address-based varobj — fall back to a plain leaf.
+            # Can't create address-based varobj — show last known value.
             if node is not None:
-                node.set_label(f"{name}  ← shadowed (unavailable)")
+                val = outer_var.value.replace("\n", " ") if outer_var.value else "?"
+                node.set_label(f"{name} = {val}  ← shadowed")
                 node.data["has_children"] = False
             return
 
