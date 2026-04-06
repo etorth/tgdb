@@ -64,10 +64,12 @@ class LocalVariablePane(PaneBase):
         # Generation counter — cancels stale async tasks
         self._rebuild_gen: int = 0
         # Current frame key — used to save expansion when leaving a frame.
-        self._frame_key: tuple[str, str] | None = None
-        # Saved expansion state keyed by (func_name, file_path).
-        # Allows restoring expanded nodes when returning to a previous frame.
-        self._saved_expansions: dict[tuple[str, str], set[tuple[str, ...]]] = {}
+        # Type: (func, file, frozenset{(name, type)}) | None
+        self._frame_key: tuple | None = None
+        # Saved expansion state keyed by (func, file, var_sig).
+        # Including the variable-type signature means same-named variables
+        # in different scopes (or different functions) never share state.
+        self._saved_expansions: dict[tuple, set[tuple[str, ...]]] = {}
 
     def title(self) -> str:
         return "LOCALS"
@@ -94,6 +96,24 @@ class LocalVariablePane(PaneBase):
         self._var_delete = var_delete
         self._var_update = var_update
 
+    @staticmethod
+    def _make_frame_key(frame: "Frame | None", variables: list[LocalVariable]) -> tuple | None:
+        """Build a hashable key that uniquely identifies the current scope.
+
+        The key is ``(func, file, frozenset{(name, type)})``.  Including the
+        variable-type signature means:
+
+        * ``main()`` and ``f()`` with the same-named ``w`` get different keys
+          because ``func`` differs.
+        * Inner-scope ``int w`` shadowing outer ``TestWrapper w`` in the same
+          function gets a different key because the type differs.
+        * Same function, same variables → identical key → in-place update.
+        """
+        if not frame or not frame.func:
+            return None
+        var_sig = frozenset((v.name, v.type) for v in variables)
+        return (frame.func, frame.fullname or frame.file, var_sig)
+
     def set_variables(
         self,
         variables: list[LocalVariable],
@@ -101,41 +121,31 @@ class LocalVariablePane(PaneBase):
     ) -> None:
         """Called when GDB stops — update in-place or rebuild as needed.
 
-        *frame* is the current GDB frame and is used as the expansion-state
-        key: ``(frame.func, frame.fullname or frame.file)`` uniquely
-        identifies a function within a file, so same-named variables in
-        different functions never share saved expansion state.
-
-        An empty *variables* list means the inferior is running (GDB sends
-        ``on_locals([])`` with every ``*running`` notification).  We cancel
-        any pending rebuild but keep state intact so the next stop in the
-        same frame can do an in-place update instead of a full rebuild.
+        An empty *variables* list means the inferior is running; we cancel
+        any pending rebuild but keep state intact for the next stop.
         """
         if not variables:
             self._rebuild_gen += 1
             return
 
-        new_frame_key: tuple[str, str] | None = None
-        if frame and frame.func:
-            new_frame_key = (frame.func, frame.fullname or frame.file)
-
-        old_names = {v.name for v in self._variables}
-        new_names = {v.name for v in variables}
+        new_frame_key = self._make_frame_key(frame, variables)
         self._variables = list(variables)
         self._rebuild_gen += 1
         gen = self._rebuild_gen
 
-        if old_names == new_names and self._varobj_names and self._var_update:
-            self._frame_key = new_frame_key
+        if (new_frame_key is not None
+                and new_frame_key == self._frame_key
+                and self._varobj_names
+                and self._var_update):
+            # Identical frame+variables → update changed values in-place.
             asyncio.create_task(self._update_tree(gen))
         else:
-            # Save the current expansion state under the outgoing frame key.
+            # Frame or variable set changed — save current state, then rebuild.
             if self._frame_key is not None:
                 paths = self._collect_expanded_paths()
                 if paths:
                     self._saved_expansions[self._frame_key] = paths
             self._frame_key = new_frame_key
-            # Restore any previously saved state for the incoming frame.
             restore = (
                 self._saved_expansions.get(new_frame_key, set())
                 if new_frame_key is not None

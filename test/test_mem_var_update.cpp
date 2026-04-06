@@ -35,12 +35,12 @@ struct TestWrapper
 
 void f()
 {
-    TestWrapper fw {};
+    TestWrapper w {};
 
-    fw.test.a = 30;
-    fw.test.b = 95.6f;
-    fw.test.c = 7890123L;
-    fw.test.d = "Updated string in f()";
+    w.test.a = 30;
+    w.test.b = 95.6f;
+    w.test.c = 7890123L;
+    w.test.d = "Updated string in f()";
 }
 
 int main()
