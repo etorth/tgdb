@@ -46,6 +46,7 @@ void f()
 int main()
 {
     TestWrapper w {};
+    TestWrapper r {};
 
     w.test.a = 10;
     w.test.b = 45.6f;

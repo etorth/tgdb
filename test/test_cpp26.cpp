@@ -85,6 +85,9 @@ void literals_test() {
     auto 😊😊 = "emoji x 2";
     auto 😊😊😊 = "emoji x 3";
 
+    auto xx = "emoji";
+    const auto xx2 = "emoji x 2";
+
     const char* raw_str = R"delimiter(
         Inside a raw string: " \ '
         No escape needed here.
