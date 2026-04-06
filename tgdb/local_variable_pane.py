@@ -140,9 +140,14 @@ class LocalVariablePane(PaneBase):
             return
 
         # Same function/file — evaluate addresses to detect inner-scope shadows.
+        # Deduplicate by name: GDB returns every binding of a shadowed variable
+        # (innermost first), but all -data-evaluate-expression &name calls resolve
+        # to the same innermost binding.  We only need one query per unique name.
         addrs: dict[str, str] = {}
         if self._var_eval:
             for var in variables:
+                if var.name in addrs:
+                    continue  # already have the innermost address for this name
                 if self._rebuild_gen != gen:
                     return
                 try:
@@ -151,7 +156,9 @@ class LocalVariablePane(PaneBase):
                     addrs[var.name] = var.type  # fallback: type string
         else:
             # No eval callback: use type as fallback (handles different-type shadows)
-            addrs = {v.name: v.type for v in variables}
+            for var in variables:
+                if var.name not in addrs:
+                    addrs[var.name] = var.type
 
         if self._rebuild_gen != gen:
             return
@@ -368,13 +375,25 @@ class LocalVariablePane(PaneBase):
         if self._rebuild_gen != gen:
             return
 
+        # GDB may return multiple entries for the same name when nested scopes
+        # shadow each other (one per visible binding, innermost first).  Only
+        # show the innermost binding — creating a varobj for each would produce
+        # duplicate tree entries all pointing to the same innermost variable.
+        seen_names: set[str] = set()
+
         if not self._var_create:
             for var in self._variables:
+                if var.name in seen_names:
+                    continue
+                seen_names.add(var.name)
                 val = var.value.replace("\n", " ") if var.value else "<complex>"
                 tree.root.add_leaf(f"{var.name} = {val}")
             return
 
         for var in self._variables:
+            if var.name in seen_names:
+                continue
+            seen_names.add(var.name)
             if self._rebuild_gen != gen:
                 return
             try:
