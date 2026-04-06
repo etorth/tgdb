@@ -448,7 +448,7 @@ class LocalVariablePane(PaneBase):
         except Exception:
             # Can't create address-based varobj — show last known value.
             if node is not None:
-                val = outer_var.value.replace("\n", " ") if outer_var.value else "?"
+                val = self._compact_value(outer_var.value) if outer_var.value else "?"
                 node.set_label(f"{name} = {val}  ← shadowed")
                 node.data["has_children"] = False
             return
@@ -477,7 +477,7 @@ class LocalVariablePane(PaneBase):
             if has_children:
                 label = exp
                 if value:
-                    label += f" = {self._truncate(value)}"
+                    label += f" = {self._compact_value(value)}"
             else:
                 label = f"{exp} = {value}" if value else exp
             node.set_label(label + "  ← shadowed")
@@ -495,7 +495,7 @@ class LocalVariablePane(PaneBase):
             if has_children:
                 label = f"{name}"
                 if value:
-                    label += f" = {self._truncate(value)}"
+                    label += f" = {self._compact_value(value)}"
                 node_new = tree.root.add(
                     label + "  ← shadowed",
                     expand=False,
@@ -551,7 +551,7 @@ class LocalVariablePane(PaneBase):
                 child.remove()
         # Add current shadowed variables.
         for var in shadowed:
-            val = var.value.replace("\n", " ") if var.value else "?"
+            val = self._compact_value(var.value) if var.value else "?"
             label = f"{var.name}: {var.type} = {val}  ← outer scope"
             tree.root.add_leaf(label, data={"shadow": True, "exp": var.name})
 
@@ -590,7 +590,10 @@ class LocalVariablePane(PaneBase):
             if has_children:
                 label = exp
                 if new_value:
-                    label += f" = {self._truncate(new_value)}"
+                    if varobj_name in shadow_varobjs:
+                        label += f" = {self._compact_value(new_value)}"
+                    else:
+                        label += f" = {self._truncate(new_value)}"
             else:
                 label = f"{exp} = {new_value}" if new_value else exp
             if varobj_name in shadow_varobjs:
@@ -803,3 +806,13 @@ class LocalVariablePane(PaneBase):
         if len(s) > max_len:
             return s[: max_len - 1] + "…"
         return s
+
+    @staticmethod
+    def _compact_value(s: str) -> str:
+        """Collapse compound-type values (those starting with '{') to '{…}'.
+
+        Used for shadowed-variable labels where the full value would be
+        very long and the expansion in the tree itself shows the details.
+        Primitive values are returned unchanged.
+        """
+        return "{…}" if s.strip().startswith("{") else s
