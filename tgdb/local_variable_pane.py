@@ -809,10 +809,15 @@ class LocalVariablePane(PaneBase):
 
     @staticmethod
     def _compact_value(s: str) -> str:
-        """Collapse compound-type values (those starting with '{') to '{…}'.
+        """Collapse compound-type values (those starting with '{') to '{...}'.
 
-        Used for shadowed-variable labels where the full value would be
-        very long and the expansion in the tree itself shows the details.
-        Primitive values are returned unchanged.
+        Used for shadowed-variable labels where the full value would be very
+        long and the expanded tree node already shows all the details.
+        Primitive values (int, float, string, …) are returned unchanged.
+
+        Note: for regular (non-shadowed) collapsed compound variables the
+        label already shows ``w = {...}`` because GDB's ``-var-create``
+        returns ``{...}`` as the value summary when pretty-printing is
+        enabled.  This helper is not involved in that path.
         """
-        return "{…}" if s.strip().startswith("{") else s
+        return "{...}" if s.strip().startswith("{") else s
