@@ -120,7 +120,9 @@ class SourceViewRendering:
         # cgdb: vert_bar = SWIN_SYM_LTEE (├) for arrow lines, SWIN_SYM_VLINE (│) otherwise
         # After vert_bar: space for normal; '>' for short arrow;
         #   '─'×col_off + '>' for long arrow, then source from col_off.
-        is_arrow_line = (is_exe and exe_disp in ("shortarrow", "longarrow")) or (is_sel and sel_disp in ("shortarrow", "longarrow"))
+        is_arrow_line = (is_exe and exe_disp in ("shortarrow", "longarrow")) or (
+            is_sel and sel_disp in ("shortarrow", "longarrow")
+        )
         if is_exe and exe_disp in ("shortarrow", "longarrow"):
             arrow_st = self.hl.style("ExecutingLineArrow")
             disp = exe_disp
@@ -229,7 +231,9 @@ class SourceViewRendering:
         out.truncate(max(1, self.size.width or 80), overflow="crop")
         return out
 
-    def _clip_spans_to_cells(self, spans: list[tuple[str, str]], start_cell: int, max_cells: int) -> Text:
+    def _clip_spans_to_cells(
+        self, spans: list[tuple[str, str]], start_cell: int, max_cells: int
+    ) -> Text:
         """Clip styled text by display cells.
 
         If clipping starts or ends in the middle of a wide character, render the
@@ -271,5 +275,3 @@ class SourceViewRendering:
                     out.append("?" * overlap, style=style)
 
         return out
-
-

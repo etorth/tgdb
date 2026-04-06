@@ -85,9 +85,14 @@ def _item_row_text(panel: _PanelLayout, item: ContextMenuItem) -> str:
     right = " " * _PADDING_RIGHT
     if item.has_children:
         tail = f" {_SUBMENU_GLYPH} "
-        filler = max(1, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(tail))
+        filler = max(
+            1,
+            panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(tail),
+        )
         return f"{left}{item.label}{' ' * filler}{tail}"
-    filler = max(0, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(right))
+    filler = max(
+        0, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(right)
+    )
     return f"{left}{item.label}{' ' * filler}{right}"
 
 
@@ -164,7 +169,11 @@ class _PanelWidget(Widget):
         item = panel.items[row.item_index]
         row_rich = sel_rich if row.item_index == panel.selected_index else border_rich
         inner = _item_row_text(panel, item)
-        segs = [Segment("│", border_rich)] + [Segment(ch, row_rich) for ch in inner] + [Segment("│", border_rich)]
+        segs = (
+            [Segment("│", border_rich)]
+            + [Segment(ch, row_rich) for ch in inner]
+            + [Segment("│", border_rich)]
+        )
         return Strip(segs, width)
 
     def _item_at(self, lx: int, ly: int) -> Optional[tuple[int, int]]:
@@ -292,7 +301,11 @@ class ContextMenu(Widget):
     # ------------------------------------------------------------------
 
     def _handle_panel_hover(self, depth: int, item_index: int) -> None:
-        if depth < len(self._selection_path) and self._selection_path[depth] == item_index and depth == len(self._selection_path) - 1:
+        if (
+            depth < len(self._selection_path)
+            and self._selection_path[depth] == item_index
+            and depth == len(self._selection_path) - 1
+        ):
             return  # selection unchanged
         self._set_selection(depth, item_index, open_child=True)
 
@@ -345,7 +358,12 @@ class ContextMenu(Widget):
         base_padding = _PADDING_LEFT + _PADDING_RIGHT
         submenu_tail = 3
         return max(
-            (cell_len(item.label) + base_padding + (submenu_tail if item.has_children else 0) for item in items),
+            (
+                cell_len(item.label)
+                + base_padding
+                + (submenu_tail if item.has_children else 0)
+                for item in items
+            ),
             default=1,
         )
 
@@ -511,9 +529,13 @@ class ContextMenu(Widget):
         key = event.key
         char = event.character or ""
         if key == "up" or char == "k":
-            self._set_selection(depth, self._selection_path[depth] - 1, open_child=False)
+            self._set_selection(
+                depth, self._selection_path[depth] - 1, open_child=False
+            )
         elif key == "down" or char == "j":
-            self._set_selection(depth, self._selection_path[depth] + 1, open_child=False)
+            self._set_selection(
+                depth, self._selection_path[depth] + 1, open_child=False
+            )
         elif key == "right" or char == "l":
             self._open_child_panel(depth)
         elif key == "left" or char == "h":

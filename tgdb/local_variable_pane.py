@@ -239,7 +239,9 @@ class LocalVariablePane(PaneBase):
         # to_reanchor: was main, now shadowed by inner var → keep tree node,
         #              rebuild varobj using *(Type*)addr so it stays valid.
         # to_truly_remove: variable gone entirely.
-        to_reanchor: list[tuple[str, str, str, LocalVariable]] = []  # (name,varobj,addr,outer_var)
+        to_reanchor: list[
+            tuple[str, str, str, LocalVariable]
+        ] = []  # (name,varobj,addr,outer_var)
         to_truly_remove: list[tuple[str, str]] = []  # (name, varobj)
 
         for name, (old_varobj, old_addr) in self._tracked.items():
@@ -268,15 +270,22 @@ class LocalVariablePane(PaneBase):
 
         # ── 5. Fast path: nothing structural changed ───────────────────────
         shadow_varobjs = {vo for _, (vo, _) in self._shadows.items()}
-        no_change = (not to_truly_remove and not to_reanchor and not to_add
-                     and not to_promote and not shadows_to_clean
-                     and new_frame_key == self._frame_key)
+        no_change = (
+            not to_truly_remove
+            and not to_reanchor
+            and not to_add
+            and not to_promote
+            and not shadows_to_clean
+            and new_frame_key == self._frame_key
+        )
         if no_change:
             if self._var_update:
                 try:
                     changelist = await self._var_update("*")
                     if self._rebuild_gen == gen:
-                        self._apply_changelist(changelist, shadow_varobjs=shadow_varobjs)
+                        self._apply_changelist(
+                            changelist, shadow_varobjs=shadow_varobjs
+                        )
                 except Exception:
                     pass
             return
@@ -289,17 +298,18 @@ class LocalVariablePane(PaneBase):
         self._frame_key = new_frame_key
 
         # ── 7. Update values for UNCHANGED variables ───────────────────────
-        stale_varobjs = (
-            {vo for _, vo in to_truly_remove}
-            | {vo for _, vo, _, _ in to_reanchor}
-        )
+        stale_varobjs = {vo for _, vo in to_truly_remove} | {
+            vo for _, vo, _, _ in to_reanchor
+        }
         if self._var_update and self._varobj_names:
             try:
                 changelist = await self._var_update("*")
                 if self._rebuild_gen == gen:
-                    self._apply_changelist(changelist,
-                                           skip_varobjs=stale_varobjs,
-                                           shadow_varobjs=shadow_varobjs)
+                    self._apply_changelist(
+                        changelist,
+                        skip_varobjs=stale_varobjs,
+                        shadow_varobjs=shadow_varobjs,
+                    )
             except Exception:
                 pass
 
@@ -361,7 +371,8 @@ class LocalVariablePane(PaneBase):
         # tree node already serves as their display.
         reanchor_names = {name for name, _, _, _ in to_reanchor}
         leaf_shadowed = [
-            v for v in new_shadowed
+            v
+            for v in new_shadowed
             if v.name not in self._shadows and v.name not in reanchor_names
         ]
         await self._refresh_shadow_leaves(gen, tree, leaf_shadowed)
@@ -369,7 +380,9 @@ class LocalVariablePane(PaneBase):
             return
 
         # ── 13. Add new variables ──────────────────────────────────────────
-        restore = self._saved_expansions.get(new_frame_key, set()) if new_frame_key else set()
+        restore = (
+            self._saved_expansions.get(new_frame_key, set()) if new_frame_key else set()
+        )
         if self._var_create:
             for name, addr, var in to_add:
                 if self._rebuild_gen != gen:
@@ -392,9 +405,8 @@ class LocalVariablePane(PaneBase):
 
                 numchild = self._safe_int(info.get("numchild", "0"))
                 has_children = (
-                    (numchild > 0 or info.get("dynamic", "0") == "1")
-                    and not _suppress_children(info)
-                )
+                    numchild > 0 or info.get("dynamic", "0") == "1"
+                ) and not _suppress_children(info)
                 value = info.get("value", "")
 
                 dh = info.get("displayhint", "")
@@ -405,17 +417,25 @@ class LocalVariablePane(PaneBase):
                     node = tree.root.add(
                         label,
                         expand=False,
-                        data={"varobj": varobj_name, "exp": var.name,
-                              "loaded": False, "has_children": True,
-                              "displayhint": dh},
+                        data={
+                            "varobj": varobj_name,
+                            "exp": var.name,
+                            "loaded": False,
+                            "has_children": True,
+                            "displayhint": dh,
+                        },
                     )
                     node.add_leaf("⏳ loading...")
                 else:
                     label = f"{var.name} = {value}"
                     node = tree.root.add_leaf(
                         label,
-                        data={"varobj": varobj_name, "exp": var.name,
-                              "has_children": False, "displayhint": dh},
+                        data={
+                            "varobj": varobj_name,
+                            "exp": var.name,
+                            "has_children": False,
+                            "displayhint": dh,
+                        },
                     )
 
                 if varobj_name:
@@ -493,9 +513,8 @@ class LocalVariablePane(PaneBase):
         value = info.get("value", outer_var.value or "")
         numchild = self._safe_int(info.get("numchild", "0"))
         has_children = (
-            (numchild > 0 or info.get("dynamic", "0") == "1")
-            and not _suppress_children(info)
-        )
+            numchild > 0 or info.get("dynamic", "0") == "1"
+        ) and not _suppress_children(info)
 
         if node is not None:
             # Keep existing node — just update varobj reference and label.
@@ -531,16 +550,25 @@ class LocalVariablePane(PaneBase):
                 node_new = tree.root.add(
                     label + "  ← shadowed",
                     expand=False,
-                    data={"varobj": new_varobj, "exp": name,
-                          "loaded": False, "has_children": True, "displayhint": dh},
+                    data={
+                        "varobj": new_varobj,
+                        "exp": name,
+                        "loaded": False,
+                        "has_children": True,
+                        "displayhint": dh,
+                    },
                 )
                 node_new.add_leaf("⏳ loading...")
             else:
                 label = f"{name} = {value}" if value else name
                 node_new = tree.root.add_leaf(
                     label + "  ← shadowed",
-                    data={"varobj": new_varobj, "exp": name,
-                          "has_children": False, "displayhint": dh},
+                    data={
+                        "varobj": new_varobj,
+                        "exp": name,
+                        "has_children": False,
+                        "displayhint": dh,
+                    },
                 )
             if new_varobj:
                 self._varobj_to_node[new_varobj] = node_new
@@ -743,7 +771,9 @@ class LocalVariablePane(PaneBase):
             return
         # Pass the parent node's displayhint so _add_children knows how to
         # lay out the children (e.g. "map" → pair key-value, "array" → index).
-        parent_dh = node.data.get("displayhint", "") if isinstance(node.data, dict) else ""
+        parent_dh = (
+            node.data.get("displayhint", "") if isinstance(node.data, dict) else ""
+        )
         await self._add_children(node, children, parent_dh)
 
     async def _add_children(
@@ -776,9 +806,8 @@ class LocalVariablePane(PaneBase):
                 val_numchild = self._safe_int(val_child.get("numchild", "0"))
                 val_dynamic = val_child.get("dynamic", "0") == "1"
                 val_has_children = (
-                    (val_numchild > 0 or val_dynamic)
-                    and not _suppress_children(val_child)
-                )
+                    val_numchild > 0 or val_dynamic
+                ) and not _suppress_children(val_child)
                 val_value = val_child.get("value", "")
                 val_dh = val_child.get("displayhint", "")
                 exp = f"[{key_val}]"
@@ -787,18 +816,27 @@ class LocalVariablePane(PaneBase):
                     if val_value:
                         label += f" = {self._truncate(val_value)}"
                     child_node = node.add(
-                        label, expand=False,
-                        data={"varobj": val_name, "exp": exp,
-                              "loaded": False, "has_children": True,
-                              "displayhint": val_dh},
+                        label,
+                        expand=False,
+                        data={
+                            "varobj": val_name,
+                            "exp": exp,
+                            "loaded": False,
+                            "has_children": True,
+                            "displayhint": val_dh,
+                        },
                     )
                     child_node.add_leaf("⏳ loading...")
                 else:
                     label = f"{exp} = {val_value}" if val_value else exp
                     child_node = node.add_leaf(
                         label,
-                        data={"varobj": val_name, "exp": exp,
-                              "has_children": False, "displayhint": val_dh},
+                        data={
+                            "varobj": val_name,
+                            "exp": exp,
+                            "has_children": False,
+                            "displayhint": val_dh,
+                        },
                     )
                 if val_name:
                     self._varobj_to_node[val_name] = child_node
@@ -811,10 +849,7 @@ class LocalVariablePane(PaneBase):
             exp = child.get("exp", "")
             numchild = self._safe_int(child.get("numchild", "0"))
             dynamic = child.get("dynamic", "0") == "1"
-            has_children = (
-                (numchild > 0 or dynamic)
-                and not _suppress_children(child)
-            )
+            has_children = (numchild > 0 or dynamic) and not _suppress_children(child)
             value = child.get("value", "")
             child_dh = child.get("displayhint", "")
 
@@ -831,18 +866,27 @@ class LocalVariablePane(PaneBase):
                 if value:
                     label += f" = {self._truncate(value)}"
                 child_node = node.add(
-                    label, expand=False,
-                    data={"varobj": child_name, "exp": exp,
-                          "loaded": False, "has_children": True,
-                          "displayhint": child_dh},
+                    label,
+                    expand=False,
+                    data={
+                        "varobj": child_name,
+                        "exp": exp,
+                        "loaded": False,
+                        "has_children": True,
+                        "displayhint": child_dh,
+                    },
                 )
                 child_node.add_leaf("⏳ loading...")
             else:
                 label = f"{exp} = {value}" if value else exp
                 child_node = node.add_leaf(
                     label,
-                    data={"varobj": child_name, "exp": exp,
-                          "has_children": False, "displayhint": child_dh},
+                    data={
+                        "varobj": child_name,
+                        "exp": exp,
+                        "has_children": False,
+                        "displayhint": child_dh,
+                    },
                 )
 
             if child_name:

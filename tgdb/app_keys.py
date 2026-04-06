@@ -20,6 +20,7 @@ def _copy_clipboard(app: "TGDBApp", text: str) -> None:
     """
     try:
         import pyperclip
+
         pyperclip.copy(text)
         return
     except Exception:
@@ -35,6 +36,7 @@ def _read_clipboard(app: "TGDBApp") -> str:
     """
     try:
         import pyperclip
+
         return pyperclip.paste()
     except Exception:
         pass
@@ -355,7 +357,11 @@ class KeyRoutingMixin:
 
         if event.button == 3:
             # Close an open context menu if the right-click lands outside it.
-            if menu and menu.is_open and not self._context_menu_contains(screen_x, screen_y):
+            if (
+                menu
+                and menu.is_open
+                and not self._context_menu_contains(screen_x, screen_y)
+            ):
                 self._close_context_menu(restore_focus=False)
             try:
                 clicked_widget, _ = self.get_widget_at(screen_x, screen_y)

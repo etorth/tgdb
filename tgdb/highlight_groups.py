@@ -112,7 +112,9 @@ DEFAULT_GROUPS: dict[str, HighlightStyle] = {
     # Selected line — explicit gray (color 240) so it is visually distinct
     # from the title bar's reverse-video white.
     "SelectedLineArrow": HighlightStyle(fg="bright_white", bold=True),
-    "SelectedLineHighlight": HighlightStyle(fg="bright_white", bg="color(240)", bold=True),
+    "SelectedLineHighlight": HighlightStyle(
+        fg="bright_white", bg="color(240)", bold=True
+    ),
     "SelectedLineBlock": HighlightStyle(fg="bright_white", bg="color(240)"),
     "SelectedLineNr": HighlightStyle(fg="bright_white", bold=True),
     # Executing line — cgdb: HLG_EXECUTING_LINE_ARROW=bold green,
@@ -138,7 +140,9 @@ class HighlightGroups:
     """Runtime table of highlight groups, configurable via :highlight."""
 
     def __init__(self) -> None:
-        self._groups: dict[str, HighlightStyle] = {k: HighlightStyle(**vars(v)) for k, v in DEFAULT_GROUPS.items()}
+        self._groups: dict[str, HighlightStyle] = {
+            k: HighlightStyle(**vars(v)) for k, v in DEFAULT_GROUPS.items()
+        }
 
     # Legacy cgdb aliases — accepted in :highlight command
     _ALIASES: dict[str, str] = {

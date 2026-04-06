@@ -61,7 +61,12 @@ class GDBController(ParsingMixin, VarobjMixin):
         on_error(msg: str)                   — user-visible ^error
     """
 
-    def __init__(self, gdb_path: str = "gdb", args: list[str] | None = None, init_commands: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        gdb_path: str = "gdb",
+        args: list[str] | None = None,
+        init_commands: list[str] | None = None,
+    ) -> None:
         self.gdb_path = gdb_path
         self.gdb_args = args or []
         self.init_commands = init_commands or []
@@ -117,7 +122,9 @@ class GDBController(ParsingMixin, VarobjMixin):
             # Disable echo on MI slave so our written commands don't echo back
             try:
                 attrs = termios.tcgetattr(mi_slave_fd)
-                attrs[3] &= ~(termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ECHONL)
+                attrs[3] &= ~(
+                    termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ECHONL
+                )
                 termios.tcsetattr(mi_slave_fd, termios.TCSANOW, attrs)
             except Exception:
                 pass
@@ -268,7 +275,9 @@ class GDBController(ParsingMixin, VarobjMixin):
 
         if cls == "error":
             if meta.get("kind") == "current-location":
-                self.request_source_file(report_error=bool(meta.get("report_error", True)))
+                self.request_source_file(
+                    report_error=bool(meta.get("report_error", True))
+                )
             elif meta.get("kind") == "stack-locals":
                 self.locals = []
                 self.on_locals([])
@@ -319,7 +328,9 @@ class GDBController(ParsingMixin, VarobjMixin):
                 self._emit_threads()
             register_names = results.get("register-names")
             if isinstance(register_names, list):
-                self.register_names = [name if isinstance(name, str) else "" for name in register_names]
+                self.register_names = [
+                    name if isinstance(name, str) else "" for name in register_names
+                ]
                 self._emit_registers()
             register_values = results.get("register-values")
             if isinstance(register_values, list):
@@ -333,7 +344,9 @@ class GDBController(ParsingMixin, VarobjMixin):
                 if path:
                     self.on_source_file(path, parsed.line)
                 elif meta.get("kind") == "current-location":
-                    self.request_source_file(report_error=bool(meta.get("report_error", True)))
+                    self.request_source_file(
+                        report_error=bool(meta.get("report_error", True))
+                    )
                 if meta.get("kind") == "current-location":
                     self.request_current_frame_locals(report_error=False)
                     self.request_current_stack_frames(report_error=False)
@@ -342,7 +355,9 @@ class GDBController(ParsingMixin, VarobjMixin):
             elif meta.get("kind") == "current-location":
                 # Mirror cgdb's startup query path: ask for the current frame
                 # first, then fall back to exec source-file if needed.
-                self.request_source_file(report_error=bool(meta.get("report_error", True)))
+                self.request_source_file(
+                    report_error=bool(meta.get("report_error", True))
+                )
 
         if token is not None and token in self._pending:
             fut = self._pending.pop(token)
@@ -376,7 +391,9 @@ class GDBController(ParsingMixin, VarobjMixin):
     # MI command helpers (sent on MI channel, not primary console)
     # ------------------------------------------------------------------
 
-    def mi_command(self, cmd: str, *, report_error: bool = True, kind: str | None = None) -> int | None:
+    def mi_command(
+        self, cmd: str, *, report_error: bool = True, kind: str | None = None
+    ) -> int | None:
         return self._send_mi_command(cmd, report_error=report_error, kind=kind)
 
     # ------------------------------------------------------------------

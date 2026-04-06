@@ -151,7 +151,9 @@ class TGDBScreen:
         """Remove all workspace panes and reset to a single empty cell."""
         await self._do_close_all()
 
-    async def split(self, pane: list[int] | None = None, mode: SplitMode = SplitMode.HORIZONTAL) -> None:
+    async def split(
+        self, pane: list[int] | None = None, mode: SplitMode = SplitMode.HORIZONTAL
+    ) -> None:
         """Add a new empty cell relative to the cell at *pane*.
 
         If *pane* is ``[]`` (or omitted), the new cell is added to the root
@@ -186,10 +188,14 @@ class TGDBScreen:
         current = root
         for step, i in enumerate(address):
             if not isinstance(current, PaneContainer):
-                raise ValueError(f"Path element [{step}]={i}: expected PaneContainer, got {type(current).__name__}")
+                raise ValueError(
+                    f"Path element [{step}]={i}: expected PaneContainer, got {type(current).__name__}"
+                )
             items = current.items
             if i < 0 or i >= len(items):
-                raise IndexError(f"Path element [{step}]={i}: index out of range (container has {len(items)} items)")
+                raise IndexError(
+                    f"Path element [{step}]={i}: index out of range (container has {len(items)} items)"
+                )
             current = items[i]
         return current
 

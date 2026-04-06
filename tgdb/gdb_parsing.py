@@ -155,7 +155,9 @@ class ParsingMixin:
                     continue
                 raw = item.get("thread", item)
                 if isinstance(raw, list):
-                    threads_raw.extend(entry for entry in raw if isinstance(entry, dict))
+                    threads_raw.extend(
+                        entry for entry in raw if isinstance(entry, dict)
+                    )
                 elif isinstance(raw, dict):
                     threads_raw.append(raw)
 
@@ -200,7 +202,11 @@ class ParsingMixin:
 
         registers: list[RegisterInfo] = []
         for number, value in sorted(self._register_values.items()):
-            name = self.register_names[number] if 0 <= number < len(self.register_names) else ""
+            name = (
+                self.register_names[number]
+                if 0 <= number < len(self.register_names)
+                else ""
+            )
             if not name:
                 continue
             registers.append(RegisterInfo(number=number, name=name, value=value))

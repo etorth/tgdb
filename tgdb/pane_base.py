@@ -99,7 +99,9 @@ class _TitleBar(Widget):
                 if child in items:
                     idx = items.index(child)
                     if idx > 0:
-                        parent._resize_from_title_drag(items[idx - 1], items[idx], screen_y)
+                        parent._resize_from_title_drag(
+                            items[idx - 1], items[idx], screen_y
+                        )
                         return
                     # idx == 0 → this pane is first; keep walking up
             child = parent

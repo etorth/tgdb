@@ -44,7 +44,10 @@ class _RegisterContent(Widget):
         for i, register in enumerate(self._registers[:height]):
             if i > 0:
                 result.append("\n")
-            result.append(fit_cells(self._register_text(register), width), style=self.hl.style("Normal"))
+            result.append(
+                fit_cells(self._register_text(register), width),
+                style=self.hl.style("Normal"),
+            )
         remaining = height - min(height, len(self._registers))
         for i in range(max(0, remaining)):
             result.append("\n")

@@ -54,7 +54,9 @@ from .app_keys import KeyRoutingMixin
 from .app_callbacks import CallbacksMixin
 
 
-class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, CallbacksMixin, App):
+class TGDBApp(
+    CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, CallbacksMixin, App
+):
     """tgdb — Python front-end for GDB, compatible with cgdb."""
 
     CSS = """
@@ -106,7 +108,13 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
     }
     """
 
-    def __init__(self, gdb_path: str = "gdb", gdb_args: list[str] | None = None, rc_file: Optional[str] = None, **kwargs) -> None:
+    def __init__(
+        self,
+        gdb_path: str = "gdb",
+        gdb_args: list[str] | None = None,
+        rc_file: Optional[str] = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.hl = HighlightGroups()
         self.km = KeyMapper()
@@ -123,12 +131,16 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         _tgdb_pkg.screen._set_app(self)
         self.cp.set_py_globals({"app": self, "tgdb": _tgdb_pkg})
 
-        self._rc_file: Optional[str] = rc_file  # resolved in on_mount after app is ready
+        self._rc_file: Optional[str] = (
+            rc_file  # resolved in on_mount after app is ready
+        )
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: Optional[asyncio.Task] = None
         self._cmd_task: Optional[asyncio.Task] = None  # running CommandLineBar command
-        self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
+        self._pending_replay_tokens: list[
+            str
+        ] = []  # map tokens queued after async <CR>
 
         self._mode: str = "GDB_PROMPT"
         self._await_mark_jump: bool = False
@@ -160,7 +172,9 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self._current_registers: list[RegisterInfo] = []
         self._in_map_replay: bool = False
         self._pane_descriptors: dict[str, PaneDescriptor] = {
-            "source": PaneDescriptor("Source", self._make_source_pane, lambda: self._source_view),
+            "source": PaneDescriptor(
+                "Source", self._make_source_pane, lambda: self._source_view
+            ),
             "gdb": PaneDescriptor("GDB", self._make_gdb_pane, lambda: self._gdb_widget),
             "locals": PaneDescriptor(
                 "Locals",
@@ -215,7 +229,9 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
                 orientation=self.cfg.winsplitorientation,
                 id="split-container",
             )
-            yield CommandLineBar(self.hl, completion_provider=self.cp.get_completions, id="cmdline")
+            yield CommandLineBar(
+                self.hl, completion_provider=self.cp.get_completions, id="cmdline"
+            )
         yield FileDialog(self.hl, id="file-dlg")
         yield ContextMenu(self.hl, id="context-menu")
 
@@ -270,7 +286,9 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
             from datetime import datetime
 
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cmdline._add_to_history(f"# tgdb begins {ts}", max_size=self.cfg.historysize)
+            cmdline._add_to_history(
+                f"# tgdb begins {ts}", max_size=self.cfg.historysize
+            )
         except NoMatches:
             pass
 
@@ -280,8 +298,12 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         self.gdb.on_stopped = lambda f: self.call_later(self._ui_on_stopped, f)
         self.gdb.on_running = lambda: self.call_later(self._ui_on_running)
         self.gdb.on_breakpoints = lambda b: self.call_later(self._ui_set_breakpoints, b)
-        self.gdb.on_source_files = lambda f: self.call_later(self._ui_set_source_files, f)
-        self.gdb.on_source_file = lambda f, ln: self.call_later(self._ui_load_source_file, f, ln)
+        self.gdb.on_source_files = lambda f: self.call_later(
+            self._ui_set_source_files, f
+        )
+        self.gdb.on_source_file = lambda f, ln: self.call_later(
+            self._ui_load_source_file, f, ln
+        )
         self.gdb.on_locals = lambda v: self.call_later(self._ui_set_locals, v)
         self.gdb.on_registers = lambda v: self.call_later(self._ui_set_registers, v)
         self.gdb.on_stack = lambda v: self.call_later(self._ui_set_stack, v)
@@ -445,7 +467,9 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
             return False
         return True
 
-    def _first_workspace_leaf(self, widget: Optional[Widget] = None) -> Optional[Widget]:
+    def _first_workspace_leaf(
+        self, widget: Optional[Widget] = None
+    ) -> Optional[Widget]:
         if widget is None:
             try:
                 widget = self.query_one("#split-container", PaneContainer)
@@ -462,4 +486,3 @@ class TGDBApp(CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, Callb
         if getattr(widget, "can_focus", False) and self._widget_attached(widget):
             return widget
         return None
-

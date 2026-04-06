@@ -66,7 +66,9 @@ class ResizeSource(Message):
     jump=True : delta is ±1 quarter-mark step (cgdb '+' / '_')
     """
 
-    def __init__(self, delta: int, rows: bool = False, jump: bool = False, percent: bool = False) -> None:
+    def __init__(
+        self, delta: int, rows: bool = False, jump: bool = False, percent: bool = False
+    ) -> None:
         super().__init__()
         self.delta = delta
         self.rows = rows

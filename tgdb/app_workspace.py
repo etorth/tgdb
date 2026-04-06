@@ -190,7 +190,9 @@ class WorkspaceMixin:
     # Workspace tree operations
     # ------------------------------------------------------------------
 
-    def _find_workspace_item(self: TGDBApp, widget: Optional[Widget]) -> Optional[Widget]:
+    def _find_workspace_item(
+        self: TGDBApp, widget: Optional[Widget]
+    ) -> Optional[Widget]:
         current = widget
         while isinstance(current, Widget):
             if isinstance(current, Splitter):
@@ -208,17 +210,23 @@ class WorkspaceMixin:
         except NoMatches:
             return None
 
-    async def _replace_workspace_item(self: TGDBApp, target: Widget, new_item: Widget) -> bool:
+    async def _replace_workspace_item(
+        self: TGDBApp, target: Widget, new_item: Widget
+    ) -> bool:
         parent = target.parent if isinstance(target.parent, PaneContainer) else None
         if parent is None:
             return False
         await parent.replace_item(target, new_item)
         return True
 
-    async def _normalize_container_after_delete(self: TGDBApp, container: PaneContainer) -> Optional[Widget]:
+    async def _normalize_container_after_delete(
+        self: TGDBApp, container: PaneContainer
+    ) -> Optional[Widget]:
         current = container
         while True:
-            parent = current.parent if isinstance(current.parent, PaneContainer) else None
+            parent = (
+                current.parent if isinstance(current.parent, PaneContainer) else None
+            )
             item_count = len(current.items)
             if parent is None:
                 if item_count == 0:
@@ -235,7 +243,9 @@ class WorkspaceMixin:
                 await parent.replace_item(current, EmptyPane(self.hl))
             current = parent
 
-    async def _add_pane_to_workspace(self: TGDBApp, target: Widget, pane_kind: str) -> Optional[Widget]:
+    async def _add_pane_to_workspace(
+        self: TGDBApp, target: Widget, pane_kind: str
+    ) -> Optional[Widget]:
         pane = self._create_pane(pane_kind)
         if pane is None:
             return None
@@ -269,7 +279,9 @@ class WorkspaceMixin:
         await parent.take_item(target)
         return await self._normalize_container_after_delete(parent)
 
-    async def _apply_context_menu_action(self: TGDBApp, target: Widget, direction: str) -> bool:
+    async def _apply_context_menu_action(
+        self: TGDBApp, target: Widget, direction: str
+    ) -> bool:
         axis = "horizontal" if direction in ("left", "right") else "vertical"
         insert_before = direction in ("left", "up")
         parent = target.parent if isinstance(target.parent, PaneContainer) else None

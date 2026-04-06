@@ -69,7 +69,9 @@ class VarobjMixin:
         Each child dict has keys: ``name``, ``exp``, ``numchild``, ``value``,
         ``type``, etc.
         """
-        result = await self.mi_command_async(f"-var-list-children --all-values {varobj_name}")
+        result = await self.mi_command_async(
+            f"-var-list-children --all-values {varobj_name}"
+        )
         payload = result.get("payload") or {}
         children_raw = payload.get("children", [])
         children: list[dict] = []

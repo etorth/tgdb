@@ -58,7 +58,9 @@ class HistoryMixin:
                 entries.append(stripped)
         self._history = entries
 
-    def save_history(self, path: Optional[Path] = None, *, max_size: int = 1024) -> Optional[str]:
+    def save_history(
+        self, path: Optional[Path] = None, *, max_size: int = 1024
+    ) -> Optional[str]:
         """Save the current session history to *path* (default: history file).
 
         Multi-line (heredoc) entries are stored verbatim (header + body + marker).

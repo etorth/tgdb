@@ -42,7 +42,9 @@ class RenderMixin:
 
         if self._search_active:
             pfx = "/" if self._search_forward else "?"
-            t = Text(_pad_crop(f"{pfx}{self._search_buf}", w), no_wrap=True, overflow="crop")
+            t = Text(
+                _pad_crop(f"{pfx}{self._search_buf}", w), no_wrap=True, overflow="crop"
+            )
             t.stylize(style)
             return t
 
@@ -51,7 +53,9 @@ class RenderMixin:
             return self._render_streaming(w, style)
 
         if self._message:
-            t = Text(_pad_crop(self._message, w), style=style, no_wrap=True, overflow="crop")
+            t = Text(
+                _pad_crop(self._message, w), style=style, no_wrap=True, overflow="crop"
+            )
             return t
 
         return Text(" " * w, style=style, no_wrap=True, overflow="crop")
@@ -90,7 +94,9 @@ class RenderMixin:
             other_tokens = [t for t in style_tokens if t != "reverse"]
             cursor_style = " ".join(other_tokens) if other_tokens else "default"
         else:
-            cursor_style = f"reverse {style}" if style and style != "default" else "reverse"
+            cursor_style = (
+                f"reverse {style}" if style and style != "default" else "reverse"
+            )
 
         t = Text(no_wrap=True, overflow="crop")
         if cursor_col > 0:

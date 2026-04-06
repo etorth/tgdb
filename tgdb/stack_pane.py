@@ -52,7 +52,11 @@ class _StackContent(Widget):
         for i, frame in enumerate(self._frames[:height]):
             if i > 0:
                 result.append("\n")
-            style = self.hl.style("SelectedLineHighlight") if frame.level == self._current_level else self.hl.style("Normal")
+            style = (
+                self.hl.style("SelectedLineHighlight")
+                if frame.level == self._current_level
+                else self.hl.style("Normal")
+            )
             result.append(fit_cells(self._frame_text(frame), width), style=style)
         remaining = height - min(height, len(self._frames))
         for i in range(max(0, remaining)):

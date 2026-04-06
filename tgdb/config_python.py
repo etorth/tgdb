@@ -25,7 +25,9 @@ class PythonExecMixin:
 
     _py_namespace: dict
 
-    async def _exec_py_async(self, code: str, source_label: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def _exec_py_async(
+        self, code: str, source_label: str, print_fn: Optional[Callable] = None
+    ) -> Optional[str]:
         """Compile *code* as ``async def _tgdb_RSVD_run_script()`` and await it.
 
         This lets scripts use ``await tgdb.screen.split(...)`` etc.
@@ -92,7 +94,9 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
         if print_fn is not None:
             writer: Any = _Writer(print_fn)
 
-            def _custom_print(*args, sep: str = " ", end: str = "\n", file=None, flush: bool = False) -> None:
+            def _custom_print(
+                *args, sep: str = " ", end: str = "\n", file=None, flush: bool = False
+            ) -> None:
                 print_fn(sep.join(str(a) for a in args) + end)
 
             raw_builtins = ns.get("__builtins__", builtins)
@@ -123,14 +127,22 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
         finally:
             # Propagate any new/modified names back to the persistent namespace
             # so that 'def foo', 'import mod', 'x = 1' survive across commands.
-            self._py_namespace.update({k: v for k, v in ns.items() if not k.startswith(_TGDB_RESERVED_PREFIX) and k != "__builtins__"})
+            self._py_namespace.update(
+                {
+                    k: v
+                    for k, v in ns.items()
+                    if not k.startswith(_TGDB_RESERVED_PREFIX) and k != "__builtins__"
+                }
+            )
 
         if isinstance(writer, io.StringIO):
             out = writer.getvalue().rstrip("\n")
             return out or None
         return None
 
-    async def _exec_pyfile_async(self, path: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def _exec_pyfile_async(
+        self, path: str, print_fn: Optional[Callable] = None
+    ) -> Optional[str]:
         """Execute a Python file as an async coroutine."""
         if not path:
             return "pyfile: missing filename"

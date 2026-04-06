@@ -254,7 +254,9 @@ class PaneContainer(Widget):
                 children = list(self.children)
                 try:
                     pos = children.index(item)
-                    if pos + 1 < len(children) and isinstance(children[pos + 1], Splitter):
+                    if pos + 1 < len(children) and isinstance(
+                        children[pos + 1], Splitter
+                    ):
                         await children[pos + 1].remove()
                     elif pos > 0 and isinstance(children[pos - 1], Splitter):
                         await children[pos - 1].remove()
@@ -278,7 +280,9 @@ class PaneContainer(Widget):
     def _apply_orientation(self) -> None:
         self.styles.layout = self.orientation
         is_horizontal = self.orientation == "horizontal"
-        item_iter = iter(zip(self._items, self._weights or ([1] * len(self._items)), strict=False))
+        item_iter = iter(
+            zip(self._items, self._weights or ([1] * len(self._items)), strict=False)
+        )
         for child in self.children:
             if isinstance(child, Splitter):
                 child.set_orientation(is_horizontal)
@@ -305,9 +309,14 @@ class PaneContainer(Widget):
         if not self._items:
             self._weights = []
             return
-        self._weights = [max(1, item.size.width if is_horizontal else item.size.height) for item in self._items]
+        self._weights = [
+            max(1, item.size.width if is_horizontal else item.size.height)
+            for item in self._items
+        ]
 
-    def _resize_from_drag(self, splitter: "Splitter", screen_x: int, screen_y: int) -> bool:
+    def _resize_from_drag(
+        self, splitter: "Splitter", screen_x: int, screen_y: int
+    ) -> bool:
         adjacent = self._adjacent_items(splitter)
         if adjacent is None:
             return False
@@ -388,7 +397,9 @@ class PaneContainer(Widget):
         # the app for top-level _window_shift bookkeeping.
         self._resize_from_drag(splitter, msg.screen_x, msg.screen_y)
 
-    def _resize_from_title_drag(self, before: Widget, after: Widget, screen_y: int) -> None:
+    def _resize_from_title_drag(
+        self, before: Widget, after: Widget, screen_y: int
+    ) -> None:
         """Resize *before* and *after* panes in a vertical container when the
         user drags the title bar of *after* (which is the visual boundary)."""
         self._capture_layout_weights()

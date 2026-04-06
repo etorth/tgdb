@@ -16,14 +16,12 @@ from textual.widget import Widget
 from textual.message import Message
 from textual import events
 
+from .cmdline_history import HistoryMixin
+from .cmdline_render import RenderMixin
 from .highlight_groups import HighlightGroups
 
 # Matches ":python << EOF" / ":py << MYMARKER" (heredoc trigger)
 _HEREDOC_RE = re.compile(r"^(python|py)\s+<<\s+(\S+)\s*$", re.IGNORECASE)
-
-
-from .cmdline_history import HistoryMixin
-from .cmdline_render import RenderMixin
 
 
 class CommandLineBar(HistoryMixin, RenderMixin, Widget):
@@ -65,7 +63,9 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         self._ml_marker: str = ""  # e.g. "EOF"
         self._ml_cmd: str = ""  # e.g. "python"
         self._ml_header: str = ""  # original header as typed
-        self._ml_history_recall: bool = False  # True when showing a recalled heredoc entry
+        self._ml_history_recall: bool = (
+            False  # True when showing a recalled heredoc entry
+        )
         self._ml_history_full: str = ""  # full multiline command for recall
 
         # ── Multiline message display state ──────────────────────────
@@ -354,7 +354,9 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
                     verbatim_lines = [header] + list(self._ml_buf) + [line]
                     history_text = "\n".join(verbatim_lines)
                     self._cancel_multiline()
-                    self.post_message(CommandSubmit(f"{cmd}\n{code}", history_text=history_text))
+                    self.post_message(
+                        CommandSubmit(f"{cmd}\n{code}", history_text=history_text)
+                    )
                 else:
                     self._ml_buf.append(line)
                     # header + collected + current-input row
@@ -435,7 +437,10 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         elif key in ("backspace", "ctrl+h"):
             self._commit_history_browse()  # adopt retrieved entry, don't revert
             if self._cursor_pos > 0:
-                self._input_buf = self._input_buf[: self._cursor_pos - 1] + self._input_buf[self._cursor_pos :]
+                self._input_buf = (
+                    self._input_buf[: self._cursor_pos - 1]
+                    + self._input_buf[self._cursor_pos :]
+                )
                 self._cursor_pos -= 1
             if not self._input_buf:
                 self._input_active = False
@@ -444,7 +449,11 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
 
         elif char and char.isprintable():
             self._commit_history_browse()  # adopt retrieved entry, don't revert
-            self._input_buf = self._input_buf[: self._cursor_pos] + char + self._input_buf[self._cursor_pos :]
+            self._input_buf = (
+                self._input_buf[: self._cursor_pos]
+                + char
+                + self._input_buf[self._cursor_pos :]
+            )
             self._cursor_pos += 1
             self.refresh()
 
@@ -512,7 +521,9 @@ class CommandSubmit(Message):
     def __init__(self, command: str, *, history_text: str = "") -> None:
         super().__init__()
         self.command = command
-        self.history_text = history_text  # verbatim input for history (if different from command)
+        self.history_text = (
+            history_text  # verbatim input for history (if different from command)
+        )
 
 
 class CommandCancel(Message):

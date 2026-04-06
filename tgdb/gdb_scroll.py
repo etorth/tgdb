@@ -105,7 +105,10 @@ class ScrollMixin:
         h = self._visible_height()
         start = max(0, total - h - self._scroll_offset)
         w = max(80, self.size.width or 80)
-        max_w = max((len(lines[i].plain) for i in range(start, min(start + h, total))), default=w)
+        max_w = max(
+            (len(lines[i].plain) for i in range(start, min(start + h, total))),
+            default=w,
+        )
         self._h_offset = max(0, max_w - w)
         self.refresh()
 
@@ -180,9 +183,13 @@ class ScrollMixin:
         h = self._visible_height()
         cur = max(0, total - h - self._scroll_offset)
         if forward:
-            order = list(range(cur + 1, total)) + (list(range(0, cur + 1)) if self.wrapscan else [])
+            order = list(range(cur + 1, total)) + (
+                list(range(0, cur + 1)) if self.wrapscan else []
+            )
         else:
-            order = list(range(cur - 1, -1, -1)) + (list(range(total - 1, cur - 1, -1)) if self.wrapscan else [])
+            order = list(range(cur - 1, -1, -1)) + (
+                list(range(total - 1, cur - 1, -1)) if self.wrapscan else []
+            )
         for idx in order:
             if rx.search(lines[idx].plain):
                 self._scroll_offset = max(0, total - h - idx)

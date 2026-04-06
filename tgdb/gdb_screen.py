@@ -119,7 +119,12 @@ def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) 
 class _GDBScreen(pyte.Screen):
     """Intercept index() to save lines that scroll off into a deque."""
 
-    def __init__(self, columns: int, lines: int, push_fn: "Callable[[Text, Optional[dict]], None]") -> None:
+    def __init__(
+        self,
+        columns: int,
+        lines: int,
+        push_fn: "Callable[[Text, Optional[dict]], None]",
+    ) -> None:
         super().__init__(columns, lines)
         self._push_scrollback = push_fn
         self.use_color: bool = True  # set by GDBWidget to honour debugwincolor

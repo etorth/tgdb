@@ -192,7 +192,9 @@ class _SourceContent(SourceViewRendering, Widget):
             if not fullname:
                 continue
             try:
-                same = os.path.abspath(fullname) == os.path.abspath(sf.path) or os.path.basename(fullname) == os.path.basename(sf.path)
+                same = os.path.abspath(fullname) == os.path.abspath(
+                    sf.path
+                ) or os.path.basename(fullname) == os.path.basename(sf.path)
             except Exception:
                 same = False
             if same and 1 <= bp.line <= len(sf.lines):
@@ -310,7 +312,9 @@ class _SourceContent(SourceViewRendering, Widget):
     # Search
     # ------------------------------------------------------------------
 
-    def search(self, pattern: str, forward: bool = True, start: Optional[int] = None) -> bool:
+    def search(
+        self, pattern: str, forward: bool = True, start: Optional[int] = None
+    ) -> bool:
         sf = self.source_file
         lines = sf.lines if sf else _LOGO_LINES
         if not lines or not pattern:
@@ -323,9 +327,13 @@ class _SourceContent(SourceViewRendering, Widget):
         n = len(lines)
         s = (start if start is not None else self.sel_line) - 1
         if forward:
-            order = list(range(s + 1, n)) + (list(range(0, s + 1)) if self.wrapscan else [])
+            order = list(range(s + 1, n)) + (
+                list(range(0, s + 1)) if self.wrapscan else []
+            )
         else:
-            order = list(range(s - 1, -1, -1)) + (list(range(n - 1, s - 1, -1)) if self.wrapscan else [])
+            order = list(range(s - 1, -1, -1)) + (
+                list(range(n - 1, s - 1, -1)) if self.wrapscan else []
+            )
         for idx in order:
             if rx.search(lines[idx]):
                 self._last_jump_line = self.sel_line
@@ -552,7 +560,9 @@ class _SourceContent(SourceViewRendering, Widget):
             self._search_active = False
             self._search_pattern = self._search_buf
             if self._search_pattern:
-                if self.source_file is None and getattr(self.app, "_initial_source_pending", False):
+                if self.source_file is None and getattr(
+                    self.app, "_initial_source_pending", False
+                ):
                     self._pending_search = (self._search_pattern, self._search_forward)
                 else:
                     self.search(self._search_pattern, self._search_forward)
@@ -635,7 +645,9 @@ class SourceView(PaneBase):
         content = self.__dict__.get("_content")
         if content is not None:
             return getattr(content, name)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
 
 
 # ---------------------------------------------------------------------------

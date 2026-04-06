@@ -79,6 +79,7 @@ def _apply_clipboard_path(path: str) -> None:
     if basename:
         try:
             import pyperclip
+
             pyperclip.set_clipboard(basename)
         except Exception:
             pass
@@ -91,7 +92,12 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
     Pass in the live Config, HighlightGroups, and KeyMapper objects.
     """
 
-    def __init__(self, config: Config, highlight_groups: "HighlightGroups", key_mapper: "KeyMapper") -> None:
+    def __init__(
+        self,
+        config: Config,
+        highlight_groups: "HighlightGroups",
+        key_mapper: "KeyMapper",
+    ) -> None:
         self.config = config
         self.hl = highlight_groups
         self.km = key_mapper
@@ -110,7 +116,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         """Inject a reference to the CommandLineBar for history operations."""
         self._cmdline_bar = bar
 
-    def register_handler(self, name: str, fn: Callable[[list[str]], Optional[str]]) -> None:
+    def register_handler(
+        self, name: str, fn: Callable[[list[str]], Optional[str]]
+    ) -> None:
         """Register an extra command handler (e.g., GDB debug commands)."""
         self._handlers[name] = fn
 
@@ -131,7 +139,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         path = XDGPath.config_home() / "tgdb" / "tgdbrc"
         return path if path.exists() else None
 
-    async def load_file_async(self, path: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def load_file_async(
+        self, path: str, print_fn: Optional[Callable] = None
+    ) -> Optional[str]:
         """Load and execute every non-blank line in *path* asynchronously.
 
         Supports heredoc blocks (``python << MARKER`` … ``MARKER``) so that
@@ -184,7 +194,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
     # Command execution — single async entry point
     # ------------------------------------------------------------------
 
-    async def execute_async(self, line: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def execute_async(
+        self, line: str, print_fn: Optional[Callable] = None
+    ) -> Optional[str]:
         """Execute one config/status-bar command asynchronously.
 
         This is the sole command-execution entry point.  All commands —
@@ -208,7 +220,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             return None
 
         # :python / :py and :pyfile / :pyf take raw (un-tokenised) argument.
-        _raw = re.match(r"^(python|pyfile|pyf|py)\s*(.*)", line, re.DOTALL | re.IGNORECASE)
+        _raw = re.match(
+            r"^(python|pyfile|pyf|py)\s*(.*)", line, re.DOTALL | re.IGNORECASE
+        )
         if _raw:
             _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
             if _cmd in ("python", "py"):
@@ -234,7 +248,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             return await self._cmd_command(_cmd_m.group(1))
 
         # :map / :imap need raw handling so spaces in the RHS are preserved.
-        _map_m = re.match(r"^(imap|im|map)\b\s*(\S+)\s*(.*)", line, re.DOTALL | re.IGNORECASE)
+        _map_m = re.match(
+            r"^(imap|im|map)\b\s*(\S+)\s*(.*)", line, re.DOTALL | re.IGNORECASE
+        )
         if _map_m:
             _mcmd = _map_m.group(1).lower()
             _mode = "gdb" if _mcmd in ("imap", "im") else "tgdb"
@@ -354,7 +370,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         try:
             n = int(val)
         except ValueError:
-            return f"set history: invalid value {val!r} (must be a non-negative integer)"
+            return (
+                f"set history: invalid value {val!r} (must be a non-negative integer)"
+            )
         if n < 0:
             return "set history: value must be >= 0"
         bar = self._cmdline_bar

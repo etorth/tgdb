@@ -63,7 +63,9 @@ class _GDBContent(ScrollMixin, Widget):
     }
     """
 
-    def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
+    def __init__(
+        self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.hl = hl
         self.max_scrollback = max_scrollback
@@ -239,7 +241,9 @@ class _GDBContent(ScrollMixin, Widget):
             return False
 
         cy = self._screen.cursor.y
-        row = _row_to_text(self._screen.buffer[cy], self._pyte_cols, use_color=False).plain
+        row = _row_to_text(
+            self._screen.buffer[cy], self._pyte_cols, use_color=False
+        ).plain
         before_cursor = row[: self._screen.cursor.x]
         return before_cursor.endswith("(gdb) ")
 
@@ -267,8 +271,19 @@ class _GDBContent(ScrollMixin, Widget):
             cy = self._screen.cursor.y
             buf = self._screen.buffer
             for r in range(self._pyte_rows):
-                cursor_col = cx if (r == cy and not self._scroll_mode and self.gdb_focused) else -1
-                lines.append(_row_to_text(buf.get(r), self._pyte_cols, cursor_col, use_color=self.debugwincolor))
+                cursor_col = (
+                    cx
+                    if (r == cy and not self._scroll_mode and self.gdb_focused)
+                    else -1
+                )
+                lines.append(
+                    _row_to_text(
+                        buf.get(r),
+                        self._pyte_cols,
+                        cursor_col,
+                        use_color=self.debugwincolor,
+                    )
+                )
         return lines
 
     def render(self) -> Text:
@@ -303,7 +318,14 @@ class _GDBContent(ScrollMixin, Widget):
             # entries in pyte's defaultdict buffer.  Phantom entries confuse
             # pyte's delete_lines logic on the next resize: it sees them as
             # "content" and displaces real rows, clearing the screen.
-            result.append_text(_row_to_text(buf.get(r), self._pyte_cols, cursor_col, use_color=self.debugwincolor))
+            result.append_text(
+                _row_to_text(
+                    buf.get(r),
+                    self._pyte_cols,
+                    cursor_col,
+                    use_color=self.debugwincolor,
+                )
+            )
         # Pad remaining rows if widget is taller than pyte screen
         for r in range(self._pyte_rows, h):
             result.append("\n")
@@ -464,7 +486,9 @@ _GDB_DELEGATE_SET = frozenset(
 class GDBWidget(PaneBase):
     """GDB console pane: title bar (blank) + _GDBContent terminal widget."""
 
-    def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
+    def __init__(
+        self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs
+    ) -> None:
         super().__init__(hl, **kwargs)
         self._content = _GDBContent(hl, max_scrollback)
         self.can_focus = True
@@ -502,7 +526,9 @@ class GDBWidget(PaneBase):
         content = self.__dict__.get("_content")
         if content is not None:
             return getattr(content, name)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
 
 
 # ---------------------------------------------------------------------------

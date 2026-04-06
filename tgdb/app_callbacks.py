@@ -29,7 +29,12 @@ from .gdb_widget import (
     ScrollSearchCommit,
     ScrollSearchCancel,
 )
-from .command_line_bar import CommandLineBar, CommandSubmit, CommandCancel, MessageDismissed
+from .command_line_bar import (
+    CommandLineBar,
+    CommandSubmit,
+    CommandCancel,
+    MessageDismissed,
+)
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 from .gdb_controller import Breakpoint, Frame, LocalVariable, ThreadInfo, RegisterInfo
 
@@ -46,7 +51,15 @@ class CallbacksMixin:
         if not sf:
             self._show_status("No source file loaded")
             return
-        existing = next((b for b in self.gdb.breakpoints if b.line == msg.line and os.path.basename(b.fullname or b.file) == os.path.basename(sf.path)), None)
+        existing = next(
+            (
+                b
+                for b in self.gdb.breakpoints
+                if b.line == msg.line
+                and os.path.basename(b.fullname or b.file) == os.path.basename(sf.path)
+            ),
+            None,
+        )
         if existing:
             self.gdb.delete_breakpoint(existing.number)
         else:
@@ -164,7 +177,9 @@ class CallbacksMixin:
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
             return
-        self._cmd_task = asyncio.create_task(self._run_cmd_task(msg.command, history_text=msg.history_text))
+        self._cmd_task = asyncio.create_task(
+            self._run_cmd_task(msg.command, history_text=msg.history_text)
+        )
 
     async def _run_cmd_task(self, cmd: str, *, history_text: str = "") -> None:
         """Run one CommandLineBar command as an async task (one-at-a-time)."""
@@ -201,7 +216,11 @@ class CallbacksMixin:
         self._cmd_task = None
 
         if cancelled:
-            text = ("\n".join(collected) + "\n[Interrupted]") if collected else "[Interrupted]"
+            text = (
+                ("\n".join(collected) + "\n[Interrupted]")
+                if collected
+                else "[Interrupted]"
+            )
             error_output = text.strip()
             collected = []  # already merged into error_output
 
@@ -294,7 +313,9 @@ class CallbacksMixin:
     def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
         self._current_locals = list(variables)
         if self._locals_pane is not None:
-            self._locals_pane.set_variables(self._current_locals, self.gdb.current_frame)
+            self._locals_pane.set_variables(
+                self._current_locals, self.gdb.current_frame
+            )
 
     def _ui_set_registers(self, registers: list[RegisterInfo]) -> None:
         self._current_registers = list(registers)
@@ -305,7 +326,9 @@ class CallbacksMixin:
         self._current_stack = list(frames)
         current_level = self.gdb.current_frame.level if self.gdb.current_frame else 0
         if self._stack_pane is not None:
-            self._stack_pane.set_frames(self._current_stack, current_level=current_level)
+            self._stack_pane.set_frames(
+                self._current_stack, current_level=current_level
+            )
 
     def _ui_set_threads(self, threads: list[ThreadInfo]) -> None:
         self._current_threads = list(threads)
