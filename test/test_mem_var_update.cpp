@@ -33,6 +33,15 @@ struct TestWrapper
     std::tuple<int, float, std::string> tup{42, 3.14f, "tuple"};
 };
 
+void f()
+{
+    TestWrapper fw {};
+
+    fw.test.a = 20;
+    fw.test.b = 45.6f;
+    fw.test.d = "Updated string";
+}
+
 int main()
 {
     TestWrapper w {};
@@ -41,5 +50,6 @@ int main()
     w.test.b = 45.6f;
     w.test.d = "Updated string";
 
+    f();
     return 0;
 }
