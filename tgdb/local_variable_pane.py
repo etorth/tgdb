@@ -20,7 +20,7 @@ from typing import Callable, Coroutine, Optional
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from .gdb_controller import LocalVariable
+from .gdb_controller import LocalVariable, Frame
 from .highlight_groups import HighlightGroups
 from .pane_base import PaneBase
 
@@ -63,9 +63,11 @@ class LocalVariablePane(PaneBase):
         self._varobj_to_node: dict[str, TreeNode] = {}
         # Generation counter — cancels stale async tasks
         self._rebuild_gen: int = 0
-        # Saved expansion state keyed by frozenset(variable_names).
+        # Current frame key — used to save expansion when leaving a frame.
+        self._frame_key: tuple[str, str] | None = None
+        # Saved expansion state keyed by (func_name, file_path).
         # Allows restoring expanded nodes when returning to a previous frame.
-        self._saved_expansions: dict[frozenset, set[tuple[str, ...]]] = {}
+        self._saved_expansions: dict[tuple[str, str], set[tuple[str, ...]]] = {}
 
     def title(self) -> str:
         return "LOCALS"
@@ -92,25 +94,30 @@ class LocalVariablePane(PaneBase):
         self._var_delete = var_delete
         self._var_update = var_update
 
-    def set_variables(self, variables: list[LocalVariable]) -> None:
+    def set_variables(
+        self,
+        variables: list[LocalVariable],
+        frame: Frame | None = None,
+    ) -> None:
         """Called when GDB stops — update in-place or rebuild as needed.
 
-        If the set of top-level variable names is unchanged AND we already
-        have varobjs from a previous stop, use ``-var-update`` to refresh
-        only the changed values without collapsing the tree.
-
-        Otherwise (new frame, different locals) do a full rebuild.
+        *frame* is the current GDB frame and is used as the expansion-state
+        key: ``(frame.func, frame.fullname or frame.file)`` uniquely
+        identifies a function within a file, so same-named variables in
+        different functions never share saved expansion state.
 
         An empty *variables* list means the inferior is running (GDB sends
         ``on_locals([])`` with every ``*running`` notification).  We cancel
-        any pending rebuild but keep ``_variables`` intact so the next stop
-        in the same frame can do an in-place update instead of a full rebuild.
+        any pending rebuild but keep state intact so the next stop in the
+        same frame can do an in-place update instead of a full rebuild.
         """
         if not variables:
-            # GDB is running — cancel pending tasks but don't touch the tree
-            # or _variables; the next stop will compare against the current set.
             self._rebuild_gen += 1
             return
+
+        new_frame_key: tuple[str, str] | None = None
+        if frame and frame.func:
+            new_frame_key = (frame.func, frame.fullname or frame.file)
 
         old_names = {v.name for v in self._variables}
         new_names = {v.name for v in variables}
@@ -119,15 +126,21 @@ class LocalVariablePane(PaneBase):
         gen = self._rebuild_gen
 
         if old_names == new_names and self._varobj_names and self._var_update:
+            self._frame_key = new_frame_key
             asyncio.create_task(self._update_tree(gen))
         else:
-            # Save the current expansion state before the rebuild wipes the tree.
-            if old_names:
+            # Save the current expansion state under the outgoing frame key.
+            if self._frame_key is not None:
                 paths = self._collect_expanded_paths()
                 if paths:
-                    self._saved_expansions[frozenset(old_names)] = paths
-            # If we have saved state for the incoming frame, restore it.
-            restore = self._saved_expansions.get(frozenset(new_names), set())
+                    self._saved_expansions[self._frame_key] = paths
+            self._frame_key = new_frame_key
+            # Restore any previously saved state for the incoming frame.
+            restore = (
+                self._saved_expansions.get(new_frame_key, set())
+                if new_frame_key is not None
+                else set()
+            )
             asyncio.create_task(self._rebuild_tree(gen, restore))
 
     # ------------------------------------------------------------------

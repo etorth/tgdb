@@ -294,7 +294,7 @@ class CallbacksMixin:
     def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
         self._current_locals = list(variables)
         if self._locals_pane is not None:
-            self._locals_pane.set_variables(self._current_locals)
+            self._locals_pane.set_variables(self._current_locals, self.gdb.current_frame)
 
     def _ui_set_registers(self, registers: list[RegisterInfo]) -> None:
         self._current_registers = list(registers)
