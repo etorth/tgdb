@@ -25,7 +25,14 @@ class LayoutMixin:
         "src_big": 1,
         "src_full": 2,
     }
-    _SPLIT_NAMES = {value: key for key, value in _SPLIT_MARKS.items()}
+    # Reverse lookup: split value → name (built from _SPLIT_MARKS below)
+    _SPLIT_NAMES = {
+        -2: "gdb_full",
+        -1: "gdb_big",
+        0: "even",
+        1: "src_big",
+        2: "src_full",
+    }
 
     def _split_axis(self: TGDBApp, is_horizontal: bool) -> int:
         try:

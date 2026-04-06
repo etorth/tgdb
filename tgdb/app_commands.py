@@ -20,7 +20,10 @@ class CommandsMixin:
 
     def _register_commands(self: TGDBApp) -> None:
         def gdb_cmd(c):
-            return lambda a: self._send_gdb_cli(c) or None
+            def handler(args):
+                self._send_gdb_cli(c)
+
+            return handler
 
         cmds = {
             "bang": self._cmd_bang,
@@ -30,7 +33,7 @@ class CommandsMixin:
             "edit": self._cmd_edit,
             "e": self._cmd_edit,
             "focus": self._cmd_focus,
-            "insert": lambda a: self._switch_to_gdb() or None,
+            "insert": self._cmd_insert,
             "noh": self._cmd_noh,
             "shell": self._cmd_shell,
             "sh": self._cmd_shell,
@@ -103,6 +106,9 @@ class CommandsMixin:
     def _cmd_bang(self: TGDBApp, _: list) -> None:
         # cgdb registers :bang, but command_do_bang() is currently a no-op.
         pass
+
+    def _cmd_insert(self: TGDBApp, _: list) -> None:
+        self._switch_to_gdb()
 
     def _cmd_focus(self: TGDBApp, args: list) -> Optional[str]:
         if len(args) != 1:
@@ -178,11 +184,15 @@ class CommandsMixin:
             if gdb_w is not None:
                 gdb_w.inject_text(f"(gdb) {cmd}\n")
         self.gdb.send_input(cmd + "\n")
-        command_name = cmd.strip().split(None, 1)[0].lower() if cmd.strip() else ""
+        stripped = cmd.strip()
+        if stripped:
+            command_name = stripped.split(None, 1)[0].lower()
+        else:
+            command_name = ""
         if command_name in {"up", "down", "frame", "f", "select-frame", "thread"}:
             asyncio.get_running_loop().call_later(
                 0.1,
-                lambda: self._safe_request_location(),
+                self._safe_request_location,
             )
         self._switch_to_gdb()
 

@@ -51,15 +51,13 @@ class CallbacksMixin:
         if not sf:
             self._show_status("No source file loaded")
             return
-        existing = next(
-            (
-                b
-                for b in self.gdb.breakpoints
-                if b.line == msg.line
-                and os.path.basename(b.fullname or b.file) == os.path.basename(sf.path)
-            ),
-            None,
-        )
+        existing = None
+        target_basename = os.path.basename(sf.path)
+        for b in self.gdb.breakpoints:
+            b_basename = os.path.basename(b.fullname or b.file)
+            if b.line == msg.line and b_basename == target_basename:
+                existing = b
+                break
         if existing:
             self.gdb.delete_breakpoint(existing.number)
         else:

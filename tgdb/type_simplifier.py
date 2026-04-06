@@ -111,53 +111,75 @@ _RULES.append(
     )
 )
 
+
 # -- Step 10: Strip default comparator + allocator from ordered maps/sets --
 # map<K, V, std::less<K>, std::allocator<std::pair<const K, V>>> → map<K, V>
 # Also handles std::less<> (transparent comparator)
+def _repl_map_full(m: re.Match) -> str:
+    return f"{m.group(1)}<{m.group(2)}, {m.group(3)}>"
+
+
 _RULES.append(
     (
         re.compile(
             r"\b(map|multimap)"
             r"<(.+?),\s*(.+?),\s*std::less<(?:\2)?>,\s*std::allocator<std::pair<const \2,\s*\3>\s*>\s*>"
         ),
-        lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
+        _repl_map_full,
     )
 )
 
+
 # map/multimap with just less<> or less<K> stripped (allocator already gone)
+def _repl_map_less(m: re.Match) -> str:
+    return f"{m.group(1)}<{m.group(2)}, {m.group(3)}>"
+
+
 _RULES.append(
     (
         re.compile(
             r"\b(map|multimap)"
             r"<(.+?),\s*(.+?),\s*std::less<(?:\2)?>\s*>"
         ),
-        lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
+        _repl_map_less,
     )
 )
 
+
 # set/multiset with std::less
+def _repl_set_full(m: re.Match) -> str:
+    return f"{m.group(1)}<{m.group(2)}>"
+
+
 _RULES.append(
     (
         re.compile(
             r"\b(set|multiset)"
             r"<(.+?),\s*std::less<(?:\2)?>,\s*std::allocator<\2>\s*>"
         ),
-        lambda m: f"{m.group(1)}<{m.group(2)}>",
+        _repl_set_full,
     )
 )
+
+
+def _repl_set_less(m: re.Match) -> str:
+    return f"{m.group(1)}<{m.group(2)}>"
+
 
 _RULES.append(
     (
-        re.compile(
-            r"\b(set|multiset)"
-            r"<(.+?),\s*std::less<(?:\2)?>\s*>"
-        ),
-        lambda m: f"{m.group(1)}<{m.group(2)}>",
+        re.compile(r"\b(set|multiset)" r"<(.+?),\s*std::less<(?:\2)?>\s*>"),
+        _repl_set_less,
     )
 )
 
+
 # -- Step 11: Strip hash/equal/allocator from unordered containers ---------
 # unordered_map<K, V, std::hash<K>, std::equal_to<K>, std::allocator<...>>
+def _repl_unordered_map(m: re.Match) -> str:
+    return f"{m.group(1)}<{m.group(2)}, {m.group(3)}>"
+
+
 _RULES.append(
     (
         re.compile(
@@ -165,9 +187,14 @@ _RULES.append(
             r"<(.+?),\s*(.+?),\s*std::hash<\2>,\s*std::equal_to<\2>,\s*"
             r"std::allocator<std::pair<const \2,\s*\3>\s*>\s*>"
         ),
-        lambda m: f"{m.group(1)}<{m.group(2)}, {m.group(3)}>",
+        _repl_unordered_map,
     )
 )
+
+
+def _repl_unordered_set(m: re.Match) -> str:
+    return f"{m.group(1)}<{m.group(2)}>"
+
 
 _RULES.append(
     (
@@ -176,15 +203,20 @@ _RULES.append(
             r"<(.+?),\s*std::hash<\2>,\s*std::equal_to<\2>,\s*"
             r"std::allocator<\2>\s*>"
         ),
-        lambda m: f"{m.group(1)}<{m.group(2)}>",
+        _repl_unordered_set,
     )
 )
 
+
 # -- Step 12: unique_ptr<T, std::default_delete<T>> → unique_ptr<T> -------
+def _repl_unique_ptr(m: re.Match) -> str:
+    return f"unique_ptr<{m.group(1)}>"
+
+
 _RULES.append(
     (
         re.compile(r"\bunique_ptr<(.+?),\s*std::default_delete<\1>\s*>"),
-        lambda m: f"unique_ptr<{m.group(1)}>",
+        _repl_unique_ptr,
     )
 )
 

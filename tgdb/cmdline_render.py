@@ -91,7 +91,10 @@ class RenderMixin:
         # not use reverse, adding it creates the same contrast.
         style_tokens = style.lower().split()
         if "reverse" in style_tokens:
-            other_tokens = [t for t in style_tokens if t != "reverse"]
+            other_tokens = []
+            for t in style_tokens:
+                if t != "reverse":
+                    other_tokens.append(t)
             cursor_style = " ".join(other_tokens) if other_tokens else "default"
         else:
             cursor_style = (
@@ -153,7 +156,9 @@ class RenderMixin:
         """Render the visible window of the scrollable message display."""
         visible = max(1, self._msg_visible_rows)
         window = self._msg_lines[self._msg_scroll : self._msg_scroll + visible]
-        lines = [_pad_crop(ln, w) for ln in window]
+        lines = []
+        for ln in window:
+            lines.append(_pad_crop(ln, w))
 
         # Pad blank rows if the window is taller than remaining content
         while len(lines) < visible:

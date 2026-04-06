@@ -80,7 +80,11 @@ class ParsingMixin:
         elif cls == "breakpoint-deleted":
             try:
                 num = int(results.get("id", ""))
-                self.breakpoints = [b for b in self.breakpoints if b.number != num]
+                kept = []
+                for b in self.breakpoints:
+                    if b.number != num:
+                        kept.append(b)
+                self.breakpoints = kept
                 self.on_breakpoints(list(self.breakpoints))
             except (ValueError, TypeError):
                 pass
@@ -139,7 +143,10 @@ class ParsingMixin:
                     frames_raw.extend(entry for entry in raw if isinstance(entry, dict))
                 elif isinstance(raw, dict):
                     frames_raw.append(raw)
-        return [self._parse_frame(item) for item in frames_raw]
+        frames = []
+        for item in frames_raw:
+            frames.append(self._parse_frame(item))
+        return frames
 
     def _parse_threads(self, data) -> list[ThreadInfo]:
         threads_raw: list[dict] = []
@@ -219,7 +226,11 @@ class ParsingMixin:
         num = self._safe_int(data.get("number", 0))
         if num == 0:
             return
-        existing = next((b for b in self.breakpoints if b.number == num), None)
+        existing = None
+        for b in self.breakpoints:
+            if b.number == num:
+                existing = b
+                break
         if existing is None:
             existing = Breakpoint(number=num)
             self.breakpoints.append(existing)

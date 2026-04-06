@@ -245,7 +245,12 @@ class LocalVariablePane(PaneBase):
         to_truly_remove: list[tuple[str, str]] = []  # (name, varobj)
 
         for name, (old_varobj, old_addr) in self._tracked.items():
-            if any(n == name and a == old_addr for n, a, _ in new_main):
+            still_present = False
+            for n, a, _ in new_main:
+                if n == name and a == old_addr:
+                    still_present = True
+                    break
+            if still_present:
                 continue  # unchanged
             outer_var = shadowed_by_name.get(name)
             if outer_var is not None and self._var_create:
@@ -269,7 +274,9 @@ class LocalVariablePane(PaneBase):
                 to_add.append((name, addr, var))
 
         # ── 5. Fast path: nothing structural changed ───────────────────────
-        shadow_varobjs = {vo for _, (vo, _) in self._shadows.items()}
+        shadow_varobjs = set()
+        for _, (vo, _) in self._shadows.items():
+            shadow_varobjs.add(vo)
         no_change = (
             not to_truly_remove
             and not to_reanchor
@@ -298,9 +305,11 @@ class LocalVariablePane(PaneBase):
         self._frame_key = new_frame_key
 
         # ── 7. Update values for UNCHANGED variables ───────────────────────
-        stale_varobjs = {vo for _, vo in to_truly_remove} | {
-            vo for _, vo, _, _ in to_reanchor
-        }
+        stale_varobjs = set()
+        for _, vo in to_truly_remove:
+            stale_varobjs.add(vo)
+        for _, vo, _, _ in to_reanchor:
+            stale_varobjs.add(vo)
         if self._var_update and self._varobj_names:
             try:
                 changelist = await self._var_update("*")
@@ -369,20 +378,22 @@ class LocalVariablePane(PaneBase):
         # ── 12. Leaf display for deeper shadowed vars (≥2 levels deep) ─────
         # Exclude names that were re-anchored (success or failure): the old
         # tree node already serves as their display.
-        reanchor_names = {name for name, _, _, _ in to_reanchor}
-        leaf_shadowed = [
-            v
-            for v in new_shadowed
-            if v.name not in self._shadows and v.name not in reanchor_names
-        ]
+        reanchor_names = set()
+        for name, _, _, _ in to_reanchor:
+            reanchor_names.add(name)
+        leaf_shadowed = []
+        for v in new_shadowed:
+            if v.name not in self._shadows and v.name not in reanchor_names:
+                leaf_shadowed.append(v)
         await self._refresh_shadow_leaves(gen, tree, leaf_shadowed)
         if self._rebuild_gen != gen:
             return
 
         # ── 13. Add new variables ──────────────────────────────────────────
-        restore = (
-            self._saved_expansions.get(new_frame_key, set()) if new_frame_key else set()
-        )
+        if new_frame_key:
+            restore = self._saved_expansions.get(new_frame_key, set())
+        else:
+            restore = set()
         if self._var_create:
             for name, addr, var in to_add:
                 if self._rebuild_gen != gen:

@@ -79,7 +79,10 @@ class UserCommandMixin:
         return None
 
     def _list_user_commands(self, prefix: str) -> Optional[str]:
-        matches = {n: c for n, c in self._user_commands.items() if n.startswith(prefix)}
+        matches = {}
+        for n, c in self._user_commands.items():
+            if n.startswith(prefix):
+                matches[n] = c
         if not matches:
             if not prefix:
                 return None
@@ -100,7 +103,10 @@ class UserCommandMixin:
     ) -> tuple[Optional[UserCommandDef], Optional[str]]:
         if name in self._user_commands:
             return self._user_commands[name], None
-        matches = [n for n in self._user_commands if n.startswith(name)]
+        matches = []
+        for n in self._user_commands:
+            if n.startswith(name):
+                matches.append(n)
         if not matches:
             return None, None
         if len(matches) == 1:
@@ -230,7 +236,10 @@ class UserCommandMixin:
         try:
             result = fn(arg_lead, cmd_line, cursor_pos)
             if isinstance(result, (list, tuple)):
-                return [str(s) for s in result]
+                converted = []
+                for s in result:
+                    converted.append(str(s))
+                return converted
         except Exception:
             pass
         return []
