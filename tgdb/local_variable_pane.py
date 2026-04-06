@@ -27,7 +27,6 @@ gets its own saved state.
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Callable, Coroutine, Optional
 
 from textual.widgets import Tree
@@ -39,37 +38,32 @@ from .pane_base import PaneBase
 
 
 # ---------------------------------------------------------------------------
-# Type-string helpers — decide whether a varobj should be expandable
+# Varobj display helper
 # ---------------------------------------------------------------------------
 
-# char * / const char * / volatile char * — pointer to char (not array).
-# GDB creates numchild=1 for these (the pointed-to character), but the value
-# already contains the full string: "0x... \"hello\"".  Show as a leaf.
-_CHAR_PTR_RE = re.compile(r"^(?:const\s+)?(?:volatile\s+)?char\s*(?:const\s*)?\*")
 
-# std::string in all its common forms before and after type simplification.
-# GDB's pretty-printer shows the string value directly; the internal children
-# (size, capacity, buffer pointer) are not useful to the user.
-_STD_STRING_RE = re.compile(
-    r"(?:std::(?:__cxx11::)?|__gnu_cxx::)?basic_string\s*<\s*char"
-    r"|^std::string$"
-    r"|^string$"
-)
+def _suppress_children(varobj_info: dict) -> bool:
+    """Return True when the varobj should be shown as a non-expandable leaf.
 
+    GDB's pretty-printer framework sets ``displayhint = "string"`` in the
+    ``-var-create`` / ``-var-list-children`` response for every string-like
+    type when ``-enable-pretty-printing`` is active.  This includes, but is
+    not limited to:
 
-def _suppress_children(type_str: str) -> bool:
-    """Return True when a varobj's children should be hidden.
+    * ``char *`` / ``const char *`` / ``wchar_t *`` / ``char8_t *`` /
+      ``char16_t *`` / ``char32_t *``
+    * ``std::string`` / ``std::wstring`` / ``std::u8string`` /
+      ``std::u16string`` / ``std::u32string`` and their ABI-mangled forms
 
-    Applies to:
-    * ``char *`` / ``const char *`` — show the pointer + string value as a
-      leaf; GDB already formats this as ``0x... \"str\"``.
-    * ``std::string`` (any ABI form) — show the quoted string value as a leaf.
+    ``char [N]`` fixed arrays are intentionally **not** suppressed: GDB does
+    not set ``displayhint = "string"`` for them, so individual bytes remain
+    accessible when the user expands the node.
 
-    ``char [N]`` arrays are intentionally *not* suppressed so that individual
-    bytes remain visible when the node is expanded.
+    Using the GDB-provided hint rather than type-string matching means this
+    function stays correct for any future string type that ships with a
+    proper pretty-printer, without any changes here.
     """
-    t = type_str.strip()
-    return bool(_CHAR_PTR_RE.match(t)) or bool(_STD_STRING_RE.search(t))
+    return varobj_info.get("displayhint", "") == "string"
 
 
 class LocalVariablePane(PaneBase):
@@ -405,7 +399,7 @@ class LocalVariablePane(PaneBase):
                 numchild = self._safe_int(info.get("numchild", "0"))
                 has_children = (
                     (numchild > 0 or info.get("dynamic", "0") == "1")
-                    and not _suppress_children(info.get("type", var.type))
+                    and not _suppress_children(info)
                 )
                 value = info.get("value", "")
 
@@ -504,7 +498,7 @@ class LocalVariablePane(PaneBase):
         numchild = self._safe_int(info.get("numchild", "0"))
         has_children = (
             (numchild > 0 or info.get("dynamic", "0") == "1")
-            and not _suppress_children(info.get("type", outer_var.type))
+            and not _suppress_children(info)
         )
 
         if node is not None:
@@ -763,7 +757,7 @@ class LocalVariablePane(PaneBase):
                 val_dynamic = val_child.get("dynamic", "0") == "1"
                 val_has_children = (
                     (val_numchild > 0 or val_dynamic)
-                    and not _suppress_children(val_child.get("type", ""))
+                    and not _suppress_children(val_child)
                 )
                 val_value = val_child.get("value", "")
                 exp = f"[{key_val}]"
@@ -794,7 +788,7 @@ class LocalVariablePane(PaneBase):
             dynamic = child.get("dynamic", "0") == "1"
             has_children = (
                 (numchild > 0 or dynamic)
-                and not _suppress_children(child.get("type", ""))
+                and not _suppress_children(child)
             )
             value = child.get("value", "")
 
