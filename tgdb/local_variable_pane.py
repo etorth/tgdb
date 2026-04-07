@@ -34,6 +34,7 @@ from textual.widgets.tree import TreeNode
 
 from .gdb_controller import LocalVariable, Frame
 from .highlight_groups import HighlightGroups
+from .config_types import Config
 from .pane_base import PaneBase
 
 
@@ -78,8 +79,9 @@ class LocalVariablePane(PaneBase):
     }
     """
 
-    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, cfg: Config, **kwargs) -> None:
         super().__init__(hl, **kwargs)
+        self._cfg = cfg
         self._variables: list[LocalVariable] = []
 
         # Async callbacks wired up by the app
@@ -722,13 +724,13 @@ class LocalVariablePane(PaneBase):
         node.remove_children()
         dh = data.get("displayhint", "")
         try:
-            children, has_more = await self._var_list_children(varobj)
+            children, has_more = await self._var_list_children(
+                varobj, limit=self._cfg.expandchildlimit
+            )
             if children:
                 await self._add_children(node, children, dh)
                 if has_more:
-                    node.add_leaf(
-                        f"… (showing first {len(children)}, more not loaded)"
-                    )
+                    self._add_load_more_node(node, varobj, len(children), dh)
             else:
                 node.add_leaf("(empty)")
             return bool(children)
@@ -768,16 +770,27 @@ class LocalVariablePane(PaneBase):
             return
         if data.get("loaded"):
             return
+        data["loaded"] = True
+        if data.get("load_more"):
+            varobj = data.get("varobj", "")
+            from_idx = data.get("from_idx", 0)
+            parent_dh = data.get("displayhint", "")
+            if varobj and self._var_list_children:
+                asyncio.create_task(
+                    self._load_more_children(node, varobj, from_idx, parent_dh)
+                )
+            return
         varobj = data.get("varobj", "")
         if not varobj or not self._var_list_children:
             return
-        data["loaded"] = True
         asyncio.create_task(self._load_children(node, varobj))
 
     async def _load_children(self, node: TreeNode, varobj_name: str) -> None:
         node.remove_children()
         try:
-            children, has_more = await self._var_list_children(varobj_name)
+            children, has_more = await self._var_list_children(
+                varobj_name, limit=self._cfg.expandchildlimit
+            )
         except Exception as e:
             node.add_leaf(f"⚠ {e}")
             return
@@ -792,7 +805,60 @@ class LocalVariablePane(PaneBase):
             parent_dh = ""
         await self._add_children(node, children, parent_dh)
         if has_more:
-            node.add_leaf(f"… (showing first {len(children)}, more not loaded)")
+            self._add_load_more_node(node, varobj_name, len(children), parent_dh)
+
+    def _add_load_more_node(
+        self,
+        parent: TreeNode,
+        varobj_name: str,
+        from_idx: int,
+        parent_dh: str,
+    ) -> None:
+        """Add an expandable sentinel node that fetches the next batch on expand."""
+        limit = self._cfg.expandchildlimit
+        if limit > 0:
+            label = f"▸ load next {limit} items  [{from_idx} shown]"
+        else:
+            label = f"▸ load remaining items  [{from_idx} shown]"
+        sentinel = parent.add(
+            label,
+            expand=False,
+            data={
+                "load_more": True,
+                "loaded": False,
+                "varobj": varobj_name,
+                "from_idx": from_idx,
+                "displayhint": parent_dh,
+            },
+        )
+        # A placeholder child is required for Textual to render the expand triangle.
+        sentinel.add_leaf("")
+
+    async def _load_more_children(
+        self,
+        sentinel: TreeNode,
+        varobj_name: str,
+        from_idx: int,
+        parent_dh: str,
+    ) -> None:
+        """Fetch the next batch of children and append them as siblings of the sentinel."""
+        parent = sentinel.parent
+        # Remove the sentinel first so it does not linger in the tree.
+        sentinel.remove()
+        if parent is None:
+            return
+        try:
+            children, has_more = await self._var_list_children(
+                varobj_name, from_idx, limit=self._cfg.expandchildlimit
+            )
+        except Exception as e:
+            parent.add_leaf(f"⚠ {e}")
+            return
+        if children:
+            await self._add_children(parent, children, parent_dh)
+        if has_more:
+            next_idx = from_idx + len(children)
+            self._add_load_more_node(parent, varobj_name, next_idx, parent_dh)
 
     async def _add_children(
         self,
@@ -873,7 +939,9 @@ class LocalVariablePane(PaneBase):
 
             if exp in _ACCESS and has_children:
                 try:
-                    grandchildren, _more = await self._var_list_children(child_name)
+                    grandchildren, _more = await self._var_list_children(
+                        child_name, limit=self._cfg.expandchildlimit
+                    )
                     await self._add_children(node, grandchildren)
                 except Exception:
                     pass

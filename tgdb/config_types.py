@@ -41,6 +41,7 @@ class Config:
     historysize: int = 1024  # set history=N  (0 = disabled)
 
     # Integer options
+    expandchildlimit: int = 0  # set expandchildlimit=N  (0 = no limit, load all at once)
     scrollbackbuffersize: int = 10000
     tabstop: int = 8
     timeoutlen: int = 1000
@@ -74,6 +75,7 @@ _BOOL_OPTIONS = {
     "wrapscan",
 }
 _INT_OPTIONS = {
+    "expandchildlimit",
     "historysize",
     "scrollbackbuffersize",
     "tabstop",

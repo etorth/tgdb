@@ -252,6 +252,7 @@ class CommandsMixin:
             "Commands (type : in TGDB mode):",
             "  :set tabstop=4          :set hlsearch",
             "  :set winsplit=even      :set executinglinedisplay=longarrow",
+            "  :set expandchildlimit=100  (locals pane: items per page, 0=no limit)",
             "  :highlight Statement ctermfg=Yellow cterm=bold",
             "  :map <F8> :next<Enter>  :imap <F8> :next<Enter>",
             "  :break :continue :next :step :finish :run :quit",

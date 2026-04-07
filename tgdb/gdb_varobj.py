@@ -23,12 +23,6 @@ class VarobjMixin:
 
     # -- async MI command helper -------------------------------------------
 
-    # Maximum number of children fetched in one -var-list-children call.
-    # Without a limit, expanding an uninitialized std::vector (which can
-    # report billions of elements from garbage memory) causes GDB to loop
-    # indefinitely inside its Python pretty-printer, hanging the UI.
-    _VAR_LIST_CHILDREN_MAX = 200
-
     async def mi_command_async(
         self, cmd: str, timeout: float | None = 10.0
     ) -> dict:
@@ -91,7 +85,7 @@ class VarobjMixin:
         return result.get("payload") or {}
 
     async def var_list_children(
-        self, varobj_name: str, from_idx: int = 0, to_idx: int = -1
+        self, varobj_name: str, from_idx: int = 0, limit: int = 0
     ) -> tuple[list[dict], bool]:
         """List children of *varobj_name*.
 
@@ -101,14 +95,19 @@ class VarobjMixin:
         Each child dict has keys: ``name``, ``exp``, ``numchild``, ``value``,
         ``type``, etc.
 
-        *from_idx* / *to_idx* control the range passed to GDB.  When *to_idx*
-        is -1 (the default) the cap ``_VAR_LIST_CHILDREN_MAX`` is used.  This
-        prevents GDB from iterating billions of elements for garbage-initialized
-        containers (e.g. an uninitialized ``std::vector``).
+        *from_idx* is the start index into the child list.
+        *limit* is the maximum number of children to fetch.  When 0 (the
+        default) all children are fetched without a range argument (original
+        GDB behaviour — may be slow or hang for garbage-initialized containers
+        with huge reported sizes).
         """
-        if to_idx < 0:
-            to_idx = from_idx + self._VAR_LIST_CHILDREN_MAX
-        cmd = f"-var-list-children --all-values {varobj_name} {from_idx} {to_idx}"
+        if limit > 0:
+            cmd = (
+                f"-var-list-children --all-values"
+                f" {varobj_name} {from_idx} {from_idx + limit}"
+            )
+        else:
+            cmd = f"-var-list-children --all-values {varobj_name}"
         result = await self.mi_command_async(cmd)
         payload = result.get("payload") or {}
         has_more = payload.get("has_more", "0") == "1"
