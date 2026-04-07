@@ -93,6 +93,7 @@ class LocalVariablePane(PaneBase):
         self._var_delete: Optional[Callable[..., Coroutine]] = None
         self._var_update: Optional[Callable[..., Coroutine]] = None
         self._var_eval: Optional[Callable[..., Coroutine]] = None
+        self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
 
         # Per-variable state for incremental updates.
         # name → (varobj_name, address)  — innermost binding only.
@@ -114,8 +115,11 @@ class LocalVariablePane(PaneBase):
         self._varobj_names: list[str] = []
 
         # Varobjs backed by a pretty-printer (dynamic=1).
-        # These are updated individually with a short timeout to avoid hanging
-        # when the container is uninitialized and reports a garbage size.
+        # These are NEVER passed to -var-update because that requires GDB to
+        # re-run the container's children() iterator, which hangs the MI
+        # channel for uninitialized containers with garbage sizes.
+        # Instead, their display value is refreshed via -var-evaluate-expression
+        # (calls to_string() only) and their child varobjs are updated individually.
         self._dynamic_varobjs: set[str] = set()
 
         # Frame key for expansion save/restore.
@@ -147,12 +151,14 @@ class LocalVariablePane(PaneBase):
         var_delete: Callable[..., Coroutine],
         var_update: Callable[..., Coroutine],
         var_eval: Callable[..., Coroutine],
+        var_eval_expr: Callable[..., Coroutine],
     ) -> None:
         self._var_create = var_create
         self._var_list_children = var_list_children
         self._var_delete = var_delete
         self._var_update = var_update
         self._var_eval = var_eval
+        self._var_eval_expr = var_eval_expr
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -192,13 +198,15 @@ class LocalVariablePane(PaneBase):
         queue behind the stuck one, so even a short asyncio timeout only
         unsticks tgdb, not GDB.
 
-        Instead, when a dynamic root has been expanded by the user, its visible
-        CHILD varobjs (e.g. var1.[0], var1.[1]) are updated individually.
-        Child varobjs are simple value lookups — no iterator involved, no hang.
-
-        When there are no dynamic varobjs at all the fast ``-var-update *``
-        path is used.  Once any dynamic varobj exists we cannot use ``*``
-        because it re-evaluates dynamic roots too.
+        Instead:
+        - Dynamic root varobjs are refreshed via ``-var-evaluate-expression``,
+          which calls only the pretty-printer's ``to_string()`` — no children
+          iterator, no hang.  This updates the summary label (e.g. "length 2,
+          capacity 2") without risking a stall.
+        - Child varobjs of expanded dynamic roots are updated individually via
+          ``-var-update childN`` — they are simple value lookups.
+        - All non-dynamic varobjs use the fast ``-var-update *`` when no
+          dynamic varobjs exist; otherwise they are updated individually.
         """
         if not self._varobj_names:
             return []
@@ -218,13 +226,30 @@ class LocalVariablePane(PaneBase):
             return changelist
 
         # Slow path: at least one dynamic varobj exists.
-        # _varobj_to_node contains every varobj registered with GDB — roots
-        # AND children.  We update everything EXCEPT dynamic root varobjs,
-        # which would trigger the pretty-printer and hang GDB.
+        #
+        # 1. Refresh dynamic root varobjs via -var-evaluate-expression (safe,
+        #    calls to_string() only, no children iterator).
+        if self._var_eval_expr:
+            for vo in self._dynamic_varobjs:
+                try:
+                    new_value = await self._var_eval_expr(vo)
+                    # Inject a synthetic changelist entry so _apply_changelist
+                    # updates the node label using the same code path as a
+                    # real -var-update response.
+                    changelist.append({"name": vo, "value": new_value})
+                    _log.debug(
+                        "dynamic root %s value refreshed: %r", vo, new_value
+                    )
+                except Exception as exc:
+                    _log.warning(
+                        "var_evaluate_expression %s failed: %s", vo, exc
+                    )
+
+        # 2. Update all non-dynamic varobjs and children of dynamic roots.
+        #    We iterate _varobj_to_node (roots + children) and skip dynamic roots.
         safe_to_update: list[str] = []
         for vo in self._varobj_to_node:
             if vo in self._dynamic_varobjs:
-                _log.debug("Skipping dynamic root varobj %s in update", vo)
                 continue
             safe_to_update.append(vo)
 

@@ -154,6 +154,23 @@ class VarobjMixin:
         payload = result.get("payload") or {}
         return payload.get("value", "")
 
+    async def var_evaluate_expression(self, varobj_name: str) -> str:
+        """Return the current value string of a varobj without touching children.
+
+        Unlike ``-var-update``, ``-var-evaluate-expression`` only calls the
+        pretty-printer's ``to_string()`` method — it does NOT re-enumerate
+        children.  For a dynamic varobj such as std::vector this means the
+        summary (e.g. "std::vector of length 2, capacity 2") is refreshed
+        quickly even when the container has many (or garbage-sized) children.
+        """
+        result = await self.mi_command_async(
+            f"-var-evaluate-expression {varobj_name}"
+        )
+        payload = result.get("payload") or {}
+        value = payload.get("value", "")
+        _log.debug("var_evaluate_expression %s -> %r", varobj_name, value)
+        return value
+
     async def var_update(
         self, varobj_name: str = "*", timeout: float | None = 10.0
     ) -> list[dict]:
