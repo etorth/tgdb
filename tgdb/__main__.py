@@ -61,6 +61,12 @@ Examples:
         help="Pass remaining arguments as program + arguments to GDB",
     )
     parser.add_argument(
+        "--log",
+        metavar="FILE",
+        default=None,
+        help="Write debug log to FILE (default: no log)",
+    )
+    parser.add_argument(
         "--cd",
         metavar="DIR",
         help="Change to DIR before starting GDB",
@@ -98,6 +104,12 @@ Examples:
         os.chdir(args.cd)
     if args.wait:
         _wait_for_debugger()
+
+    # Initialise logging before importing anything heavy.
+    if args.log:
+        from .log import init as log_init
+
+        log_init(args.log)
 
     # Import here to avoid loading textual before arg parsing
     from .app import TGDBApp
