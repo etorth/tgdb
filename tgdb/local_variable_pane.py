@@ -254,6 +254,7 @@ class LocalVariablePane(PaneBase):
         # Step 1 + 2: per dynamic root, evaluate value string, then decide
         # whether a real -var-update is also safe.
         safe_dynamic_updated: set[str] = set()
+        garbage_dynamic: set[str] = set()   # roots with garbage/huge length
         if self._var_eval_expr:
             for vo in self._dynamic_varobjs:
                 try:
@@ -284,28 +285,43 @@ class LocalVariablePane(PaneBase):
                             "var_update %s failed: %s", vo, exc
                         )
                 else:
+                    # Garbage or unparseable length — also mark children as
+                    # unsafe. Their varobjs were created from garbage data and
+                    # sending -var-update to them can trigger GDB internal
+                    # assertion failures (cplus_describe_child: Assertion
+                    # 'access' failed).
+                    garbage_dynamic.add(vo)
                     _log.debug(
-                        "Skipping -var-update for %s: length=%s (likely garbage)",
+                        "Skipping -var-update for %s and its children:"
+                        " length=%s (likely garbage)",
                         vo,
                         length,
                     )
 
         # Step 3: update non-dynamic varobjs and children of dynamic roots.
         # Iterate _varobj_to_node which includes roots AND children.
-        # Skip dynamic roots (already handled above) but include their
-        # children if they were NOT already covered by a full -var-update above.
+        # Skip:
+        #   - dynamic roots (handled above)
+        #   - children of garbage dynamic roots (unsafe — can crash GDB)
+        #   - children of fully-updated dynamic roots (already covered)
         safe_to_update: list[str] = []
         for vo in self._varobj_to_node:
             if vo in self._dynamic_varobjs:
                 continue
-            # Check if this child belongs to a dynamic root that was already
-            # fully updated — if so GDB already refreshed it in that call.
-            parent_updated = False
+            skip = False
             for dyn_root in safe_dynamic_updated:
                 if vo.startswith(dyn_root + "."):
-                    parent_updated = True
+                    skip = True
                     break
-            if parent_updated:
+            if not skip:
+                for dyn_root in garbage_dynamic:
+                    if vo.startswith(dyn_root + "."):
+                        _log.debug(
+                            "Skipping garbage child varobj %s in update", vo
+                        )
+                        skip = True
+                        break
+            if skip:
                 continue
             safe_to_update.append(vo)
 
