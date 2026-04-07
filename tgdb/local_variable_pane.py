@@ -664,6 +664,11 @@ class LocalVariablePane(PaneBase):
         # Grab the existing tree node BEFORE any cleanup.
         node = self._varobj_to_node.get(old_varobj) if old_varobj else None
 
+        # Save type BEFORE purging — _purge_varobj_subtree removes _varobj_type entries.
+        # Type comes from the var_create response; outer_var.type is always empty
+        # because -stack-list-variables never returns a type field.
+        type_str = self._varobj_type.get(old_varobj, "") if old_varobj else ""
+
         # Purge tracking entries for old varobj and its children.
         if old_varobj:
             self._purge_varobj_subtree(old_varobj)
@@ -684,10 +689,7 @@ class LocalVariablePane(PaneBase):
         if self._rebuild_gen != gen:
             return
 
-        # Build *(Type*)addr expression.  Type comes from the var_create
-        # response saved in _varobj_type; outer_var.type is always empty
-        # because -stack-list-variables never returns a type field.
-        type_str = self._varobj_type.get(old_varobj, "") if old_varobj else ""
+        # Build *(Type*)addr expression.
         if not type_str:
             # No type — show as non-expandable leaf with last known value.
             if node is not None:
