@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Callable, Coroutine, Optional
 
 from textual.widgets import Tree
@@ -186,27 +187,50 @@ class LocalVariablePane(PaneBase):
     # Core update logic
     # ------------------------------------------------------------------
 
+    _RE_CONTAINER_LENGTH = re.compile(r"(?:length|size)\s+(\d+)", re.IGNORECASE)
+    # Threshold above which a reported container length is treated as garbage
+    # (i.e. from an uninitialized variable).  Sending -var-update to GDB for
+    # a container with a "length" of 10^18 causes GDB to iterate that many
+    # elements and hang its entire MI channel.
+    _SAFE_CHILD_COUNT = 1_000_000
+
+    @classmethod
+    def _parse_container_length(cls, value_str: str) -> int | None:
+        """Return the container length from a GDB value string, or None.
+
+        Handles patterns like:
+          "std::vector of length 2, capacity 2"
+          "std::map with 3 elements"
+        Returns None if no length can be parsed.
+        """
+        match = cls._RE_CONTAINER_LENGTH.search(value_str)
+        if match:
+            return int(match.group(1))
+        return None
+
     async def _do_var_update(self) -> list[dict]:
         """Update all tracked varobjs, returning merged changelist.
 
-        Dynamic (pretty-printer backed) ROOT varobjs are NEVER passed to
-        ``-var-update``.  Asking GDB to update a dynamic root requires it to
-        re-run the container's pretty-printer iterator from the beginning,
-        which hangs GDB's entire MI channel when the container is uninitialized
-        and its garbage numchild suggests billions of elements.  Crucially, the
-        hang is in GDB itself, not just in tgdb — all subsequent MI commands
-        queue behind the stuck one, so even a short asyncio timeout only
-        unsticks tgdb, not GDB.
+        For each dynamic (pretty-printer backed) root varobj the strategy is:
 
-        Instead:
-        - Dynamic root varobjs are refreshed via ``-var-evaluate-expression``,
-          which calls only the pretty-printer's ``to_string()`` — no children
-          iterator, no hang.  This updates the summary label (e.g. "length 2,
-          capacity 2") without risking a stall.
-        - Child varobjs of expanded dynamic roots are updated individually via
-          ``-var-update childN`` — they are simple value lookups.
-        - All non-dynamic varobjs use the fast ``-var-update *`` when no
-          dynamic varobjs exist; otherwise they are updated individually.
+        1. Call ``-var-evaluate-expression varN`` (fast, calls only
+           ``to_string()``; no children iterator; no hang risk) to get the
+           current summary value and update the node label.
+
+        2. Parse the container length from that string.  If the length is
+           within a safe bound (< _SAFE_CHILD_COUNT), also call
+           ``-var-update varN`` so GDB refreshes its internal varobj state
+           (child count, ``new_num_children``, etc.).  This is what makes
+           children correct when the user expands after the container changes.
+
+        3. If the length looks like garbage (≥ _SAFE_CHILD_COUNT or
+           unparseable AND has_more was set at creation), skip ``-var-update``
+           entirely to avoid blocking GDB's MI channel for seconds.
+
+        Child varobjs (e.g. var1.[0]) and non-dynamic varobjs are updated via
+        ``-var-update *`` when no dynamic roots exist, or individually
+        otherwise (because ``-var-update *`` would also re-evaluate dynamic
+        roots).
         """
         if not self._varobj_names:
             return []
@@ -227,15 +251,13 @@ class LocalVariablePane(PaneBase):
 
         # Slow path: at least one dynamic varobj exists.
         #
-        # 1. Refresh dynamic root varobjs via -var-evaluate-expression (safe,
-        #    calls to_string() only, no children iterator).
+        # Step 1 + 2: per dynamic root, evaluate value string, then decide
+        # whether a real -var-update is also safe.
+        safe_dynamic_updated: set[str] = set()
         if self._var_eval_expr:
             for vo in self._dynamic_varobjs:
                 try:
                     new_value = await self._var_eval_expr(vo)
-                    # Inject a synthetic changelist entry so _apply_changelist
-                    # updates the node label using the same code path as a
-                    # real -var-update response.
                     changelist.append({"name": vo, "value": new_value})
                     _log.debug(
                         "dynamic root %s value refreshed: %r", vo, new_value
@@ -244,12 +266,46 @@ class LocalVariablePane(PaneBase):
                     _log.warning(
                         "var_evaluate_expression %s failed: %s", vo, exc
                     )
+                    new_value = ""
 
-        # 2. Update all non-dynamic varobjs and children of dynamic roots.
-        #    We iterate _varobj_to_node (roots + children) and skip dynamic roots.
+                length = self._parse_container_length(new_value)
+                if length is not None and length < self._SAFE_CHILD_COUNT:
+                    # Safe to call -var-update: GDB will iterate at most
+                    # length elements via the pretty-printer.
+                    try:
+                        result = await self._var_update(vo, timeout=10.0)
+                        changelist.extend(result)
+                        safe_dynamic_updated.add(vo)
+                        _log.debug(
+                            "dynamic root %s updated (length=%d)", vo, length
+                        )
+                    except Exception as exc:
+                        _log.warning(
+                            "var_update %s failed: %s", vo, exc
+                        )
+                else:
+                    _log.debug(
+                        "Skipping -var-update for %s: length=%s (likely garbage)",
+                        vo,
+                        length,
+                    )
+
+        # Step 3: update non-dynamic varobjs and children of dynamic roots.
+        # Iterate _varobj_to_node which includes roots AND children.
+        # Skip dynamic roots (already handled above) but include their
+        # children if they were NOT already covered by a full -var-update above.
         safe_to_update: list[str] = []
         for vo in self._varobj_to_node:
             if vo in self._dynamic_varobjs:
+                continue
+            # Check if this child belongs to a dynamic root that was already
+            # fully updated — if so GDB already refreshed it in that call.
+            parent_updated = False
+            for dyn_root in safe_dynamic_updated:
+                if vo.startswith(dyn_root + "."):
+                    parent_updated = True
+                    break
+            if parent_updated:
                 continue
             safe_to_update.append(vo)
 
