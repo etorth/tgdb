@@ -60,8 +60,7 @@ def init(log_file: str) -> None:
     try:
         fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     except OSError as e:
-        print(f"tgdb: cannot open log file {log_file!r}: {e}", file=sys.stderr)
-        return
+        raise SystemExit(f"tgdb: cannot open log file {log_file!r}: {e}") from e
 
     fmt = logging.Formatter(
         fmt="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
