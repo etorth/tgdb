@@ -808,10 +808,8 @@ class LocalVariablePane(PaneBase):
             return
         # Strip "  ← shadowed" from the label.
         plain = node.label.plain if hasattr(node.label, "plain") else str(node.label)
-        for suffix in ("  ← shadowed", "← shadowed"):
-            if plain.endswith(suffix):
-                node.set_label(plain[: -len(suffix)])
-                break
+        if plain.endswith("  ← shadowed"):
+            node.set_label(plain[: -len("  ← shadowed")])
 
     # ------------------------------------------------------------------
     # Shadowed leaf management (for deeper shadows beyond one level)
@@ -834,7 +832,7 @@ class LocalVariablePane(PaneBase):
         # Add current shadowed variables.
         for var in shadowed:
             val = self._compact_value(var.value) if var.value else "?"
-            label = f"{var.name}: {var.type} = {val}  ← outer scope"
+            label = f"{var.name}: {var.type} = {val}  ← shadowed"
             tree.root.add_leaf(label, data={"shadow": True, "exp": var.name})
 
     # ------------------------------------------------------------------
