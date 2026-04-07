@@ -446,6 +446,10 @@ class LocalVariablePane(PaneBase):
             tuple[str, str, str, LocalVariable]
         ] = []  # (name,varobj,addr,outer_var)
         to_truly_remove: list[tuple[str, str]] = []  # (name, varobj)
+        # Old inner-scope varobjs superseded by a shadow promotion.
+        # Their _tracked entry is handled by _promote_shadow; we only need
+        # to delete the GDB varobj and purge tree entries.
+        superseded_varobjs: list[str] = []
 
         for name, (old_varobj, old_addr) in self._tracked.items():
             still_present = False
@@ -455,6 +459,14 @@ class LocalVariablePane(PaneBase):
                     break
             if still_present:
                 continue  # unchanged
+            # If this name was just promoted (a shadow became the new active
+            # binding), the promotion already updates _tracked[name].  Don't
+            # also queue a removal — that would delete the promoted entry in
+            # step 10 and leave _tracked without the variable entirely.
+            # Instead, just queue the old inner varobj for GDB-side cleanup.
+            if name in promoted_names:
+                superseded_varobjs.append(old_varobj)
+                continue
             outer_var = shadowed_by_name.get(name)
             if outer_var is not None and self._var_create:
                 to_reanchor.append((name, old_varobj, old_addr, outer_var))
@@ -530,6 +542,26 @@ class LocalVariablePane(PaneBase):
             self._promote_shadow(name, shadow_varobj)
             if self._rebuild_gen != gen:
                 return
+
+        # ── 8b. Clean up old inner-scope varobjs superseded by promotion ───
+        # _promote_shadow updated _tracked; now delete the displaced varobj
+        # from GDB and remove its tree node and tracking entries.
+        for old_varobj in superseded_varobjs:
+            node = self._varobj_to_node.get(old_varobj)
+            self._purge_varobj_subtree(old_varobj)
+            if node is not None:
+                node.remove()
+            try:
+                self._varobj_names.remove(old_varobj)
+            except ValueError:
+                pass
+            if self._var_delete:
+                try:
+                    await self._var_delete(old_varobj)
+                except Exception:
+                    pass
+        if self._rebuild_gen != gen:
+            return
 
         # ── 9. Re-anchor variables that are now shadowed ───────────────────
         # Keep their tree nodes; replace old floating varobj with an
