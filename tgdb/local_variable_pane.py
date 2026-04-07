@@ -110,6 +110,13 @@ class LocalVariablePane(PaneBase):
         # name → (varobj_name, address)
         self._shadows: dict[str, tuple[str, str]] = {}
 
+        # Type string saved from the var_create response.
+        # Used by _reanchor_var to build *(Type*)addr for address-pinned
+        # shadow varobjs.  Populated from the "type" field that GDB returns
+        # in the var_create result (which -stack-list-variables never returns).
+        # varobj_name → type_str
+        self._varobj_type: dict[str, str] = {}
+
         # varobj name → TreeNode (all depths)
         self._varobj_to_node: dict[str, TreeNode] = {}
 
@@ -649,6 +656,9 @@ class LocalVariablePane(PaneBase):
                     self._tracked[name] = (varobj_name, addr)
                     if info.get("dynamic", "0") == "1":
                         self._dynamic_varobjs.add(varobj_name)
+                    type_str = info.get("type", "")
+                    if type_str:
+                        self._varobj_type[varobj_name] = type_str
 
                 numchild = self._safe_int(info.get("numchild", "0"))
                 has_children = (
@@ -740,8 +750,18 @@ class LocalVariablePane(PaneBase):
         if self._rebuild_gen != gen:
             return
 
-        # 3. Create address-pinned varobj: *(Type*)addr
-        addr_expr = f"*({outer_var.type}*){old_addr}"
+        # Use the type saved from the original var_create response; fall back
+        # to outer_var.type (always empty from -stack-list-variables, but kept
+        # as a last resort).
+        type_str = self._varobj_type.get(old_varobj, outer_var.type or "")
+        if not type_str:
+            # No type available — cannot build *(Type*)addr expression.
+            if node is not None:
+                val = self._compact_value(outer_var.value) if outer_var.value else "?"
+                node.set_label(f"{name} = {val}  ← shadowed")
+                node.data["has_children"] = False
+            return
+        addr_expr = f"*({type_str}*){old_addr}"
         try:
             info = await self._var_create(addr_expr)
         except Exception:
@@ -761,6 +781,12 @@ class LocalVariablePane(PaneBase):
             self._shadows[name] = (new_varobj, old_addr)
             if info.get("dynamic", "0") == "1":
                 self._dynamic_varobjs.add(new_varobj)
+            # Save the type so that if this shadow itself gets re-anchored
+            # (e.g. a third binding of the same name appears), we can still
+            # build the *(Type*)addr expression.
+            reanchor_type = info.get("type", "") or type_str
+            if reanchor_type:
+                self._varobj_type[new_varobj] = reanchor_type
 
         # 4. Update or create the tree node.
         value = info.get("value", outer_var.value or "")
@@ -1285,6 +1311,7 @@ class LocalVariablePane(PaneBase):
         for k in stale:
             self._varobj_to_node.pop(k, None)
             self._dynamic_varobjs.discard(k)
+            self._varobj_type.pop(k, None)
 
     @staticmethod
     def _safe_int(val) -> int:
