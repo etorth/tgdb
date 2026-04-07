@@ -30,7 +30,10 @@ ERROR   — failures that degrade functionality (MI channel closed
 from __future__ import annotations
 
 import logging
+import os
+import platform
 import sys
+from datetime import datetime, timezone
 
 _LOGGER_NAME = "tgdb"
 
@@ -55,18 +58,43 @@ def init(log_file: str) -> None:
             _logger.removeHandler(handler)
 
     try:
-        fh = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     except OSError as e:
         print(f"tgdb: cannot open log file {log_file!r}: {e}", file=sys.stderr)
         return
 
     fmt = logging.Formatter(
         fmt="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
     fh.setFormatter(fmt)
     _logger.addHandler(fh)
-    _logger.info("tgdb logging started — writing to %s", log_file)
+
+    start_time = datetime.now(timezone.utc).astimezone()
+    _logger.info("=" * 60)
+    _logger.info("tgdb session started")
+    _logger.info("  time    : %s", start_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+    _logger.info("  pid     : %d", os.getpid())
+    _logger.info("  python  : %s", sys.version.replace("\n", " "))
+    _logger.info("  platform: %s", platform.platform())
+    _logger.info("  argv    : %s", " ".join(sys.argv))
+    _logger.info("  log file: %s", log_file)
+    _logger.info("=" * 60)
+
+
+def shutdown() -> None:
+    """Log a session-end marker and flush all handlers.
+
+    Call this from ``__main__.py`` after ``app.run()`` returns so the
+    log always has a clear end boundary even when tgdb exits normally.
+    """
+    end_time = datetime.now(timezone.utc).astimezone()
+    _logger.info("=" * 60)
+    _logger.info("tgdb session ended")
+    _logger.info("  time: %s", end_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+    _logger.info("=" * 60)
+    for handler in _logger.handlers:
+        handler.flush()
 
 
 def get_logger() -> logging.Logger:

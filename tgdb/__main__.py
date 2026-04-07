@@ -106,7 +106,8 @@ Examples:
         _wait_for_debugger()
 
     # Initialise logging before importing anything heavy.
-    if args.log:
+    log_enabled = bool(args.log)
+    if log_enabled:
         from .log import init as log_init
 
         log_init(args.log)
@@ -120,6 +121,11 @@ Examples:
         rc_file=args.rcfile,
     )
     app.run(mouse=True)
+
+    if log_enabled:
+        from .log import shutdown as log_shutdown
+
+        log_shutdown()
 
 
 if __name__ == "__main__":
