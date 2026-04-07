@@ -8,10 +8,57 @@ underlying mi_command_async helper.  Mixed into GDBController.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 
 _log = logging.getLogger("tgdb.gdb_varobj")
+
+# Python script run inside GDB to collect DWARF declaration lines for all
+# local variables in the current function.
+#
+# We base64-encode it so the MI command stays a single safe ASCII string —
+# no newlines, quotes, or backslashes that would confuse the GDB MI parser.
+#
+# Algorithm:
+#   1. Walk UP from the current block to find the enclosing function block.
+#   2. Scan every DWARF block inside the function's PC range by jumping from
+#      one block's end address to the next (covers sibling blocks that GCC
+#      emits for variables declared after goto labels, etc.).
+#   3. For each block, also walk UP to collect variables in enclosing scopes.
+#   4. Store the result in the GDB convenience variable $tgdb_decls so it can
+#      be read back via a normal -data-evaluate-expression MI command.
+_DECL_LINES_SCRIPT = """\
+import gdb
+frame = gdb.selected_frame()
+fb = frame.block()
+while fb and not fb.function:
+    fb = fb.superblock
+fs = fb.start
+fe = fb.end
+seen = set()
+decls = {}
+pc = fs
+while pc < fe:
+    b = gdb.block_for_pc(pc)
+    if b is None or b.end <= pc:
+        break
+    cur = b
+    while cur and cur.start >= fs:
+        if cur.start not in seen:
+            seen.add(cur.start)
+            for s in cur:
+                if s.is_variable and s.name not in decls:
+                    decls[s.name] = s.line
+        if cur.function:
+            break
+        cur = cur.superblock
+    pc = b.end
+gdb.set_convenience_variable("tgdb_decls", ",".join(f"{n}:{l}" for n, l in decls.items()))
+"""
+
+# Compute once at import time — avoids re-encoding on every call.
+_DECL_LINES_B64 = base64.b64encode(_DECL_LINES_SCRIPT.encode()).decode()
 
 
 class VarobjMixin:
@@ -26,9 +73,7 @@ class VarobjMixin:
 
     # -- async MI command helper -------------------------------------------
 
-    async def mi_command_async(
-        self, cmd: str, timeout: float | None = 10.0
-    ) -> dict:
+    async def mi_command_async(self, cmd: str, timeout: float | None = 10.0) -> dict:
         """Send an MI command and await its result.
 
         Returns ``{"message": str, "payload": dict|None}``.
@@ -136,7 +181,11 @@ class VarobjMixin:
                 children.append(child)
         _log.debug(
             "var_list_children %s from=%d limit=%d -> %d children has_more=%s",
-            varobj_name, from_idx, limit, len(children), has_more,
+            varobj_name,
+            from_idx,
+            limit,
+            len(children),
+            has_more,
         )
         return children, has_more
 
@@ -149,39 +198,40 @@ class VarobjMixin:
             pass
 
     async def get_decl_lines(self) -> dict[str, int]:
-        """Return DWARF declaration lines for all local variables.
+        """Return DWARF declaration lines for all local variables in the frame.
 
-        Runs a GDB Python one-liner via ``-interpreter-exec console`` that
-        stores the result in a GDB convenience variable, then retrieves it
-        via ``-data-evaluate-expression``.  This avoids parsing fragile
-        stream output and goes through the normal MI result path.
+        Runs a GDB Python script via ``-interpreter-exec console`` that walks
+        every DWARF block within the current function's address range, then
+        stores the result in a GDB convenience variable which is retrieved via
+        ``-data-evaluate-expression``.
 
-        Returns ``{var_name: decl_line}`` for every variable in the current
-        frame's block.  Returns an empty dict on any error.
+        Returns ``{var_name: decl_line}``.  Returns an empty dict on error.
 
-        When the current stopped line is <= a variable's decl_line, the
-        variable's constructor/initializer has not yet executed.
+        Why walk ALL blocks?
+        --------------------
+        ``frame.block()`` returns only the INNERMOST block at the current PC.
+        Functions are commonly split into SIBLING blocks in DWARF — for
+        example GCC puts variables declared after a ``goto`` label into a
+        separate block.  Iterating only the current block (and its parents)
+        misses those sibling blocks.
+
+        The fix: starting from the function block's start address, jump from
+        one block's end to the next to enumerate every sibling block.  At
+        each PC, also walk UP the block chain to collect variables from outer
+        (enclosing) blocks, using a visited set to avoid double-counting.
+
+        The Python script (_DECL_LINES_SCRIPT) is base64-encoded so that the
+        resulting MI command is a single safe ASCII string — no embedded
+        newlines, quotes, or backslashes that would trip up the GDB MI parser.
         """
-        # Step 1: set $tgdb_decls via the Python API.
-        py_script = (
-            "import gdb; "
-            "frame=gdb.selected_frame(); "
-            "block=frame.block(); "
-            "decls=','.join("
-            "    f'{sym.name}:{sym.line}' "
-            "    for sym in block if sym.is_variable"
-            "); "
-            "gdb.set_convenience_variable('tgdb_decls', decls)"
-        )
+        py_cmd = f"import base64; exec(base64.b64decode('{_DECL_LINES_B64}').decode())"
         try:
-            await self.mi_command_async(
-                f'-interpreter-exec console "python {py_script}"'
-            )
+            await self.mi_command_async(f'-interpreter-exec console "python {py_cmd}"')
         except RuntimeError as exc:
             _log.debug("get_decl_lines python step failed: %s", exc)
             return {}
 
-        # Step 2: read back the convenience variable.
+        # Read back the convenience variable.
         try:
             raw = await self.eval_expr("$tgdb_decls")
         except RuntimeError as exc:
@@ -221,9 +271,7 @@ class VarobjMixin:
         summary (e.g. "std::vector of length 2, capacity 2") is refreshed
         quickly even when the container has many (or garbage-sized) children.
         """
-        result = await self.mi_command_async(
-            f"-var-evaluate-expression {varobj_name}"
-        )
+        result = await self.mi_command_async(f"-var-evaluate-expression {varobj_name}")
         payload = result.get("payload") or {}
         value = payload.get("value", "")
         _log.debug("var_evaluate_expression %s -> %r", varobj_name, value)
