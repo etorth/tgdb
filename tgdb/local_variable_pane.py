@@ -257,19 +257,15 @@ class LocalVariablePane(PaneBase):
         # Step 1 + 2: per dynamic root, evaluate value string, then decide
         # whether a real -var-update is also safe.
         safe_dynamic_updated: set[str] = set()
-        garbage_dynamic: set[str] = set()   # roots with garbage/huge length
+        garbage_dynamic: set[str] = set()  # roots with garbage/huge length
         if self._var_eval_expr:
             for vo in self._dynamic_varobjs:
                 try:
                     new_value = await self._var_eval_expr(vo)
                     changelist.append({"name": vo, "value": new_value})
-                    _log.debug(
-                        "dynamic root %s value refreshed: %r", vo, new_value
-                    )
+                    _log.debug("dynamic root %s value refreshed: %r", vo, new_value)
                 except Exception as exc:
-                    _log.warning(
-                        "var_evaluate_expression %s failed: %s", vo, exc
-                    )
+                    _log.warning("var_evaluate_expression %s failed: %s", vo, exc)
                     new_value = ""
 
                 length = self._parse_container_length(new_value)
@@ -280,13 +276,9 @@ class LocalVariablePane(PaneBase):
                         result = await self._var_update(vo, timeout=10.0)
                         changelist.extend(result)
                         safe_dynamic_updated.add(vo)
-                        _log.debug(
-                            "dynamic root %s updated (length=%d)", vo, length
-                        )
+                        _log.debug("dynamic root %s updated (length=%d)", vo, length)
                     except Exception as exc:
-                        _log.warning(
-                            "var_update %s failed: %s", vo, exc
-                        )
+                        _log.warning("var_update %s failed: %s", vo, exc)
                 else:
                     # Garbage or unparseable length — also mark children as
                     # unsafe. Their varobjs were created from garbage data and
@@ -319,9 +311,7 @@ class LocalVariablePane(PaneBase):
             if not skip:
                 for dyn_root in garbage_dynamic:
                     if vo.startswith(dyn_root + "."):
-                        _log.debug(
-                            "Skipping garbage child varobj %s in update", vo
-                        )
+                        _log.debug("Skipping garbage child varobj %s in update", vo)
                         skip = True
                         break
             if skip:
@@ -493,9 +483,7 @@ class LocalVariablePane(PaneBase):
             try:
                 changelist = await self._do_var_update()
                 if self._rebuild_gen == gen:
-                    self._apply_changelist(
-                        changelist, shadow_varobjs=shadow_varobjs
-                    )
+                    self._apply_changelist(changelist, shadow_varobjs=shadow_varobjs)
             except Exception:
                 pass
             return
