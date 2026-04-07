@@ -8,7 +8,10 @@ underlying mi_command_async helper.  Mixed into GDBController.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+
+_log = logging.getLogger("tgdb.gdb_varobj")
 
 
 class VarobjMixin:
@@ -55,7 +58,10 @@ class VarobjMixin:
         except OSError as e:
             self._request_meta.pop(token, None)
             self._pending.pop(token, None)
+            _log.error("MI write failed: %s", e)
             raise RuntimeError(f"MI write failed: {e}") from e
+
+        _log.debug("MI >> %s", cmd)
 
         if timeout is None:
             result = await fut
@@ -67,7 +73,10 @@ class VarobjMixin:
                 # pending entry so the eventual stale response is silently dropped.
                 self._pending.pop(token, None)
                 self._request_meta.pop(token, None)
+                _log.warning("MI command timed out: %s", cmd)
                 raise RuntimeError("MI command timed out — GDB may be busy")
+
+        _log.debug("MI << token=%d msg=%s", token, result.get("message"))
 
         if result.get("message") == "error":
             payload = result.get("payload") or {}
@@ -82,7 +91,9 @@ class VarobjMixin:
         Keys include ``name``, ``numchild``, ``value``, ``type``, etc.
         """
         result = await self.mi_command_async(f'-var-create - {frame} "{expr}"')
-        return result.get("payload") or {}
+        payload = result.get("payload") or {}
+        _log.debug("var_create expr=%r -> name=%r", expr, payload.get("name"))
+        return payload
 
     async def var_list_children(
         self, varobj_name: str, from_idx: int = 0, limit: int = 0
@@ -123,10 +134,15 @@ class VarobjMixin:
             child = children_raw.get("child", children_raw)
             if isinstance(child, dict):
                 children.append(child)
+        _log.debug(
+            "var_list_children %s from=%d limit=%d -> %d children has_more=%s",
+            varobj_name, from_idx, limit, len(children), has_more,
+        )
         return children, has_more
 
     async def var_delete(self, varobj_name: str) -> None:
         """Delete a varobj and its children."""
+        _log.debug("var_delete %s", varobj_name)
         try:
             await self.mi_command_async(f"-var-delete {varobj_name}")
         except RuntimeError:
@@ -143,4 +159,6 @@ class VarobjMixin:
         result = await self.mi_command_async(f"-var-update --all-values {varobj_name}")
         payload = result.get("payload") or {}
         changelist = payload.get("changelist", [])
-        return changelist if isinstance(changelist, list) else []
+        changelist = changelist if isinstance(changelist, list) else []
+        _log.debug("var_update -> %d changes", len(changelist))
+        return changelist

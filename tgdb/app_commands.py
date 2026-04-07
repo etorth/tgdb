@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 import time
 from datetime import datetime
@@ -13,6 +14,8 @@ from .source_widget import SourceFile
 
 if TYPE_CHECKING:
     from .app import TGDBApp
+
+_log = logging.getLogger("tgdb.app")
 
 
 class CommandsMixin:
@@ -178,6 +181,7 @@ class CommandsMixin:
         return None
 
     def _send_gdb_cli(self: TGDBApp, cmd: str) -> None:
+        _log.info("gdb cli: %r", cmd)
         if self.cfg.showdebugcommands:
             # Mirror cgdb showdebugcommands: echo the command into the GDB window
             gdb_w = self._get_gdb_widget()

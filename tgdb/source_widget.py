@@ -15,6 +15,7 @@ Features:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Optional
@@ -53,6 +54,8 @@ from .source_messages import (  # noqa: F401 — re-exported
 )
 
 from .pane_base import PaneBase
+
+_log = logging.getLogger("tgdb.source")
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +169,10 @@ class _SourceContent(SourceViewRendering, Widget):
             self.sel_line = max(1, min(target_line, len(lines)))
             self._ensure_visible(self.sel_line)
             self.refresh()
+            _log.info("load file: %s", path)
             return True
-        except OSError:
+        except OSError as e:
+            _log.warning("load file failed: %s: %s", path, e)
             return False
 
     def reload_if_changed(self) -> bool:

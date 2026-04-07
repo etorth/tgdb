@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from typing import Optional
+
 from textual.css.query import NoMatches
 
 from .source_widget import (
@@ -38,6 +40,8 @@ from .command_line_bar import (
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
 from .gdb_controller import Breakpoint, Frame, LocalVariable, ThreadInfo, RegisterInfo
 
+_log = logging.getLogger("tgdb.app")
+
 
 class CallbacksMixin:
     """Message handlers and GDB UI callbacks for TGDBApp."""
@@ -58,6 +62,7 @@ class CallbacksMixin:
             if b.line == msg.line and b_basename == target_basename:
                 existing = b
                 break
+        _log.info("toggle breakpoint line=%d file=%s", msg.line, sf.path)
         if existing:
             self.gdb.delete_breakpoint(existing.number)
         else:
@@ -171,6 +176,7 @@ class CallbacksMixin:
         self._set_mode("GDB_SCROLL")
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
+        _log.info("command: %r", msg.command)
         # If a command task is already running, reject new submissions.
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
@@ -275,6 +281,12 @@ class CallbacksMixin:
 
     def _ui_on_stopped(self, frame: Frame) -> None:
         """GDB stopped — update source view to executing location."""
+        _log.info(
+            "stopped frame=%s:%d func=%s",
+            frame.file or frame.fullname,
+            frame.line,
+            frame.func,
+        )
         path = frame.fullname or frame.file
         if path and os.path.isfile(path):
             src = self._get_source_view()
@@ -298,17 +310,20 @@ class CallbacksMixin:
         self.gdb.mi_command("-break-list")
 
     def _ui_on_running(self) -> None:
+        _log.info("running")
         self._set_mode("GDB_PROMPT")
         if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
             return
         self._focus_widget(self._first_workspace_leaf())
 
     def _ui_set_breakpoints(self, bps: list[Breakpoint]) -> None:
+        _log.info("breakpoints: %d", len(bps))
         src = self._get_source_view()
         if src is not None:
             src.set_breakpoints(bps)
 
     def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
+        _log.debug("locals: %d vars", len(variables))
         self._current_locals = list(variables)
         if self._locals_pane is not None:
             self._locals_pane.set_variables(
@@ -354,6 +369,7 @@ class CallbacksMixin:
             return
         # Only load if no file is shown yet (don't override a user selection)
         if not src.source_file:
+            _log.info("load source %s line %d", path, line)
             src.load_file(path)
             if line > 0:
                 src.move_to(line)
@@ -369,6 +385,7 @@ class CallbacksMixin:
     def _ui_gdb_exit(self) -> None:
         # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
         # cgdb calls cgdb_cleanup_and_exit(0) in tgdb_process() on size<=0.
+        _log.info("GDB exited")
         self._save_history_to_disk()
         self.exit(0)
 

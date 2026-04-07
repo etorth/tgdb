@@ -8,6 +8,8 @@ source files), and the ``_safe_int`` utility.  Mixed into GDBController.
 
 from __future__ import annotations
 
+import logging
+
 from .gdb_types import (
     Breakpoint,
     Frame,
@@ -15,6 +17,8 @@ from .gdb_types import (
     RegisterInfo,
     ThreadInfo,
 )
+
+_log = logging.getLogger("tgdb.gdb_parsing")
 
 
 class ParsingMixin:
@@ -40,6 +44,12 @@ class ParsingMixin:
             thread_id = results.get("thread-id")
             if isinstance(thread_id, str):
                 self.current_thread_id = thread_id
+            _log.info(
+                "stopped reason=%s frame=%s:%d",
+                results.get("reason", ""),
+                frame.file or frame.fullname,
+                frame.line,
+            )
             self.on_stopped(frame)
             self.request_current_frame_locals(report_error=False)
             self.request_current_stack_frames(report_error=False)
@@ -52,6 +62,7 @@ class ParsingMixin:
             self.on_locals([])
             self.stack = []
             self.on_stack([])
+            _log.info("running")
             running_thread = results.get("thread-id")
             if self.threads:
                 if running_thread == "all":
@@ -80,6 +91,7 @@ class ParsingMixin:
         elif cls == "breakpoint-deleted":
             try:
                 num = int(results.get("id", ""))
+                _log.info("breakpoint-deleted id=%s", results.get("id", ""))
                 kept = []
                 for b in self.breakpoints:
                     if b.number != num:
@@ -241,6 +253,12 @@ class ParsingMixin:
         if "enabled" in data:
             existing.enabled = data["enabled"] == "y"
         existing.temporary = data.get("disp", "") == "del"
+        _log.info(
+            "breakpoint updated: #%d %s:%d",
+            existing.number,
+            existing.file or existing.fullname,
+            existing.line,
+        )
         self.on_breakpoints(list(self.breakpoints))
 
     def handle_breaklist_result(self, results: dict) -> None:
@@ -269,6 +287,7 @@ class ParsingMixin:
                     )
                 )
         self.breakpoints = new_bps
+        _log.info("breaklist: %d breakpoints", len(new_bps))
         self.on_breakpoints(list(self.breakpoints))
 
     def _handle_source_files(self, files) -> None:

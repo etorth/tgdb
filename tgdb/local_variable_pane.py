@@ -27,6 +27,7 @@ gets its own saved state.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Callable, Coroutine, Optional
 
 from textual.widgets import Tree
@@ -36,6 +37,8 @@ from .gdb_controller import LocalVariable, Frame
 from .highlight_groups import HighlightGroups
 from .config_types import Config
 from .pane_base import PaneBase
+
+_log = logging.getLogger("tgdb.locals")
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +652,7 @@ class LocalVariablePane(PaneBase):
         explicitly created via -var-list-children.  No special handling is
         needed — they are naturally skipped.
         """
+        _log.debug("changelist: %d changes", len(changelist))
         for change in changelist:
             varobj_name = change.get("name", "")
             if varobj_name in skip_varobjs:
@@ -756,6 +760,7 @@ class LocalVariablePane(PaneBase):
             return bool(children)
         except Exception as e:
             data["loaded"] = False
+            _log.warning("failed to load children for %s: %s", varobj, e)
             node.add_leaf(f"⚠ {e}")
             return False
 
@@ -817,6 +822,7 @@ class LocalVariablePane(PaneBase):
         if not children:
             node.add_leaf("(empty)")
             return
+        _log.debug("load_children varobj=%s -> %d children has_more=%s", varobj_name, len(children), has_more)
         # Pass the parent node's displayhint so _add_children knows how to
         # lay out the children (e.g. "map" → pair key-value, "array" → index).
         if isinstance(node.data, dict):
@@ -874,6 +880,7 @@ class LocalVariablePane(PaneBase):
         except Exception as e:
             parent.add_leaf(f"⚠ {e}")
             return
+        _log.debug("load_more_children varobj=%s from=%d -> %d children", varobj_name, from_idx, len(children))
         if children:
             await self._add_children(parent, children, parent_dh)
         if has_more:

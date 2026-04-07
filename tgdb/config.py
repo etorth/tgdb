@@ -9,6 +9,7 @@ Supports all :set options, :highlight, :map, :imap, :unmap, :iunmap.
 from __future__ import annotations
 
 import builtins
+import logging
 import os
 import re
 import shlex
@@ -33,6 +34,8 @@ from .config_types import (  # noqa: F401 — re-exported
 )
 from .config_commands import UserCommandMixin
 from .config_python import PythonExecMixin
+
+_log = logging.getLogger("tgdb.config")
 
 
 # Abbreviation → canonical name
@@ -158,6 +161,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         except OSError as e:
             return f"source: cannot open '{path}': {e}"
 
+        _log.info("loading rc file: %s", path)
         i = 0
         while i < len(raw_lines):
             line = raw_lines[i].rstrip("\n")
@@ -258,6 +262,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             _rhs = self._decode_keyseq_tokens(_map_m.group(3))
             if not _lhs:
                 return "map: empty lhs"
+            _log.debug("map %r -> %r", _lhs, _rhs)
             self.km.map(_mode, _lhs, _rhs)
             return None
 
@@ -388,6 +393,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         name = self._resolve_name(name)
         if name in _BOOL_OPTIONS:
             setattr(self.config, name, value.lower() not in ("0", "false", "off", "no"))
+            _log.debug("set %s = %r", name, getattr(self.config, name))
             return None
         elif name in _INT_OPTIONS:
             try:
@@ -397,17 +403,22 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
                     self.km.timeout_ms = int(value)
                 elif name == "ttimeoutlen":
                     self.km.ttimeout_ms = int(value)
+                _log.debug("set %s = %r", name, getattr(self.config, name))
             except ValueError:
+                _log.warning("set: invalid integer value for %s: %r", name, value)
                 return f"set: invalid integer '{value}'"
             return None
         elif name in _STR_OPTIONS:
             setattr(self.config, name, value.lower())
+            _log.debug("set %s = %r", name, getattr(self.config, name))
             return None
         elif name in _PATH_OPTIONS:
             setattr(self.config, name, value)  # preserve case
+            _log.debug("set %s = %r", name, value)
             if value:
                 _apply_clipboard_path(value)
             return None
+        _log.warning("set: unknown option %r", name)
         return f"set: unknown option '{name}'"
 
     def _resolve_name(self, name: str) -> str:

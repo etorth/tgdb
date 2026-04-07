@@ -15,6 +15,7 @@ Secondary PTY: GDB machine-interface channel opened via "new-ui mi <device>".
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import termios
@@ -35,6 +36,8 @@ from .gdb_parsing import ParsingMixin
 # ---------------------------------------------------------------------------
 
 from .gdb_miparser import GDBMIParser
+
+_log = logging.getLogger("tgdb.gdb_controller")
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +149,9 @@ class GDBController(ParsingMixin, VarobjMixin):
                     os.close(fd)
                 except OSError:
                     pass
+            _log.error("GDB spawn failed, cmd=%r", cmd)
             raise
+        _log.info("GDB spawned, cmd=%r", cmd)
         self._mi_master_fd = mi_master_fd
         self._mi_slave_fd = mi_slave_fd
 
@@ -166,9 +171,11 @@ class GDBController(ParsingMixin, VarobjMixin):
         if self._proc and self._proc.isalive():
             if isinstance(data, str):
                 data = data.encode()
+            _log.debug("GDB input: %r", data)
             self._proc.write(data)
 
     def terminate(self) -> None:
+        _log.info("GDB terminated")
         if self._proc and self._proc.isalive():
             try:
                 self._proc.terminate(force=True)
@@ -201,6 +208,7 @@ class GDBController(ParsingMixin, VarobjMixin):
         # with zero polling delay (unlike asyncio.sleep(0.02)).
         loop.add_reader(self._proc.fd, self._on_console_readable, loop)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
+        _log.info("MI reader started")
 
         # Enable pretty-printing so varobj operations return logical children
         # (e.g. vector elements, map key-value pairs) instead of raw internals.
@@ -219,6 +227,7 @@ class GDBController(ParsingMixin, VarobjMixin):
                 loop.remove_reader(self._mi_master_fd)
             except Exception:
                 pass
+            _log.info("GDB exited")
             self.on_exit()
 
     def _on_console_readable(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -252,6 +261,8 @@ class GDBController(ParsingMixin, VarobjMixin):
         while "\n" in self._mi_buf:
             line, self._mi_buf = self._mi_buf.split("\n", 1)
             line = line.rstrip("\r")
+            if line:
+                _log.debug("MI raw: %s", line)
             self._dispatch(line)
 
     def _dispatch(self, line: str) -> None:
@@ -272,6 +283,7 @@ class GDBController(ParsingMixin, VarobjMixin):
         meta: dict[str, object] = {}
         if token is not None:
             meta = self._request_meta.pop(token, {})
+        _log.debug("MI result token=%s cls=%s", token, cls)
 
         if cls == "error":
             if meta.get("kind") == "current-location":
@@ -296,6 +308,7 @@ class GDBController(ParsingMixin, VarobjMixin):
             else:
                 msg = results.get("msg", "")
                 if isinstance(msg, str) and bool(meta.get("report_error", True)):
+                    _log.error("MI error: %s", msg)
                     self.on_error(msg)
 
         elif cls in ("done", "running"):
