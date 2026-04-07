@@ -643,6 +643,11 @@ class LocalVariablePane(PaneBase):
 
         *shadow_varobjs* are the currently re-anchored outer-binding varobjs;
         their labels get "← shadowed" re-appended after the value is updated.
+
+        Hidden children (those not yet fetched due to expandchildlimit) are
+        never in *changelist* because GDB only knows about varobjs that were
+        explicitly created via -var-list-children.  No special handling is
+        needed — they are naturally skipped.
         """
         for change in changelist:
             varobj_name = change.get("name", "")
@@ -657,6 +662,10 @@ class LocalVariablePane(PaneBase):
                 continue
             data = node.data
             if not isinstance(data, dict):
+                continue
+            # Sentinel "load more" nodes should never appear in the changelist
+            # (they are not registered in _varobj_to_node), but guard anyway.
+            if data.get("load_more"):
                 continue
             new_value = change.get("value", "")
             exp = data.get("exp", "")
@@ -675,9 +684,20 @@ class LocalVariablePane(PaneBase):
             node.set_label(label)
             new_num_children = change.get("new_num_children")
             if new_num_children is not None and data.get("loaded"):
+                # The child count changed (e.g. vector grew or shrank).
+                # Reset the node so it reloads its children fresh, including
+                # re-applying the expandchildlimit paging from the start.
                 data["loaded"] = False
                 node.remove_children()
-                node.add_leaf("⏳ loading...")
+                if node.is_expanded:
+                    # Node is already open — reload immediately so the user
+                    # does not see a spinner that never resolves.
+                    asyncio.create_task(self._load_children(node, varobj_name))
+                else:
+                    # Node is collapsed — add a placeholder so the expand
+                    # triangle stays visible and on_tree_node_expanded fires
+                    # when the user opens it next time.
+                    node.add_leaf("⏳ loading...")
 
     # ------------------------------------------------------------------
     # Expansion save / restore helpers
