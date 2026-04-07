@@ -57,6 +57,16 @@ int main()
     w.test.d = "Updated string in main()";
 
     {
+        TestWrapper w {};
+
+        w.test.a = 10;
+        w.test.b = 45.6f;
+
+        w.test.c = 4567890L;
+        w.test.d = "Updated string in main()";
+    }
+
+    {
         int w = 12;
         {
             float w = 23.0;
