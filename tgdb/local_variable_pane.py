@@ -832,7 +832,7 @@ class LocalVariablePane(PaneBase):
         # Add current shadowed variables.
         for var in shadowed:
             val = self._compact_value(var.value) if var.value else "?"
-            label = f"{var.name}: {var.type} = {val}  ← shadowed"
+            label = f"{var.name} = {val}  ← shadowed"
             tree.root.add_leaf(label, data={"shadow": True, "exp": var.name})
 
     # ------------------------------------------------------------------
