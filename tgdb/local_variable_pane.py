@@ -97,18 +97,18 @@ class LocalVariablePane(PaneBase):
         self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
         self._get_decl_lines: Optional[Callable[..., Coroutine]] = None
 
-        # Per-variable state for incremental updates.
-        # name → (varobj_name, address)  — innermost binding only.
-        self._tracked: dict[str, tuple[str, str]] = {}
+        # Per-variable state keyed by (name, address) so every distinct
+        # binding of the same name is tracked independently — no same-name
+        # collisions even when inner scopes shadow outer variables.
+        # (name, addr) → varobj_name
+        self._tracked: dict[tuple[str, str], str] = {}
 
-        # Re-anchored outer (shadowed) bindings.
-        # When an inner-scope var shadows an outer one we delete the old
-        # floating varobj (which GDB hijacks to point at the inner var) and
-        # create a new address-pinned varobj ``*(Type*)addr`` that keeps
-        # pointing at the outer var regardless of scope.  The original tree
-        # node is kept in place with a "← shadowed" label suffix.
-        # name → (varobj_name, address)
-        self._shadows: dict[str, tuple[str, str]] = {}
+        # Varobjs created with *(Type*)addr rather than the plain variable
+        # name.  Needed for outer (shadowed) bindings: GDB's floating varobj
+        # (created with the plain name) gets hijacked to follow the inner
+        # binding when a new inner-scope variable with the same name appears.
+        # Pinning it to a fixed address prevents that.
+        self._pinned_varobjs: set[str] = set()
 
         # Type string saved from the var_create response.
         # Used by _reanchor_var to build *(Type*)addr for address-pinned
@@ -358,7 +358,7 @@ class LocalVariablePane(PaneBase):
         except Exception:
             return
 
-        # ── 1. Evaluate addresses (unique names only — innermost binding) ─
+        # ── 1. Evaluate addresses for innermost binding of each unique name ─
         addrs: dict[str, str] = {}
         if self._var_eval:
             for var in variables:
@@ -415,236 +415,158 @@ class LocalVariablePane(PaneBase):
         if self._rebuild_gen != gen:
             return
 
-        # ── 2. Separate innermost bindings from shadowed outer ones ────────
-        # GDB returns multiple entries for the same name (innermost first).
-        new_main: list[tuple[str, str, LocalVariable]] = []  # (name, addr, var)
-        new_shadowed: list[LocalVariable] = []
-        shadowed_by_name: dict[str, LocalVariable] = {}
-        seen: set[str] = set()
-        for var in variables:
-            if var.name not in seen:
-                seen.add(var.name)
-                new_main.append((var.name, addrs.get(var.name, var.type), var))
-            else:
-                new_shadowed.append(var)
-                shadowed_by_name.setdefault(var.name, var)
+        # ── 2. Build complete binding list ─────────────────────────────────
+        # GDB returns variables innermost-first; duplicate names are outer
+        # (shadowed) bindings.  For outer bindings we need their address —
+        # &name always returns the innermost, so we look them up from the
+        # addresses already stored as keys in _tracked.
+        tracked_outer: dict[str, list[str]] = {}
+        for (tname, taddr) in self._tracked:
+            if addrs.get(tname) != taddr:
+                tracked_outer.setdefault(tname, []).append(taddr)
 
-        # ── 3. Compute new frame key ───────────────────────────────────────
+        new_bindings: list[tuple[str, str, LocalVariable]] = []
+        seen_names: set[str] = set()
+        for var in variables:
+            if var.name not in seen_names:
+                seen_names.add(var.name)
+                new_bindings.append((var.name, addrs.get(var.name, var.type), var))
+            else:
+                outer_addrs = tracked_outer.get(var.name, [])
+                if outer_addrs:
+                    outer_addr = outer_addrs.pop(0)
+                    new_bindings.append((var.name, outer_addr, var))
+                # else: unknown outer binding address (only when attaching
+                # mid-execution inside an inner scope we've never seen) — skip.
+
+        # ── 3. Determine shadow status ─────────────────────────────────────
+        # A binding (name, addr) is shadowed iff addr != innermost addr for
+        # that name, i.e. there exists a more-inner binding with the same name.
+        new_binding_keys: set[tuple[str, str]] = set()
+        shadowed_keys: set[tuple[str, str]] = set()
+        for bname, baddr, _ in new_bindings:
+            key = (bname, baddr)
+            new_binding_keys.add(key)
+            if addrs.get(bname) != baddr:
+                shadowed_keys.add(key)
+
+        # ── 4. Compute new frame key ───────────────────────────────────────
         new_frame_key: tuple | None = None
         if frame and frame.func:
-            var_sig = frozenset((name, addr) for name, addr, _ in new_main)
+            var_sig = frozenset(new_binding_keys)
             new_frame_key = (frame.func, frame.fullname or frame.file, var_sig)
 
-        # ── 4a. Promotions: _shadows entries whose address matches new_main ─
-        # (inner scope exited; the re-anchored outer var becomes active again)
-        to_promote: list[tuple[str, str]] = []  # (name, shadow_varobj)
-        promoted_names: set[str] = set()
-        for name, addr, _var in new_main:
-            shadow = self._shadows.get(name)
-            if shadow and shadow[1] == addr:
-                to_promote.append((name, shadow[0]))
-                promoted_names.add(name)
+        # ── 5. Classify changes ────────────────────────────────────────────
+        current_keys = set(self._tracked.keys())
 
-        # ── 4b. Per-tracked-variable classification ────────────────────────
-        # to_reanchor: was main, now shadowed by inner var → keep tree node,
-        #              rebuild varobj using *(Type*)addr so it stays valid.
-        # to_truly_remove: variable gone entirely.
-        to_reanchor: list[
-            tuple[str, str, str, LocalVariable]
-        ] = []  # (name,varobj,addr,outer_var)
-        to_truly_remove: list[tuple[str, str]] = []  # (name, varobj)
-        # Old inner-scope varobjs superseded by a shadow promotion.
-        # Their _tracked entry is handled by _promote_shadow; we only need
-        # to delete the GDB varobj and purge tree entries.
-        superseded_varobjs: list[str] = []
-
-        for name, (old_varobj, old_addr) in self._tracked.items():
-            still_present = False
-            for n, a, _ in new_main:
-                if n == name and a == old_addr:
-                    still_present = True
-                    break
-            if still_present:
-                continue  # unchanged
-            # If this name was just promoted (a shadow became the new active
-            # binding), the promotion already updates _tracked[name].  Don't
-            # also queue a removal — that would delete the promoted entry in
-            # step 10 and leave _tracked without the variable entirely.
-            # Instead, just queue the old inner varobj for GDB-side cleanup.
-            if name in promoted_names:
-                superseded_varobjs.append(old_varobj)
+        to_remove: list[tuple[str, str]] = [
+            k for k in current_keys if k not in new_binding_keys
+        ]
+        to_add: list[tuple[str, str, LocalVariable]] = [
+            (n, a, v) for n, a, v in new_bindings if (n, a) not in current_keys
+        ]
+        # to_reanchor: already tracked with a floating varobj, but now
+        # shadowed by an inner-scope binding.  Must replace with a pinned
+        # *(Type*)addr varobj so GDB stops hijacking it.
+        to_reanchor: list[tuple[str, str, LocalVariable]] = []
+        for bname, baddr, bvar in new_bindings:
+            key = (bname, baddr)
+            if key not in current_keys:
                 continue
-            outer_var = shadowed_by_name.get(name)
-            if outer_var is not None and self._var_create:
-                to_reanchor.append((name, old_varobj, old_addr, outer_var))
-            else:
-                to_truly_remove.append((name, old_varobj))
+            if key not in shadowed_keys:
+                continue
+            varobj = self._tracked.get(key, "")
+            if varobj and varobj not in self._pinned_varobjs:
+                to_reanchor.append((bname, baddr, bvar))
 
-        # ── 4c. _shadows cleanup: entries no longer shadowed or visible ────
-        shadows_to_clean: list[tuple[str, str]] = []
-        for sname, (svo, _saddr) in self._shadows.items():
-            if sname not in promoted_names and sname not in shadowed_by_name:
-                shadows_to_clean.append((sname, svo))
-
-        # ── 4d. Regular adds ───────────────────────────────────────────────
-        to_add: list[tuple[str, str, LocalVariable]] = []
-        for name, addr, var in new_main:
-            if name in promoted_names:
-                continue  # handled by promotion
-            old = self._tracked.get(name)
-            if old is None or old[1] != addr:
-                to_add.append((name, addr, var))
-
-        # ── 5. Fast path: nothing structural changed ───────────────────────
-        shadow_varobjs = set()
-        for _, (vo, _) in self._shadows.items():
-            shadow_varobjs.add(vo)
+        # ── 6. Fast path: nothing structural changed ───────────────────────
         no_change = (
-            not to_truly_remove
+            not to_remove
             and not to_reanchor
             and not to_add
-            and not to_promote
-            and not shadows_to_clean
             and new_frame_key == self._frame_key
         )
         if no_change:
             try:
                 changelist = await self._do_var_update()
                 if self._rebuild_gen == gen:
-                    self._apply_changelist(changelist, shadow_varobjs=shadow_varobjs)
+                    self._apply_changelist(changelist)
             except Exception:
                 pass
+            self._sync_shadow_labels(shadowed_keys)
             return
 
-        # ── 6. Save expansion for outgoing frame key ───────────────────────
+        # ── 7. Save expansion for outgoing frame key ───────────────────────
         if self._frame_key is not None and self._frame_key != new_frame_key:
             paths = self._collect_expanded_paths()
             if paths:
                 self._saved_expansions[self._frame_key] = paths
         self._frame_key = new_frame_key
 
-        # ── 7. Update values for UNCHANGED variables ───────────────────────
-        stale_varobjs = set()
-        for _, vo in to_truly_remove:
-            stale_varobjs.add(vo)
-        for _, vo, _, _ in to_reanchor:
-            stale_varobjs.add(vo)
+        # ── 8. Update values for UNCHANGED variables ───────────────────────
+        stale_varobjs: set[str] = set()
+        for rname, raddr in to_remove:
+            vo = self._tracked.get((rname, raddr), "")
+            if vo:
+                stale_varobjs.add(vo)
+        for rname, raddr, _ in to_reanchor:
+            vo = self._tracked.get((rname, raddr), "")
+            if vo:
+                stale_varobjs.add(vo)
         if self._varobj_names:
             try:
                 changelist = await self._do_var_update()
                 if self._rebuild_gen == gen:
-                    self._apply_changelist(
-                        changelist,
-                        skip_varobjs=stale_varobjs,
-                        shadow_varobjs=shadow_varobjs,
-                    )
+                    self._apply_changelist(changelist, skip_varobjs=stale_varobjs)
             except Exception:
                 pass
 
         if self._rebuild_gen != gen:
             return
 
-        # ── 8. Promote re-anchored shadows back to regular variables ───────
-        for name, shadow_varobj in to_promote:
-            self._promote_shadow(name, shadow_varobj)
+        # ── 9. Re-anchor variables that became shadowed ────────────────────
+        for bname, baddr, bvar in to_reanchor:
+            await self._reanchor_var(gen, bname, baddr, bvar, tree)
             if self._rebuild_gen != gen:
                 return
 
-        # ── 8b. Clean up old inner-scope varobjs superseded by promotion ───
-        # _promote_shadow updated _tracked; now delete the displaced varobj
-        # from GDB and remove its tree node and tracking entries.
-        for old_varobj in superseded_varobjs:
-            node = self._varobj_to_node.get(old_varobj)
-            self._purge_varobj_subtree(old_varobj)
+        # ── 10. Remove gone variables ──────────────────────────────────────
+        for rname, raddr in to_remove:
+            varobj = self._tracked.pop((rname, raddr), "")
+            node = self._varobj_to_node.get(varobj) if varobj else None
+            if varobj:
+                self._purge_varobj_subtree(varobj)
+                self._pinned_varobjs.discard(varobj)
             if node is not None:
                 node.remove()
-            try:
-                self._varobj_names.remove(old_varobj)
-            except ValueError:
-                pass
-            if self._var_delete:
+            if varobj:
                 try:
-                    await self._var_delete(old_varobj)
-                except Exception:
+                    self._varobj_names.remove(varobj)
+                except ValueError:
                     pass
-        if self._rebuild_gen != gen:
-            return
-
-        # ── 9. Re-anchor variables that are now shadowed ───────────────────
-        # Keep their tree nodes; replace old floating varobj with an
-        # address-pinned *(Type*)addr one, add "← shadowed" annotation.
-        for name, old_varobj, old_addr, outer_var in to_reanchor:
-            await self._reanchor_var(gen, name, old_varobj, old_addr, outer_var, tree)
-            if self._rebuild_gen != gen:
-                return
-
-        # ── 10. Truly remove gone variables ───────────────────────────────
-        for name, varobj_name in to_truly_remove:
-            del self._tracked[name]
-            node = self._varobj_to_node.get(varobj_name)
-            self._purge_varobj_subtree(varobj_name)
-            if node is not None:
-                node.remove()
-            try:
-                self._varobj_names.remove(varobj_name)
-            except ValueError:
-                pass
-            if self._var_delete:
+            if varobj and self._var_delete:
                 try:
-                    await self._var_delete(varobj_name)
+                    await self._var_delete(varobj)
                 except Exception:
                     pass
             if self._rebuild_gen != gen:
                 return
 
-        # ── 11. Clean up _shadows entries that are no longer visible ───────
-        for sname, svo in shadows_to_clean:
-            del self._shadows[sname]
-            node = self._varobj_to_node.get(svo)
-            self._purge_varobj_subtree(svo)
-            if node is not None:
-                node.remove()
-            try:
-                self._varobj_names.remove(svo)
-            except ValueError:
-                pass
-            if self._var_delete:
-                try:
-                    await self._var_delete(svo)
-                except Exception:
-                    pass
-            if self._rebuild_gen != gen:
-                return
-
-        # ── 12. Leaf display for deeper shadowed vars (≥2 levels deep) ─────
-        # Exclude names that were re-anchored (success or failure): the old
-        # tree node already serves as their display.
-        reanchor_names = set()
-        for name, _, _, _ in to_reanchor:
-            reanchor_names.add(name)
-        leaf_shadowed = []
-        for v in new_shadowed:
-            if v.name not in self._shadows and v.name not in reanchor_names:
-                leaf_shadowed.append(v)
-        await self._refresh_shadow_leaves(gen, tree, leaf_shadowed)
-        if self._rebuild_gen != gen:
-            return
-
-        # ── 13. Add new variables ──────────────────────────────────────────
+        # ── 11. Add new variables ──────────────────────────────────────────
         if new_frame_key:
             restore = self._saved_expansions.get(new_frame_key, set())
         else:
             restore = set()
         if self._var_create:
-            for name, addr, var in to_add:
+            for bname, baddr, bvar in to_add:
                 if self._rebuild_gen != gen:
                     return
                 try:
-                    info = await self._var_create(var.name)
+                    info = await self._var_create(bvar.name)
                 except Exception:
-                    val = var.value.replace("\n", " ") if var.value else "<complex>"
-                    tree.root.add_leaf(f"{var.name} = {val}")
-                    self._tracked[name] = ("", addr)
+                    val = bvar.value.replace("\n", " ") if bvar.value else "<complex>"
+                    tree.root.add_leaf(f"{bvar.name} = {val}")
+                    self._tracked[(bname, baddr)] = ""
                     continue
 
                 if self._rebuild_gen != gen:
@@ -653,30 +575,36 @@ class LocalVariablePane(PaneBase):
                 varobj_name = info.get("name", "")
                 if varobj_name:
                     self._varobj_names.append(varobj_name)
-                    self._tracked[name] = (varobj_name, addr)
+                    self._tracked[(bname, baddr)] = varobj_name
                     if info.get("dynamic", "0") == "1":
                         self._dynamic_varobjs.add(varobj_name)
                     type_str = info.get("type", "")
                     if type_str:
                         self._varobj_type[varobj_name] = type_str
+                else:
+                    self._tracked[(bname, baddr)] = ""
 
                 numchild = self._safe_int(info.get("numchild", "0"))
                 has_children = (
                     numchild > 0 or info.get("dynamic", "0") == "1"
                 ) and not _suppress_children(info)
                 value = info.get("value", "")
-
                 dh = info.get("displayhint", "")
+
+                # New bindings from to_add are always innermost (non-shadowed)
+                # in normal stepping flow; add shadow suffix defensively if not.
+                shadow_suffix = "  ← shadowed" if (bname, baddr) in shadowed_keys else ""
+
                 if has_children:
-                    label = var.name
+                    label = bvar.name
                     if value:
                         label += f" = {self._truncate(value)}"
                     node = tree.root.add(
-                        label,
+                        label + shadow_suffix,
                         expand=False,
                         data={
                             "varobj": varobj_name,
-                            "exp": var.name,
+                            "exp": bvar.name,
                             "loaded": False,
                             "has_children": True,
                             "displayhint": dh,
@@ -684,12 +612,12 @@ class LocalVariablePane(PaneBase):
                     )
                     node.add_leaf("⏳ loading...")
                 else:
-                    label = f"{var.name} = {value}"
+                    label = f"{bvar.name} = {value}"
                     node = tree.root.add_leaf(
-                        label,
+                        label + shadow_suffix,
                         data={
                             "varobj": varobj_name,
-                            "exp": var.name,
+                            "exp": bvar.name,
                             "has_children": False,
                             "displayhint": dh,
                         },
@@ -700,7 +628,7 @@ class LocalVariablePane(PaneBase):
 
                 if restore:
                     paths_for_name = sorted(
-                        (p for p in restore if p and p[0] == name),
+                        (p for p in restore if p and p[0] == bname),
                         key=len,
                     )
                     for path in paths_for_name:
@@ -708,64 +636,70 @@ class LocalVariablePane(PaneBase):
                             return
                         await self._restore_expansion(tree.root, path, gen)
 
+        # ── 12. Sync shadow labels on all surviving nodes ──────────────────
+        self._sync_shadow_labels(shadowed_keys)
+
     # ------------------------------------------------------------------
-    # Shadow re-anchor and promotion
+    # Shadow re-anchor
     # ------------------------------------------------------------------
 
     async def _reanchor_var(
         self,
         gen: int,
         name: str,
-        old_varobj: str,
-        old_addr: str,
+        addr: str,
         outer_var: LocalVariable,
         tree: Tree,
     ) -> None:
-        """Replace the floating varobj with an address-pinned one.
+        """Replace the floating varobj for (name, addr) with an address-pinned one.
 
-        The original tree node is kept so expansion state is preserved.
-        The label gets a "← shadowed" suffix to show it is an outer binding.
-        If the node was expanded and loaded, its children are re-fetched
-        under the new varobj name.
+        Called when a new inner-scope variable with the same name shadows this
+        outer binding.  GDB would otherwise hijack the floating varobj to
+        follow the inner binding.  The original tree node is kept so expansion
+        state is preserved.  The label gets a "← shadowed" suffix.
         """
-        # 1. Grab the existing tree node BEFORE deleting old varobj.
-        node = self._varobj_to_node.get(old_varobj)
-        # Purge the root and ALL descendant child entries so stale names
-        # don't linger in _varobj_to_node / _dynamic_varobjs.
-        self._purge_varobj_subtree(old_varobj)
+        key = (name, addr)
+        old_varobj = self._tracked.get(key, "")
 
-        # 2. Delete old (hijacked) varobj from GDB.
-        try:
-            self._varobj_names.remove(old_varobj)
-        except ValueError:
-            pass
-        self._dynamic_varobjs.discard(old_varobj)
-        if self._var_delete:
+        # Grab the existing tree node BEFORE any cleanup.
+        node = self._varobj_to_node.get(old_varobj) if old_varobj else None
+
+        # Purge tracking entries for old varobj and its children.
+        if old_varobj:
+            self._purge_varobj_subtree(old_varobj)
             try:
-                await self._var_delete(old_varobj)
-            except Exception:
+                self._varobj_names.remove(old_varobj)
+            except ValueError:
                 pass
-        del self._tracked[name]
+            self._pinned_varobjs.discard(old_varobj)
+            if self._var_delete:
+                try:
+                    await self._var_delete(old_varobj)
+                except Exception:
+                    pass
+
+        # Clear tracked entry; will be re-set if pinning succeeds.
+        self._tracked.pop(key, None)
 
         if self._rebuild_gen != gen:
             return
 
-        # Use the type saved from the original var_create response; fall back
-        # to outer_var.type (always empty from -stack-list-variables, but kept
-        # as a last resort).
-        type_str = self._varobj_type.get(old_varobj, outer_var.type or "")
+        # Build *(Type*)addr expression.  Type comes from the var_create
+        # response saved in _varobj_type; outer_var.type is always empty
+        # because -stack-list-variables never returns a type field.
+        type_str = self._varobj_type.get(old_varobj, "") if old_varobj else ""
         if not type_str:
-            # No type available — cannot build *(Type*)addr expression.
+            # No type — show as non-expandable leaf with last known value.
             if node is not None:
                 val = self._compact_value(outer_var.value) if outer_var.value else "?"
                 node.set_label(f"{name} = {val}  ← shadowed")
                 node.data["has_children"] = False
             return
-        addr_expr = f"*({type_str}*){old_addr}"
+
+        addr_expr = f"*({type_str}*){addr}"
         try:
             info = await self._var_create(addr_expr)
         except Exception:
-            # Can't create address-based varobj — show last known value.
             if node is not None:
                 val = self._compact_value(outer_var.value) if outer_var.value else "?"
                 node.set_label(f"{name} = {val}  ← shadowed")
@@ -776,19 +710,17 @@ class LocalVariablePane(PaneBase):
             return
 
         new_varobj = info.get("name", "")
+        self._tracked[key] = new_varobj
         if new_varobj:
             self._varobj_names.append(new_varobj)
-            self._shadows[name] = (new_varobj, old_addr)
+            self._pinned_varobjs.add(new_varobj)
             if info.get("dynamic", "0") == "1":
                 self._dynamic_varobjs.add(new_varobj)
-            # Save the type so that if this shadow itself gets re-anchored
-            # (e.g. a third binding of the same name appears), we can still
-            # build the *(Type*)addr expression.
+            # Save type for further re-anchoring (e.g. a third binding appears).
             reanchor_type = info.get("type", "") or type_str
             if reanchor_type:
                 self._varobj_type[new_varobj] = reanchor_type
 
-        # 4. Update or create the tree node.
         value = info.get("value", outer_var.value or "")
         numchild = self._safe_int(info.get("numchild", "0"))
         has_children = (
@@ -796,7 +728,6 @@ class LocalVariablePane(PaneBase):
         ) and not _suppress_children(info)
 
         if node is not None:
-            # Keep existing node — just update varobj reference and label.
             node.data["varobj"] = new_varobj
             node.data["has_children"] = has_children
             if new_varobj:
@@ -817,13 +748,12 @@ class LocalVariablePane(PaneBase):
                 node.data["loaded"] = False
                 node.remove_children()
                 node.add_leaf("⏳ loading...")
-                # Node is already expanded; trigger reload directly.
                 asyncio.create_task(self._load_children(node, new_varobj))
         else:
-            # Old node was already removed; create a fresh one.
+            # No existing node — create a fresh one.
             dh = info.get("displayhint", "")
             if has_children:
-                label = f"{name}"
+                label = name
                 if value:
                     label += f" = {self._compact_value(value)}"
                 node_new = tree.root.add(
@@ -852,46 +782,26 @@ class LocalVariablePane(PaneBase):
             if new_varobj:
                 self._varobj_to_node[new_varobj] = node_new
 
-    def _promote_shadow(self, name: str, shadow_varobj: str) -> None:
-        """Promote a re-anchored shadow back to a regular tracked variable.
+    def _sync_shadow_labels(self, shadowed_keys: set[tuple[str, str]]) -> None:
+        """Add or remove '  ← shadowed' suffix on all tracked nodes.
 
-        Called when the inner scope that was shadowing this variable exits.
-        Moves the entry from _shadows to _tracked and removes the annotation.
+        Called at the end of every update cycle.  Handles the common case
+        where the inner scope exits: the outer binding's (name, addr) key is
+        no longer in shadowed_keys so its label gets the suffix stripped.
         """
-        shadow_addr = self._shadows.pop(name, (None, None))[1] or ""
-        self._tracked[name] = (shadow_varobj, shadow_addr)
-
-        node = self._varobj_to_node.get(shadow_varobj)
-        if node is None:
-            return
-        # Strip "  ← shadowed" from the label.
-        plain = node.label.plain if hasattr(node.label, "plain") else str(node.label)
-        if plain.endswith("  ← shadowed"):
-            node.set_label(plain[: -len("  ← shadowed")])
-
-    # ------------------------------------------------------------------
-    # Shadowed leaf management (for deeper shadows beyond one level)
-    # ------------------------------------------------------------------
-
-    async def _refresh_shadow_leaves(
-        self,
-        gen: int,
-        tree: Tree,
-        shadowed: list[LocalVariable],
-    ) -> None:
-        """Remove old and (re)add current shadowed-variable leaf nodes."""
-        if self._rebuild_gen != gen:
-            return
-        # Remove any existing shadow leaves.
-        for child in list(tree.root.children):
-            data = child.data
-            if isinstance(data, dict) and data.get("shadow"):
-                child.remove()
-        # Add current shadowed variables.
-        for var in shadowed:
-            val = self._compact_value(var.value) if var.value else "?"
-            label = f"{var.name} = {val}  ← shadowed"
-            tree.root.add_leaf(label, data={"shadow": True, "exp": var.name})
+        for (name, addr), varobj in self._tracked.items():
+            node = self._varobj_to_node.get(varobj) if varobj else None
+            if node is None:
+                continue
+            label_plain = node.label.plain if hasattr(node.label, "plain") else str(node.label)
+            is_currently_shadowed = label_plain.endswith("  ← shadowed")
+            should_be_shadowed = (name, addr) in shadowed_keys
+            if should_be_shadowed == is_currently_shadowed:
+                continue
+            if should_be_shadowed:
+                node.set_label(label_plain + "  ← shadowed")
+            else:
+                node.set_label(label_plain[: -len("  ← shadowed")])
 
     # ------------------------------------------------------------------
     # Value update helper
@@ -901,12 +811,8 @@ class LocalVariablePane(PaneBase):
         self,
         changelist: list[dict],
         skip_varobjs: "set[str]" = frozenset(),
-        shadow_varobjs: "set[str]" = frozenset(),
     ) -> None:
         """Apply -var-update changelist results to existing tree nodes.
-
-        *shadow_varobjs* are the currently re-anchored outer-binding varobjs;
-        their labels get "← shadowed" re-appended after the value is updated.
 
         Hidden children (those not yet fetched due to expandchildlimit) are
         never in *changelist* because GDB only knows about varobjs that were
@@ -935,33 +841,28 @@ class LocalVariablePane(PaneBase):
             new_value = change.get("value", "")
             exp = data.get("exp", "")
             has_children = data.get("has_children", False)
+            is_pinned = varobj_name in self._pinned_varobjs
             if has_children:
                 label = exp
                 if new_value:
-                    if varobj_name in shadow_varobjs:
+                    if is_pinned:
                         label += f" = {self._compact_value(new_value)}"
                     else:
                         label += f" = {self._truncate(new_value)}"
             else:
                 label = f"{exp} = {new_value}" if new_value else exp
-            if varobj_name in shadow_varobjs:
+            if is_pinned:
                 label += "  ← shadowed"
             node.set_label(label)
             new_num_children = change.get("new_num_children")
             if new_num_children is not None and data.get("loaded"):
                 # The child count changed (e.g. vector grew or shrank).
-                # Reset the node so it reloads its children fresh, including
-                # re-applying the expandchildlimit paging from the start.
+                # Reset the node so it reloads its children fresh.
                 data["loaded"] = False
                 node.remove_children()
                 if node.is_expanded:
-                    # Node is already open — reload immediately so the user
-                    # does not see a spinner that never resolves.
                     asyncio.create_task(self._load_children(node, varobj_name))
                 else:
-                    # Node is collapsed — add a placeholder so the expand
-                    # triangle stays visible and on_tree_node_expanded fires
-                    # when the user opens it next time.
                     node.add_leaf("⏳ loading...")
 
     # ------------------------------------------------------------------
@@ -982,8 +883,6 @@ class LocalVariablePane(PaneBase):
                 data = child.data
                 if not isinstance(data, dict):
                     continue
-                if data.get("shadow"):
-                    continue  # shadow leaves are not part of expansion state
                 exp = data.get("exp", "")
                 if not exp:
                     continue
