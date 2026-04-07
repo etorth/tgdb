@@ -113,6 +113,11 @@ class LocalVariablePane(PaneBase):
         # All live GDB varobj names (for cleanup)
         self._varobj_names: list[str] = []
 
+        # Varobjs backed by a pretty-printer (dynamic=1).
+        # These are updated individually with a short timeout to avoid hanging
+        # when the container is uninitialized and reports a garbage size.
+        self._dynamic_varobjs: set[str] = set()
+
         # Frame key for expansion save/restore.
         # Type: (func, file, frozenset{(name, addr)}) | None
         self._frame_key: tuple | None = None
@@ -174,6 +179,50 @@ class LocalVariablePane(PaneBase):
     # ------------------------------------------------------------------
     # Core update logic
     # ------------------------------------------------------------------
+
+    async def _do_var_update(self) -> list[dict]:
+        """Update all tracked varobjs, returning merged changelist.
+
+        If any varobjs are dynamic (backed by a pretty-printer), every varobj
+        is updated individually so that a dynamic varobj with a garbage size
+        does not block the ``-var-update *`` call that would otherwise update
+        all varobjs at once.  Dynamic varobjs get a short 1.5 s timeout.
+
+        When there are no dynamic varobjs the usual ``-var-update *`` is used
+        for efficiency.
+        """
+        if not self._var_update or not self._varobj_names:
+            return []
+
+        changelist: list[dict] = []
+
+        if not self._dynamic_varobjs:
+            # Fast path: no dynamic varobjs — update everything at once.
+            try:
+                result = await self._var_update("*")
+                changelist.extend(result)
+            except Exception as exc:
+                _log.warning("var_update(*) failed: %s", exc)
+            return changelist
+
+        # Slow path: update each varobj individually.
+        for vo in self._varobj_names:
+            if vo in self._dynamic_varobjs:
+                timeout = 1.5
+            else:
+                timeout = 10.0
+            try:
+                result = await self._var_update(vo, timeout=timeout)
+                changelist.extend(result)
+            except Exception as exc:
+                _log.warning(
+                    "Skipped varobj %s during update (timeout=%.1f s): %s",
+                    vo,
+                    timeout,
+                    exc,
+                )
+
+        return changelist
 
     async def _update_variables(
         self,
@@ -291,15 +340,14 @@ class LocalVariablePane(PaneBase):
             and new_frame_key == self._frame_key
         )
         if no_change:
-            if self._var_update:
-                try:
-                    changelist = await self._var_update("*")
-                    if self._rebuild_gen == gen:
-                        self._apply_changelist(
-                            changelist, shadow_varobjs=shadow_varobjs
-                        )
-                except Exception:
-                    pass
+            try:
+                changelist = await self._do_var_update()
+                if self._rebuild_gen == gen:
+                    self._apply_changelist(
+                        changelist, shadow_varobjs=shadow_varobjs
+                    )
+            except Exception:
+                pass
             return
 
         # ── 6. Save expansion for outgoing frame key ───────────────────────
@@ -315,9 +363,9 @@ class LocalVariablePane(PaneBase):
             stale_varobjs.add(vo)
         for _, vo, _, _ in to_reanchor:
             stale_varobjs.add(vo)
-        if self._var_update and self._varobj_names:
+        if self._varobj_names:
             try:
-                changelist = await self._var_update("*")
+                changelist = await self._do_var_update()
                 if self._rebuild_gen == gen:
                     self._apply_changelist(
                         changelist,
@@ -354,6 +402,7 @@ class LocalVariablePane(PaneBase):
                 self._varobj_names.remove(varobj_name)
             except ValueError:
                 pass
+            self._dynamic_varobjs.discard(varobj_name)
             if self._var_delete:
                 try:
                     await self._var_delete(varobj_name)
@@ -372,6 +421,7 @@ class LocalVariablePane(PaneBase):
                 self._varobj_names.remove(svo)
             except ValueError:
                 pass
+            self._dynamic_varobjs.discard(svo)
             if self._var_delete:
                 try:
                     await self._var_delete(svo)
@@ -418,6 +468,8 @@ class LocalVariablePane(PaneBase):
                 if varobj_name:
                     self._varobj_names.append(varobj_name)
                     self._tracked[name] = (varobj_name, addr)
+                    if info.get("dynamic", "0") == "1":
+                        self._dynamic_varobjs.add(varobj_name)
 
                 numchild = self._safe_int(info.get("numchild", "0"))
                 has_children = (
@@ -495,6 +547,7 @@ class LocalVariablePane(PaneBase):
             self._varobj_names.remove(old_varobj)
         except ValueError:
             pass
+        self._dynamic_varobjs.discard(old_varobj)
         if self._var_delete:
             try:
                 await self._var_delete(old_varobj)
@@ -524,6 +577,8 @@ class LocalVariablePane(PaneBase):
         if new_varobj:
             self._varobj_names.append(new_varobj)
             self._shadows[name] = (new_varobj, old_addr)
+            if info.get("dynamic", "0") == "1":
+                self._dynamic_varobjs.add(new_varobj)
 
         # 4. Update or create the tree node.
         value = info.get("value", outer_var.value or "")

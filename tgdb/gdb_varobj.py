@@ -154,11 +154,20 @@ class VarobjMixin:
         payload = result.get("payload") or {}
         return payload.get("value", "")
 
-    async def var_update(self, varobj_name: str = "*") -> list[dict]:
-        """Update varobjs and return changed ones."""
-        result = await self.mi_command_async(f"-var-update --all-values {varobj_name}")
+    async def var_update(
+        self, varobj_name: str = "*", timeout: float | None = 10.0
+    ) -> list[dict]:
+        """Update varobjs and return changed ones.
+
+        *timeout* is forwarded to mi_command_async.  Pass a short value (e.g.
+        1.5 s) for dynamic/pretty-printed varobjs whose pretty-printer may
+        iterate a huge (possibly garbage) number of elements.
+        """
+        result = await self.mi_command_async(
+            f"-var-update --all-values {varobj_name}", timeout=timeout
+        )
         payload = result.get("payload") or {}
         changelist = payload.get("changelist", [])
         changelist = changelist if isinstance(changelist, list) else []
-        _log.debug("var_update -> %d changes", len(changelist))
+        _log.debug("var_update %s -> %d changes", varobj_name, len(changelist))
         return changelist
