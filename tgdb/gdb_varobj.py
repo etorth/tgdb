@@ -231,9 +231,16 @@ class VarobjMixin:
             _log.debug("get_decl_lines python step failed: %s", exc)
             return {}
 
-        # Lift the print-elements limit so GDB doesn't truncate the result
-        # string with "..." when there are many variables.  Restore it after.
+        # Save current print limits, set both to unlimited, then restore.
+        # GDB 14+ has a separate "print characters" setting that controls string
+        # display length independently of "print elements".  If either is set to
+        # a finite value the convenience variable value will be truncated with
+        # "..." and our parser will silently drop the remaining variables.
+        old_elements = await self.eval_expr("$_gdb_setting(\"print elements\")")
+        old_characters = await self.eval_expr("$_gdb_setting(\"print characters\")")
+
         await self.mi_command_async("-gdb-set print elements unlimited")
+        await self.mi_command_async("-gdb-set print characters unlimited")
 
         # Read back the convenience variable.
         try:
@@ -242,7 +249,20 @@ class VarobjMixin:
             _log.debug("get_decl_lines eval step failed: %s", exc)
             return {}
         finally:
-            await self.mi_command_async("-gdb-set print elements 200")
+            # Restore old values.  GDB treats "0" as unlimited for elements;
+            # for characters it uses the special keyword "elements" to mean
+            # "follow print elements".  We restore by re-setting to whatever
+            # GDB reported (which may be a number, "unlimited", or "elements").
+            restore_elements = old_elements.strip().strip('"') or "200"
+            restore_characters = old_characters.strip().strip('"') or "elements"
+            try:
+                await self.mi_command_async(f"-gdb-set print elements {restore_elements}")
+            except Exception:
+                await self.mi_command_async("-gdb-set print elements 200")
+            try:
+                await self.mi_command_async(f"-gdb-set print characters {restore_characters}")
+            except Exception:
+                pass  # older GDB without print characters — ignore
 
         # raw looks like: '"v:5,x:3"' (GDB wraps strings in double quotes)
         raw = raw.strip().strip('"')
