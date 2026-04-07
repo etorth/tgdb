@@ -323,7 +323,16 @@ class LocalVariablePane(PaneBase):
                 result = await self._var_update(vo, timeout=10.0)
                 changelist.extend(result)
             except Exception as exc:
-                _log.warning("Skipped varobj %s during update: %s", vo, exc)
+                err = str(exc)
+                if "not found" in err.lower() or "usage" in err.lower():
+                    # Varobj was invalidated by GDB (e.g. parent was
+                    # re-created after a type change or scope transition).
+                    # Purge it and all its children so we don't keep
+                    # hammering GDB with stale names.
+                    _log.debug("Purging stale varobj %s: %s", vo, exc)
+                    self._purge_varobj_subtree(vo)
+                else:
+                    _log.warning("Skipped varobj %s during update: %s", vo, exc)
 
         return changelist
 
@@ -533,14 +542,14 @@ class LocalVariablePane(PaneBase):
         # ── 10. Truly remove gone variables ───────────────────────────────
         for name, varobj_name in to_truly_remove:
             del self._tracked[name]
-            node = self._varobj_to_node.pop(varobj_name, None)
+            node = self._varobj_to_node.get(varobj_name)
+            self._purge_varobj_subtree(varobj_name)
             if node is not None:
                 node.remove()
             try:
                 self._varobj_names.remove(varobj_name)
             except ValueError:
                 pass
-            self._dynamic_varobjs.discard(varobj_name)
             if self._var_delete:
                 try:
                     await self._var_delete(varobj_name)
@@ -552,14 +561,14 @@ class LocalVariablePane(PaneBase):
         # ── 11. Clean up _shadows entries that are no longer visible ───────
         for sname, svo in shadows_to_clean:
             del self._shadows[sname]
-            node = self._varobj_to_node.pop(svo, None)
+            node = self._varobj_to_node.get(svo)
+            self._purge_varobj_subtree(svo)
             if node is not None:
                 node.remove()
             try:
                 self._varobj_names.remove(svo)
             except ValueError:
                 pass
-            self._dynamic_varobjs.discard(svo)
             if self._var_delete:
                 try:
                     await self._var_delete(svo)
@@ -678,7 +687,10 @@ class LocalVariablePane(PaneBase):
         under the new varobj name.
         """
         # 1. Grab the existing tree node BEFORE deleting old varobj.
-        node = self._varobj_to_node.pop(old_varobj, None)
+        node = self._varobj_to_node.get(old_varobj)
+        # Purge the root and ALL descendant child entries so stale names
+        # don't linger in _varobj_to_node / _dynamic_varobjs.
+        self._purge_varobj_subtree(old_varobj)
 
         # 2. Delete old (hijacked) varobj from GDB.
         try:
@@ -1004,6 +1016,11 @@ class LocalVariablePane(PaneBase):
         asyncio.create_task(self._load_children(node, varobj))
 
     async def _load_children(self, node: TreeNode, varobj_name: str) -> None:
+        # Purge stale child entries from previous load before refreshing.
+        prefix = varobj_name + "."
+        for k in [k for k in self._varobj_to_node if k.startswith(prefix)]:
+            self._varobj_to_node.pop(k, None)
+            self._dynamic_varobjs.discard(k)
         node.remove_children()
         try:
             children, has_more = await self._var_list_children(
@@ -1015,7 +1032,12 @@ class LocalVariablePane(PaneBase):
         if not children:
             node.add_leaf("(empty)")
             return
-        _log.debug("load_children varobj=%s -> %d children has_more=%s", varobj_name, len(children), has_more)
+        _log.debug(
+            "load_children varobj=%s -> %d children has_more=%s",
+            varobj_name,
+            len(children),
+            has_more,
+        )
         # Pass the parent node's displayhint so _add_children knows how to
         # lay out the children (e.g. "map" → pair key-value, "array" → index).
         if isinstance(node.data, dict):
@@ -1073,7 +1095,12 @@ class LocalVariablePane(PaneBase):
         except Exception as e:
             parent.add_leaf(f"⚠ {e}")
             return
-        _log.debug("load_more_children varobj=%s from=%d -> %d children", varobj_name, from_idx, len(children))
+        _log.debug(
+            "load_more_children varobj=%s from=%d -> %d children",
+            varobj_name,
+            from_idx,
+            len(children),
+        )
         if children:
             await self._add_children(parent, children, parent_dh)
         if has_more:
@@ -1144,6 +1171,8 @@ class LocalVariablePane(PaneBase):
                     )
                 if val_name:
                     self._varobj_to_node[val_name] = child_node
+                    if val_dynamic:
+                        self._dynamic_varobjs.add(val_name)
             return
 
         # Default: individual children, with access-specifier flattening.
@@ -1197,10 +1226,28 @@ class LocalVariablePane(PaneBase):
 
             if child_name:
                 self._varobj_to_node[child_name] = child_node
+                if dynamic:
+                    self._dynamic_varobjs.add(child_name)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _purge_varobj_subtree(self, varobj_name: str) -> None:
+        """Remove *varobj_name* and all its child varobjs from tracking dicts.
+
+        Must be called whenever a GDB varobj is deleted so stale child
+        entries don't accumulate in _varobj_to_node and _dynamic_varobjs
+        and trigger spurious -var-update calls (which can crash GDB with
+        "cplus_describe_child: Assertion 'access' failed").
+        """
+        prefix = varobj_name + "."
+        stale = [
+            k for k in self._varobj_to_node if k == varobj_name or k.startswith(prefix)
+        ]
+        for k in stale:
+            self._varobj_to_node.pop(k, None)
+            self._dynamic_varobjs.discard(k)
 
     @staticmethod
     def _safe_int(val) -> int:
