@@ -1188,10 +1188,17 @@ class LocalVariablePane(PaneBase):
 
             if exp in _ACCESS and has_children:
                 try:
-                    grandchildren, _more = await self._var_list_children(
+                    grandchildren, more = await self._var_list_children(
                         child_name, limit=self._cfg.expandchildlimit
                     )
                     await self._add_children(node, grandchildren)
+                    if more:
+                        # The access-specifier block has more members than
+                        # expandchildlimit — add a "load more" sentinel so the
+                        # user can page through the remaining siblings.
+                        self._add_load_more_node(
+                            node, child_name, len(grandchildren), ""
+                        )
                 except Exception:
                     pass
                 continue
