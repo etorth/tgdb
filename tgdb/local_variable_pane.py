@@ -183,15 +183,27 @@ class LocalVariablePane(PaneBase):
     async def _do_var_update(self) -> list[dict]:
         """Update all tracked varobjs, returning merged changelist.
 
-        If any varobjs are dynamic (backed by a pretty-printer), every varobj
-        is updated individually so that a dynamic varobj with a garbage size
-        does not block the ``-var-update *`` call that would otherwise update
-        all varobjs at once.  Dynamic varobjs get a short 1.5 s timeout.
+        Dynamic (pretty-printer backed) ROOT varobjs are NEVER passed to
+        ``-var-update``.  Asking GDB to update a dynamic root requires it to
+        re-run the container's pretty-printer iterator from the beginning,
+        which hangs GDB's entire MI channel when the container is uninitialized
+        and its garbage numchild suggests billions of elements.  Crucially, the
+        hang is in GDB itself, not just in tgdb — all subsequent MI commands
+        queue behind the stuck one, so even a short asyncio timeout only
+        unsticks tgdb, not GDB.
 
-        When there are no dynamic varobjs the usual ``-var-update *`` is used
-        for efficiency.
+        Instead, when a dynamic root has been expanded by the user, its visible
+        CHILD varobjs (e.g. var1.[0], var1.[1]) are updated individually.
+        Child varobjs are simple value lookups — no iterator involved, no hang.
+
+        When there are no dynamic varobjs at all the fast ``-var-update *``
+        path is used.  Once any dynamic varobj exists we cannot use ``*``
+        because it re-evaluates dynamic roots too.
         """
-        if not self._var_update or not self._varobj_names:
+        if not self._varobj_names:
+            return []
+
+        if not self._var_update:
             return []
 
         changelist: list[dict] = []
@@ -205,22 +217,23 @@ class LocalVariablePane(PaneBase):
                 _log.warning("var_update(*) failed: %s", exc)
             return changelist
 
-        # Slow path: update each varobj individually.
-        for vo in self._varobj_names:
+        # Slow path: at least one dynamic varobj exists.
+        # _varobj_to_node contains every varobj registered with GDB — roots
+        # AND children.  We update everything EXCEPT dynamic root varobjs,
+        # which would trigger the pretty-printer and hang GDB.
+        safe_to_update: list[str] = []
+        for vo in self._varobj_to_node:
             if vo in self._dynamic_varobjs:
-                timeout = 1.5
-            else:
-                timeout = 10.0
+                _log.debug("Skipping dynamic root varobj %s in update", vo)
+                continue
+            safe_to_update.append(vo)
+
+        for vo in safe_to_update:
             try:
-                result = await self._var_update(vo, timeout=timeout)
+                result = await self._var_update(vo, timeout=10.0)
                 changelist.extend(result)
             except Exception as exc:
-                _log.warning(
-                    "Skipped varobj %s during update (timeout=%.1f s): %s",
-                    vo,
-                    timeout,
-                    exc,
-                )
+                _log.warning("Skipped varobj %s during update: %s", vo, exc)
 
         return changelist
 
