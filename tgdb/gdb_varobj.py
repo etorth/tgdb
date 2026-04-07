@@ -231,12 +231,18 @@ class VarobjMixin:
             _log.debug("get_decl_lines python step failed: %s", exc)
             return {}
 
+        # Lift the print-elements limit so GDB doesn't truncate the result
+        # string with "..." when there are many variables.  Restore it after.
+        await self.mi_command_async("-gdb-set print elements unlimited")
+
         # Read back the convenience variable.
         try:
             raw = await self.eval_expr("$tgdb_decls")
         except RuntimeError as exc:
             _log.debug("get_decl_lines eval step failed: %s", exc)
             return {}
+        finally:
+            await self.mi_command_async("-gdb-set print elements 200")
 
         # raw looks like: '"v:5,x:3"' (GDB wraps strings in double quotes)
         raw = raw.strip().strip('"')
