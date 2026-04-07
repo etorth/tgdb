@@ -95,6 +95,7 @@ class LocalVariablePane(PaneBase):
         self._var_update: Optional[Callable[..., Coroutine]] = None
         self._var_eval: Optional[Callable[..., Coroutine]] = None
         self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
+        self._get_decl_lines: Optional[Callable[..., Coroutine]] = None
 
         # Per-variable state for incremental updates.
         # name → (varobj_name, address)  — innermost binding only.
@@ -153,6 +154,7 @@ class LocalVariablePane(PaneBase):
         var_update: Callable[..., Coroutine],
         var_eval: Callable[..., Coroutine],
         var_eval_expr: Callable[..., Coroutine],
+        get_decl_lines: Callable[..., Coroutine],
     ) -> None:
         self._var_create = var_create
         self._var_list_children = var_list_children
@@ -160,6 +162,7 @@ class LocalVariablePane(PaneBase):
         self._var_update = var_update
         self._var_eval = var_eval
         self._var_eval_expr = var_eval_expr
+        self._get_decl_lines = get_decl_lines
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -365,6 +368,43 @@ class LocalVariablePane(PaneBase):
             for var in variables:
                 if var.name not in addrs:
                     addrs[var.name] = var.type
+
+        if self._rebuild_gen != gen:
+            return
+
+        # ── 1b. Fetch DWARF declaration lines and filter out variables that
+        #         haven't been initialized yet (current line ≤ decl line).
+        #
+        # GDB stops BEFORE executing the indicated line. So if the program is
+        # stopped at line N, lines 1..N-1 have already run. A variable declared
+        # on line D has had its constructor run only if N > D.
+        #
+        # We only filter non-argument variables: function arguments are always
+        # valid once the function is entered.
+        current_line = frame.line if frame else 0
+        if current_line > 0 and self._get_decl_lines:
+            try:
+                decl_lines = await self._get_decl_lines()
+            except Exception as exc:
+                _log.debug("get_decl_lines failed: %s", exc)
+                decl_lines = {}
+            if decl_lines:
+                filtered: list[LocalVariable] = []
+                for var in variables:
+                    if var.is_arg:
+                        filtered.append(var)
+                        continue
+                    decl = decl_lines.get(var.name, 0)
+                    if decl > 0 and current_line <= decl:
+                        _log.debug(
+                            "Hiding uninitialized var %s (decl=%d current=%d)",
+                            var.name,
+                            decl,
+                            current_line,
+                        )
+                    else:
+                        filtered.append(var)
+                variables = filtered
 
         if self._rebuild_gen != gen:
             return

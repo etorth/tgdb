@@ -148,6 +148,64 @@ class VarobjMixin:
         except RuntimeError:
             pass
 
+    async def get_decl_lines(self) -> dict[str, int]:
+        """Return DWARF declaration lines for all local variables.
+
+        Runs a GDB Python one-liner via ``-interpreter-exec console`` that
+        stores the result in a GDB convenience variable, then retrieves it
+        via ``-data-evaluate-expression``.  This avoids parsing fragile
+        stream output and goes through the normal MI result path.
+
+        Returns ``{var_name: decl_line}`` for every variable in the current
+        frame's block.  Returns an empty dict on any error.
+
+        When the current stopped line is <= a variable's decl_line, the
+        variable's constructor/initializer has not yet executed.
+        """
+        # Step 1: set $tgdb_decls via the Python API.
+        py_script = (
+            "import gdb; "
+            "frame=gdb.selected_frame(); "
+            "block=frame.block(); "
+            "decls=','.join("
+            "    f'{sym.name}:{sym.line}' "
+            "    for sym in block if sym.is_variable"
+            "); "
+            "gdb.set_convenience_variable('tgdb_decls', decls)"
+        )
+        try:
+            await self.mi_command_async(
+                f'-interpreter-exec console "python {py_script}"'
+            )
+        except RuntimeError as exc:
+            _log.debug("get_decl_lines python step failed: %s", exc)
+            return {}
+
+        # Step 2: read back the convenience variable.
+        try:
+            raw = await self.eval_expr("$tgdb_decls")
+        except RuntimeError as exc:
+            _log.debug("get_decl_lines eval step failed: %s", exc)
+            return {}
+
+        # raw looks like: '"v:5,x:3"' (GDB wraps strings in double quotes)
+        raw = raw.strip().strip('"')
+        result: dict[str, int] = {}
+        for part in raw.split(","):
+            part = part.strip()
+            if ":" not in part:
+                continue
+            name, _, line_str = part.partition(":")
+            name = name.strip()
+            line_str = line_str.strip()
+            try:
+                result[name] = int(line_str)
+            except ValueError:
+                pass
+
+        _log.debug("get_decl_lines -> %s", result)
+        return result
+
     async def eval_expr(self, expr: str) -> str:
         """Evaluate a GDB expression and return its value string."""
         result = await self.mi_command_async(f"-data-evaluate-expression {expr}")
