@@ -1048,7 +1048,7 @@ class LocalVariablePane(PaneBase):
         """Add an expandable sentinel node that fetches the next batch on expand."""
         limit = self._cfg.expandchildlimit
         if limit > 0:
-            label = f"load next {limit} items [{from_idx} shown]"
+            label = f"load more items [{from_idx} shown]"
         else:
             label = f"load remaining items [{from_idx} shown]"
         sentinel = parent.add(
