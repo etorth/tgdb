@@ -722,15 +722,19 @@ class LocalVariablePane(PaneBase):
         node.remove_children()
         dh = data.get("displayhint", "")
         try:
-            children = await self._var_list_children(varobj)
+            children, has_more = await self._var_list_children(varobj)
             if children:
                 await self._add_children(node, children, dh)
+                if has_more:
+                    node.add_leaf(
+                        f"… (showing first {len(children)}, more not loaded)"
+                    )
             else:
                 node.add_leaf("(empty)")
             return bool(children)
-        except Exception:
+        except Exception as e:
             data["loaded"] = False
-            node.add_leaf("⚠ error fetching children")
+            node.add_leaf(f"⚠ {e}")
             return False
 
     async def _restore_expansion(
@@ -773,19 +777,22 @@ class LocalVariablePane(PaneBase):
     async def _load_children(self, node: TreeNode, varobj_name: str) -> None:
         node.remove_children()
         try:
-            children = await self._var_list_children(varobj_name)
-        except Exception:
-            node.add_leaf("⚠ error fetching children")
+            children, has_more = await self._var_list_children(varobj_name)
+        except Exception as e:
+            node.add_leaf(f"⚠ {e}")
             return
         if not children:
             node.add_leaf("(empty)")
             return
         # Pass the parent node's displayhint so _add_children knows how to
         # lay out the children (e.g. "map" → pair key-value, "array" → index).
-        parent_dh = (
-            node.data.get("displayhint", "") if isinstance(node.data, dict) else ""
-        )
+        if isinstance(node.data, dict):
+            parent_dh = node.data.get("displayhint", "")
+        else:
+            parent_dh = ""
         await self._add_children(node, children, parent_dh)
+        if has_more:
+            node.add_leaf(f"… (showing first {len(children)}, more not loaded)")
 
     async def _add_children(
         self,
@@ -866,7 +873,7 @@ class LocalVariablePane(PaneBase):
 
             if exp in _ACCESS and has_children:
                 try:
-                    grandchildren = await self._var_list_children(child_name)
+                    grandchildren, _more = await self._var_list_children(child_name)
                     await self._add_children(node, grandchildren)
                 except Exception:
                     pass
