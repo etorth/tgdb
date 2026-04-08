@@ -579,6 +579,7 @@ class LocalVariablePane(PaneBase):
             vo = self._tracked.get((rname, raddr), "")
             if vo:
                 stale_varobjs.add(vo)
+        changelist: list[dict] = []
         if self._varobj_names:
             try:
                 changelist = await self._do_var_update()
@@ -586,6 +587,34 @@ class LocalVariablePane(PaneBase):
                     self._apply_changelist(changelist, skip_varobjs=stale_varobjs)
             except Exception:
                 pass
+
+        if self._rebuild_gen != gen:
+            return
+
+        # ── 8.5. Demote reanchor candidates that went out of scope ─────────
+        # _do_var_update may report in_scope="false" for a varobj that was
+        # scheduled for to_reanchor.  This happens when a scope closes and an
+        # address that was previously the innermost gets incorrectly matched as
+        # an outer binding (because tracked_outer still contains the stale
+        # address due to incomplete tracking after scope bounces through
+        # shallower frames).  Moving such entries to to_remove ensures the
+        # stale varobj is cleanly deleted rather than being re-pinned with the
+        # wrong type expression (which would produce garbage values).
+        if to_reanchor and changelist:
+            out_of_scope_varobjs: set[str] = set()
+            for c in changelist:
+                if isinstance(c, dict) and c.get("in_scope") == "false":
+                    out_of_scope_varobjs.add(c["name"])
+            if out_of_scope_varobjs:
+                remaining_reanchor: list[tuple[str, str, LocalVariable]] = []
+                for entry in to_reanchor:
+                    rname, raddr, _ = entry
+                    vo = self._tracked.get((rname, raddr), "")
+                    if vo and vo in out_of_scope_varobjs:
+                        to_remove.append((rname, raddr))
+                    else:
+                        remaining_reanchor.append(entry)
+                to_reanchor = remaining_reanchor
 
         if self._rebuild_gen != gen:
             return
