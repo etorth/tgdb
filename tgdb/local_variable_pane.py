@@ -610,6 +610,28 @@ class LocalVariablePane(PaneBase):
                 # state so we don't end up with a duplicate entry.
                 if (bname, baddr) in self._uninitialized_nodes:
                     self._uninitialized_nodes.pop((bname, baddr)).remove()
+
+                # Check the value from -stack-list-variables BEFORE calling
+                # var_create.  For multi-line initialisers (e.g. std::map m
+                # { {k,v}, ... };) GDB reports the variable as in-scope before
+                # its constructor runs; the value already contains the error
+                # text at this stage.  var_create would succeed but return a
+                # clean-looking value, letting the bad varobj slip through to
+                # -var-update which then crashes GDB.
+                bval = bvar.value or ""
+                if "<error reading" in bval or "Cannot access memory" in bval:
+                    shadow_suffix = "  ← shadowed" if (bname, baddr) in shadowed_keys else ""
+                    placeholder = tree.root.add_leaf(
+                        f"{bvar.name} = <not yet initialized>{shadow_suffix}",
+                        data={"varobj": "", "exp": bvar.name, "has_children": False, "displayhint": ""},
+                    )
+                    self._uninitialized_nodes[(bname, baddr)] = placeholder
+                    _log.debug(
+                        "Skipping var_create for %s: uninitialized memory in bvar.value (%r)",
+                        bvar.name, bval[:80],
+                    )
+                    continue
+
                 try:
                     info = await self._var_create(bvar.name)
                 except Exception:
@@ -627,15 +649,8 @@ class LocalVariablePane(PaneBase):
                 varobj_name = info.get("name", "")
                 value = info.get("value", "")
 
-                # If GDB's value contains an error the variable's storage is
-                # not yet accessible — it is in scope but not yet initialized
-                # (e.g. a std::map declared with a multi-line brace initializer:
-                # GDB sees the name from the opening { of main before the
-                # constructor runs).  Delete the bad varobj immediately so its
-                # corrupted internal state never reaches -var-update or
-                # -var-list-children (which would crash GDB).  Record a
-                # placeholder node and leave _tracked empty for this key so
-                # the next stop's rebuild retries var_create automatically.
+                # Belt-and-suspenders: also check the var_create response value
+                # in case GDB does include error text there on some versions.
                 if varobj_name and (
                     "<error reading" in value
                     or "Cannot access memory" in value
@@ -652,8 +667,8 @@ class LocalVariablePane(PaneBase):
                     )
                     self._uninitialized_nodes[(bname, baddr)] = placeholder
                     _log.debug(
-                        "var_create %s: uninitialized memory (%r), placeholder added",
-                        bvar.name, value,
+                        "var_create %s: uninitialized memory in response (%r), placeholder added",
+                        bvar.name, value[:80],
                     )
                     continue
 
