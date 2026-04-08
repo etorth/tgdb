@@ -131,6 +131,12 @@ class LocalVariablePane(PaneBase):
         # (calls to_string() only) and their child varobjs are updated individually.
         self._dynamic_varobjs: set[str] = set()
 
+        # The GDB expression that was passed to -var-create for each varobj.
+        # Needed so that a corrupted varobj (created while its variable was
+        # uninitialized) can be deleted and recreated fresh.
+        # varobj_name -> original expression string (e.g. "m", "*(T*)0xaddr")
+        self._varobj_to_expr: dict[str, str] = {}
+
         # Frame key for expansion save/restore.
         # Type: (func, file, frozenset{(name, addr)}) | None
         self._frame_key: tuple | None = None
@@ -288,7 +294,9 @@ class LocalVariablePane(PaneBase):
         safe_dynamic_updated: set[str] = set()
         garbage_dynamic: set[str] = set()  # roots with garbage/huge length
         if self._var_eval_expr:
-            for vo in self._dynamic_varobjs:
+            # Iterate over a snapshot: recreation inside the loop mutates
+            # _dynamic_varobjs (purge + re-add with new name).
+            for vo in list(self._dynamic_varobjs):
                 try:
                     new_value = await self._var_eval_expr(vo)
                     changelist.append({"name": vo, "value": new_value})
@@ -303,11 +311,42 @@ class LocalVariablePane(PaneBase):
                     # length elements via the pretty-printer.
                     try:
                         result = await self._var_update(vo, timeout=10.0)
+                    except Exception as exc:
+                        _log.warning("var_update %s failed: %s", vo, exc)
+                        continue
+
+                    # Detect corrupted child varobjs: when a varobj was created
+                    # while its variable was uninitialized, GDB may report
+                    # children named "<error at N>" after the first real update.
+                    # Calling -var-list-children on such a varobj crashes GDB
+                    # (install_new_value: Assertion '!var->value->lazy()' failed).
+                    # Delete and recreate the varobj to get a clean GDB-internal state.
+                    has_error_children = False
+                    for c in result:
+                        if "<error at" in c.get("name", ""):
+                            has_error_children = True
+                            break
+
+                    if has_error_children:
+                        _log.warning(
+                            "varobj %s has '<error at N>' children after -var-update"
+                            " — varobj was created during uninitialized state;"
+                            " deleting and recreating",
+                            vo,
+                        )
+                        new_vo = await self._recreate_dynamic_varobj(vo)
+                        if new_vo:
+                            safe_dynamic_updated.add(new_vo)
+                            # The value-update entry already in changelist
+                            # references the old name — update it in-place.
+                            for entry in changelist:
+                                if entry.get("name") == vo:
+                                    entry["name"] = new_vo
+                                    break
+                    else:
                         changelist.extend(result)
                         safe_dynamic_updated.add(vo)
                         _log.debug("dynamic root %s updated (length=%d)", vo, length)
-                    except Exception as exc:
-                        _log.warning("var_update %s failed: %s", vo, exc)
                 else:
                     # Garbage or unparseable length — also mark children as
                     # unsafe. Their varobjs were created from garbage data and
@@ -615,6 +654,7 @@ class LocalVariablePane(PaneBase):
                     type_str = info.get("type", "")
                     if type_str:
                         self._varobj_type[varobj_name] = type_str
+                    self._varobj_to_expr[varobj_name] = bvar.name
                 else:
                     self._tracked[(bname, baddr)] = ""
 
@@ -772,6 +812,7 @@ class LocalVariablePane(PaneBase):
             reanchor_type = info.get("type", "") or type_str
             if reanchor_type:
                 self._varobj_type[new_varobj] = reanchor_type
+            self._varobj_to_expr[new_varobj] = addr_expr
 
         value = info.get("value", outer_var.value or "")
         numchild = self._safe_int(info.get("numchild", "0"))
@@ -1272,7 +1313,90 @@ class LocalVariablePane(PaneBase):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _purge_varobj_subtree(self, varobj_name: str) -> None:
+    async def _recreate_dynamic_varobj(self, vo: str) -> str:
+        """Delete varobj *vo* and recreate it fresh using the stored expression.
+
+        Called when -var-update reveals that a varobj has '<error at N>'
+        children — a symptom of the varobj having been created while the
+        variable was still uninitialized (garbage memory).  The only safe
+        recovery is to discard the corrupted GDB-internal state and start
+        fresh; otherwise -var-list-children will crash GDB.
+
+        Returns the new varobj name, or "" on failure.
+        """
+        expr = self._varobj_to_expr.get(vo, "")
+        if not expr:
+            _log.warning("Cannot recreate varobj %s: expression not tracked", vo)
+            return ""
+
+        # Grab tree node and type before purging wipes them.
+        node = self._varobj_to_node.get(vo)
+        type_str = self._varobj_type.get(vo, "")
+        was_pinned = vo in self._pinned_varobjs
+
+        # Find the _tracked key that points to this varobj (O(n), but small).
+        tracked_key = None
+        for k, v in self._tracked.items():
+            if v == vo:
+                tracked_key = k
+                break
+
+        # Delete from GDB first.
+        if self._var_delete:
+            try:
+                await self._var_delete(vo)
+            except Exception as exc:
+                _log.warning("var_delete %s failed during recreation: %s", vo, exc)
+
+        # Purge from all tracking dicts.
+        self._purge_varobj_subtree(vo)
+        try:
+            self._varobj_names.remove(vo)
+        except ValueError:
+            pass
+        self._pinned_varobjs.discard(vo)
+        if tracked_key:
+            self._tracked.pop(tracked_key, None)
+
+        # Recreate the varobj.
+        if not self._var_create:
+            return ""
+        try:
+            new_info = await self._var_create(expr)
+        except Exception as exc:
+            _log.warning("var_create(%r) failed during recreation: %s", expr, exc)
+            return ""
+
+        new_vo = new_info.get("name", "")
+        if not new_vo:
+            return ""
+
+        # Re-register in tracking dicts.
+        self._varobj_names.append(new_vo)
+        if tracked_key:
+            self._tracked[tracked_key] = new_vo
+        if was_pinned:
+            self._pinned_varobjs.add(new_vo)
+        if new_info.get("dynamic", "0") == "1":
+            self._dynamic_varobjs.add(new_vo)
+        new_type = new_info.get("type", "") or type_str
+        if new_type:
+            self._varobj_type[new_vo] = new_type
+        self._varobj_to_expr[new_vo] = expr
+
+        # Reconnect the existing tree node to the new varobj.
+        if node is not None:
+            self._varobj_to_node[new_vo] = node
+            node.data["varobj"] = new_vo
+            node.data["loaded"] = False
+            node.data["has_children"] = True
+            node.remove_children()
+            node.add_leaf("⏳ loading...")
+
+        _log.debug("varobj %s recreated as %s (expr=%r)", vo, new_vo, expr)
+        return new_vo
+
+
         """Remove *varobj_name* and all its child varobjs from tracking dicts.
 
         Must be called whenever a GDB varobj is deleted so stale child
@@ -1289,6 +1413,7 @@ class LocalVariablePane(PaneBase):
             self._varobj_to_node.pop(k, None)
             self._dynamic_varobjs.discard(k)
             self._varobj_type.pop(k, None)
+            self._varobj_to_expr.pop(k, None)
 
     @staticmethod
     def _safe_int(val) -> int:
