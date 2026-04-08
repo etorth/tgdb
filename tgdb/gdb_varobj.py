@@ -21,39 +21,36 @@ _log = logging.getLogger("tgdb.gdb_varobj")
 # no newlines, quotes, or backslashes that would confuse the GDB MI parser.
 #
 # Algorithm:
-#   1. Walk UP from the current block to find the enclosing function block.
-#   2. Scan every DWARF block inside the function's PC range by jumping from
-#      one block's end address to the next (covers sibling blocks that GCC
-#      emits for variables declared after goto labels, etc.).
-#   3. For each block, also walk UP to collect variables in enclosing scopes.
-#   4. Store the result in the GDB convenience variable $tgdb_decls so it can
+#   1. Start from frame.block() — the innermost DWARF block at the current PC.
+#   2. Walk UP through superblocks to collect all variables currently in scope.
+#   3. Use "first seen wins" so the innermost declaration for each name is kept
+#      (inner scopes shadow outer ones with the same name).
+#   4. Stop at the function block to avoid leaking variables from the caller.
+#   5. Store the result in the GDB convenience variable $tgdb_decls so it can
 #      be read back via a normal -data-evaluate-expression MI command.
+#
+# Why not enumerate sibling blocks?
+#   The previous version walked the full function PC range to catch variables
+#   in sibling DWARF blocks (e.g. GCC's goto-label blocks).  But that walk
+#   started at the FUNCTION's start address, so gdb.block_for_pc() returned
+#   the outermost function block on the first iteration, skipping all inner
+#   blocks entirely.  For our purpose — hiding variables that haven't been
+#   initialized yet at the current PC — we only need the decl_line of variables
+#   that GDB is currently reporting as in-scope.  Those are exactly the
+#   variables reachable by walking up from frame.block(), so the sibling scan
+#   was both broken and unnecessary.
 _DECL_LINES_SCRIPT = """\
 import gdb
 frame = gdb.selected_frame()
-fb = frame.block()
-while fb and not fb.function:
-    fb = fb.superblock
-fs = fb.start
-fe = fb.end
-seen = set()
+b = frame.block()
 decls = {}
-pc = fs
-while pc < fe:
-    b = gdb.block_for_pc(pc)
-    if b is None or b.end <= pc:
+while b:
+    for s in b:
+        if s.is_variable and s.name not in decls:
+            decls[s.name] = s.line
+    if b.function:
         break
-    cur = b
-    while cur and cur.start >= fs:
-        if cur.start not in seen:
-            seen.add(cur.start)
-            for s in cur:
-                if s.is_variable and s.name not in decls:
-                    decls[s.name] = s.line
-        if cur.function:
-            break
-        cur = cur.superblock
-    pc = b.end
+    b = b.superblock
 gdb.set_convenience_variable("tgdb_decls", ",".join(f"{n}:{l}" for n, l in decls.items()))
 """
 

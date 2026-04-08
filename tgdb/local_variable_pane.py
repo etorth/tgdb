@@ -454,10 +454,21 @@ class LocalVariablePane(PaneBase):
                 decl_lines = {}
             if decl_lines:
                 filtered: list[LocalVariable] = []
+                # Track which names we've already evaluated as innermost.
+                # GDB returns variables innermost-first; the FIRST occurrence
+                # of a name is the innermost binding.  The decl-line check
+                # applies only to that innermost occurrence: outer (shadowed)
+                # bindings with the same name are always already initialized.
+                innermost_seen: set[str] = set()
                 for var in variables:
                     if var.is_arg:
                         filtered.append(var)
                         continue
+                    if var.name in innermost_seen:
+                        # Outer shadowed binding — always initialized, always show.
+                        filtered.append(var)
+                        continue
+                    innermost_seen.add(var.name)
                     decl = decl_lines.get(var.name, 0)
                     if decl > 0 and current_line <= decl:
                         _log.debug(
