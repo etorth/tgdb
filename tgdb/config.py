@@ -45,6 +45,7 @@ _ALIASES: dict[str, str] = {
     "as": "executinglinedisplay",  # short form of arrowstyle
     "dwc": "debugwincolor",
     "dis": "disasm",
+    "ecl": "expandchildlimit",
     "eld": "executinglinedisplay",
     "hls": "hlsearch",
     "ic": "ignorecase",
