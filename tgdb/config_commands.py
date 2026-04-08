@@ -55,7 +55,10 @@ class UserCommandMixin:
                 remaining = remaining[m.end() :]
                 continue
             m = re.match(r"(-\S+)", remaining)
-            token = m.group(1) if m else remaining.split()[0]
+            if m:
+                token = m.group(1)
+            else:
+                token = remaining.split()[0]
             return f"command: unknown attribute: {token!r}"
         m = re.match(r"(\S+)\s*", remaining)
         if not m:
@@ -160,9 +163,18 @@ class UserCommandMixin:
         self, template: str, shlex_args: list[str], raw_args: str
     ) -> str:
         args_str = raw_args.strip()
-        q_args_str = json.dumps(args_str) if args_str else '""'
+        if args_str:
+            q_args_str = json.dumps(args_str)
+        else:
+            q_args_str = '""'
         f_parts = self._f_args_split(args_str)
-        f_args_str = ",".join(json.dumps(a) for a in f_parts) if f_parts else ""
+        if f_parts:
+            parts_json = []
+            for a in f_parts:
+                parts_json.append(json.dumps(a))
+            f_args_str = ",".join(parts_json)
+        else:
+            f_args_str = ""
 
         def replacer(m: re.Match) -> str:
             token = m.group(1).lower()

@@ -387,7 +387,10 @@ class LocalVariablePane(PaneBase):
         #
         # We only filter non-argument variables: function arguments are always
         # valid once the function is entered.
-        current_line = frame.line if frame else 0
+        if frame:
+            current_line = frame.line
+        else:
+            current_line = 0
         if current_line > 0 and self._get_decl_lines:
             try:
                 decl_lines = await self._get_decl_lines()
@@ -459,12 +462,15 @@ class LocalVariablePane(PaneBase):
         # ── 5. Classify changes ────────────────────────────────────────────
         current_keys = set(self._tracked.keys())
 
-        to_remove: list[tuple[str, str]] = [
-            k for k in current_keys if k not in new_binding_keys
-        ]
-        to_add: list[tuple[str, str, LocalVariable]] = [
-            (n, a, v) for n, a, v in new_bindings if (n, a) not in current_keys
-        ]
+        to_remove: list[tuple[str, str]] = []
+        for k in current_keys:
+            if k not in new_binding_keys:
+                to_remove.append(k)
+
+        to_add: list[tuple[str, str, LocalVariable]] = []
+        for n, a, v in new_bindings:
+            if (n, a) not in current_keys:
+                to_add.append((n, a, v))
         # to_reanchor: already tracked with a floating varobj, but now
         # shadowed by an inner-scope binding.  Must replace with a pinned
         # *(Type*)addr varobj so GDB stops hijacking it.
@@ -533,7 +539,10 @@ class LocalVariablePane(PaneBase):
         # ── 10. Remove gone variables ──────────────────────────────────────
         for rname, raddr in to_remove:
             varobj = self._tracked.pop((rname, raddr), "")
-            node = self._varobj_to_node.get(varobj) if varobj else None
+            if varobj:
+                node = self._varobj_to_node.get(varobj)
+            else:
+                node = None
             if varobj:
                 self._purge_varobj_subtree(varobj)
                 self._pinned_varobjs.discard(varobj)
@@ -564,7 +573,10 @@ class LocalVariablePane(PaneBase):
                 try:
                     info = await self._var_create(bvar.name)
                 except Exception:
-                    val = bvar.value.replace("\n", " ") if bvar.value else "<complex>"
+                    if bvar.value:
+                        val = bvar.value.replace("\n", " ")
+                    else:
+                        val = "<complex>"
                     tree.root.add_leaf(f"{bvar.name} = {val}")
                     self._tracked[(bname, baddr)] = ""
                     continue
@@ -593,7 +605,10 @@ class LocalVariablePane(PaneBase):
 
                 # New bindings from to_add are always innermost (non-shadowed)
                 # in normal stepping flow; add shadow suffix defensively if not.
-                shadow_suffix = "  ← shadowed" if (bname, baddr) in shadowed_keys else ""
+                if (bname, baddr) in shadowed_keys:
+                    shadow_suffix = "  ← shadowed"
+                else:
+                    shadow_suffix = ""
 
                 if has_children:
                     label = bvar.name
@@ -627,10 +642,11 @@ class LocalVariablePane(PaneBase):
                     self._varobj_to_node[varobj_name] = node
 
                 if restore:
-                    paths_for_name = sorted(
-                        (p for p in restore if p and p[0] == bname),
-                        key=len,
-                    )
+                    paths_for_name = []
+                    for p in restore:
+                        if p and p[0] == bname:
+                            paths_for_name.append(p)
+                    paths_for_name.sort(key=len)
                     for path in paths_for_name:
                         if self._rebuild_gen != gen:
                             return
@@ -662,12 +678,18 @@ class LocalVariablePane(PaneBase):
         old_varobj = self._tracked.get(key, "")
 
         # Grab the existing tree node BEFORE any cleanup.
-        node = self._varobj_to_node.get(old_varobj) if old_varobj else None
+        if old_varobj:
+            node = self._varobj_to_node.get(old_varobj)
+        else:
+            node = None
 
         # Save type BEFORE purging — _purge_varobj_subtree removes _varobj_type entries.
         # Type comes from the var_create response; outer_var.type is always empty
         # because -stack-list-variables never returns a type field.
-        type_str = self._varobj_type.get(old_varobj, "") if old_varobj else ""
+        if old_varobj:
+            type_str = self._varobj_type.get(old_varobj, "")
+        else:
+            type_str = ""
 
         # Purge tracking entries for old varobj and its children.
         if old_varobj:
@@ -693,7 +715,10 @@ class LocalVariablePane(PaneBase):
         if not type_str:
             # No type — show as non-expandable leaf with last known value.
             if node is not None:
-                val = self._compact_value(outer_var.value) if outer_var.value else "?"
+                if outer_var.value:
+                    val = self._compact_value(outer_var.value)
+                else:
+                    val = "?"
                 node.set_label(f"{name} = {val}  ← shadowed")
                 node.data["has_children"] = False
             return
@@ -703,7 +728,10 @@ class LocalVariablePane(PaneBase):
             info = await self._var_create(addr_expr)
         except Exception:
             if node is not None:
-                val = self._compact_value(outer_var.value) if outer_var.value else "?"
+                if outer_var.value:
+                    val = self._compact_value(outer_var.value)
+                else:
+                    val = "?"
                 node.set_label(f"{name} = {val}  ← shadowed")
                 node.data["has_children"] = False
             return
@@ -741,7 +769,10 @@ class LocalVariablePane(PaneBase):
                 if value:
                     label += f" = {self._compact_value(value)}"
             else:
-                label = f"{exp} = {value}" if value else exp
+                if value:
+                    label = f"{exp} = {value}"
+                else:
+                    label = exp
             node.set_label(label + "  ← shadowed")
 
             # If the node was expanded and had loaded children, reload them
@@ -771,7 +802,10 @@ class LocalVariablePane(PaneBase):
                 )
                 node_new.add_leaf("⏳ loading...")
             else:
-                label = f"{name} = {value}" if value else name
+                if value:
+                    label = f"{name} = {value}"
+                else:
+                    label = name
                 node_new = tree.root.add_leaf(
                     label + "  ← shadowed",
                     data={
@@ -792,10 +826,16 @@ class LocalVariablePane(PaneBase):
         no longer in shadowed_keys so its label gets the suffix stripped.
         """
         for (name, addr), varobj in self._tracked.items():
-            node = self._varobj_to_node.get(varobj) if varobj else None
+            if varobj:
+                node = self._varobj_to_node.get(varobj)
+            else:
+                node = None
             if node is None:
                 continue
-            label_plain = node.label.plain if hasattr(node.label, "plain") else str(node.label)
+            if hasattr(node.label, "plain"):
+                label_plain = node.label.plain
+            else:
+                label_plain = str(node.label)
             is_currently_shadowed = label_plain.endswith("  ← shadowed")
             should_be_shadowed = (name, addr) in shadowed_keys
             if should_be_shadowed == is_currently_shadowed:
@@ -852,7 +892,10 @@ class LocalVariablePane(PaneBase):
                     else:
                         label += f" = {self._truncate(new_value)}"
             else:
-                label = f"{exp} = {new_value}" if new_value else exp
+                if new_value:
+                    label = f"{exp} = {new_value}"
+                else:
+                    label = exp
             if is_pinned:
                 label += "  ← shadowed"
             node.set_label(label)
@@ -975,7 +1018,11 @@ class LocalVariablePane(PaneBase):
     async def _load_children(self, node: TreeNode, varobj_name: str) -> None:
         # Purge stale child entries from previous load before refreshing.
         prefix = varobj_name + "."
-        for k in [k for k in self._varobj_to_node if k.startswith(prefix)]:
+        stale_children = []
+        for k in self._varobj_to_node:
+            if k.startswith(prefix):
+                stale_children.append(k)
+        for k in stale_children:
             self._varobj_to_node.pop(k, None)
             self._dynamic_varobjs.discard(k)
         node.remove_children()
@@ -1116,7 +1163,10 @@ class LocalVariablePane(PaneBase):
                     )
                     child_node.add_leaf("⏳ loading...")
                 else:
-                    label = f"{exp} = {val_value}" if val_value else exp
+                    if val_value:
+                        label = f"{exp} = {val_value}"
+                    else:
+                        label = exp
                     child_node = node.add_leaf(
                         label,
                         data={
@@ -1177,7 +1227,10 @@ class LocalVariablePane(PaneBase):
                 )
                 child_node.add_leaf("⏳ loading...")
             else:
-                label = f"{exp} = {value}" if value else exp
+                if value:
+                    label = f"{exp} = {value}"
+                else:
+                    label = exp
                 child_node = node.add_leaf(
                     label,
                     data={
@@ -1206,9 +1259,10 @@ class LocalVariablePane(PaneBase):
         "cplus_describe_child: Assertion 'access' failed").
         """
         prefix = varobj_name + "."
-        stale = [
-            k for k in self._varobj_to_node if k == varobj_name or k.startswith(prefix)
-        ]
+        stale = []
+        for k in self._varobj_to_node:
+            if k == varobj_name or k.startswith(prefix):
+                stale.append(k)
         for k in stale:
             self._varobj_to_node.pop(k, None)
             self._dynamic_varobjs.discard(k)
@@ -1241,4 +1295,6 @@ class LocalVariablePane(PaneBase):
         returns ``{...}`` as the value summary when pretty-printing is
         enabled.  This helper is not involved in that path.
         """
-        return "{...}" if s.strip().startswith("{") else s
+        if s.strip().startswith("{"):
+            return "{...}"
+        return s

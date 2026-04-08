@@ -41,7 +41,10 @@ class RenderMixin:
             return self._render_input(w, style)
 
         if self._search_active:
-            pfx = "/" if self._search_forward else "?"
+            if self._search_forward:
+                pfx = "/"
+            else:
+                pfx = "?"
             t = Text(
                 _pad_crop(f"{pfx}{self._search_buf}", w), no_wrap=True, overflow="crop"
             )
@@ -95,16 +98,23 @@ class RenderMixin:
             for t in style_tokens:
                 if t != "reverse":
                     other_tokens.append(t)
-            cursor_style = " ".join(other_tokens) if other_tokens else "default"
+            if other_tokens:
+                cursor_style = " ".join(other_tokens)
+            else:
+                cursor_style = "default"
         else:
-            cursor_style = (
-                f"reverse {style}" if style and style != "default" else "reverse"
-            )
+            if style and style != "default":
+                cursor_style = f"reverse {style}"
+            else:
+                cursor_style = "reverse"
 
         t = Text(no_wrap=True, overflow="crop")
         if cursor_col > 0:
             t.append(visible[:cursor_col], style)
-        ch = visible[cursor_col] if cursor_col < len(visible) else " "
+        if cursor_col < len(visible):
+            ch = visible[cursor_col]
+        else:
+            ch = " "
         t.append(ch, cursor_style)
         after_col = cursor_col + 1
         if after_col < len(visible):

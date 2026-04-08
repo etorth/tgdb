@@ -166,7 +166,10 @@ class TGDBScreen:
         * If the orientations differ, the target is wrapped in a new container
           of the requested *mode* and the new empty cell is added alongside it.
         """
-        await self._do_split(list(pane) if pane is not None else [], mode)
+        if pane is not None:
+            await self._do_split(list(pane), mode)
+        else:
+            await self._do_split([], mode)
 
     async def close(self, address: list[int]) -> None:
         """Delete the workspace cell at *address* (equivalent to context-menu Delete)."""
@@ -217,8 +220,14 @@ class TGDBScreen:
         if app is None:
             return
         await app._ensure_dynamic_workspace()
-        orientation = mode.value if isinstance(mode, SplitMode) else str(mode)
-        direction = "right" if orientation == "horizontal" else "down"
+        if isinstance(mode, SplitMode):
+            orientation = mode.value
+        else:
+            orientation = str(mode)
+        if orientation == "horizontal":
+            direction = "right"
+        else:
+            direction = "down"
 
         if not pane:
             # Operate on the root container: ensure orientation, add cell
@@ -249,7 +258,10 @@ class TGDBScreen:
         app = self._app
         if app is None:
             return
-        pane_kind = pane_type.value if isinstance(pane_type, Pane) else str(pane_type)
+        if isinstance(pane_type, Pane):
+            pane_kind = pane_type.value
+        else:
+            pane_kind = str(pane_type)
         widget = self._get_widget_at(address)
         pane_widget = app._create_pane(pane_kind)
         if pane_widget is None:

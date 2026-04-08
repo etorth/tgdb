@@ -90,7 +90,10 @@ class CommandsMixin:
         elif raw.startswith("-"):
             src.scroll_up(-n)
         else:
-            src.move_to(n if n > 0 else 1)
+            if n > 0:
+                src.move_to(n)
+            else:
+                src.move_to(1)
         return None
 
     def _cmd_help(self: TGDBApp, _: list) -> None:
@@ -133,7 +136,10 @@ class CommandsMixin:
 
     def _cmd_syntax(self: TGDBApp, args: list) -> None:
         """Mirror cgdb's :syntax [on|off|c|asm|…] command."""
-        value = args[0] if args else ""
+        if args:
+            value = args[0]
+        else:
+            value = ""
         if value:
             self.cfg.syntax = value.lower()
         # No args: cgdb prints info (TODO); we just refresh

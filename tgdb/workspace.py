@@ -309,10 +309,12 @@ class PaneContainer(Widget):
         if not self._items:
             self._weights = []
             return
-        self._weights = [
-            max(1, item.size.width if is_horizontal else item.size.height)
-            for item in self._items
-        ]
+        self._weights = []
+        for item in self._items:
+            if is_horizontal:
+                self._weights.append(max(1, item.size.width))
+            else:
+                self._weights.append(max(1, item.size.height))
 
     def _resize_from_drag(
         self, splitter: "Splitter", screen_x: int, screen_y: int
@@ -326,16 +328,27 @@ class PaneContainer(Widget):
         before_index = self.index_of(before)
         after_index = self.index_of(after)
         is_horizontal = self.orientation == "horizontal"
-        min_size = self.min_item_width if is_horizontal else self.min_item_height
+        if is_horizontal:
+            min_size = self.min_item_width
+        else:
+            min_size = self.min_item_height
 
-        start = before.region.x if is_horizontal else before.region.y
-        before_size = before.size.width if is_horizontal else before.size.height
-        after_size = after.size.width if is_horizontal else after.size.height
+        if is_horizontal:
+            start = before.region.x
+            before_size = before.size.width
+            after_size = after.size.width
+        else:
+            start = before.region.y
+            before_size = before.size.height
+            after_size = after.size.height
         total_size = before_size + after_size
         if total_size <= (min_size * 2):
             return False
 
-        pointer = screen_x if is_horizontal else screen_y
+        if is_horizontal:
+            pointer = screen_x
+        else:
+            pointer = screen_y
         new_before = max(min_size, min(total_size - min_size, int(pointer - start)))
         new_after = total_size - new_before
         if new_before <= 0 or new_after <= 0:

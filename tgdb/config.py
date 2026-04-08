@@ -140,7 +140,9 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
     def default_rc_path(self) -> Optional[Path]:
         """Return the default rc file path (~/.config/tgdb/tgdbrc), or None if it doesn't exist."""
         path = XDGPath.config_home() / "tgdb" / "tgdbrc"
-        return path if path.exists() else None
+        if path.exists():
+            return path
+        return None
 
     async def load_file_async(
         self, path: str, print_fn: Optional[Callable] = None
@@ -257,7 +259,10 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         )
         if _map_m:
             _mcmd = _map_m.group(1).lower()
-            _mode = "gdb" if _mcmd in ("imap", "im") else "tgdb"
+            if _mcmd in ("imap", "im"):
+                _mode = "gdb"
+            else:
+                _mode = "tgdb"
             _lhs = self._decode_keyseq_tokens(_map_m.group(2))
             _rhs = self._decode_keyseq_tokens(_map_m.group(3))
             if not _lhs:
@@ -327,7 +332,10 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
                 return amb_err
             if ucmd is not None:
                 m = re.match(r"\S+\s*(.*)", line, re.DOTALL)
-                raw_args = m.group(1) if m else ""
+                if m:
+                    raw_args = m.group(1)
+                else:
+                    raw_args = ""
                 return await self._exec_user_command_async(
                     ucmd,
                     raw_args,
@@ -431,11 +439,17 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
     async def _cmd_save(self, args: list[str]) -> Optional[str]:
         """Handle: save history [filename]"""
         if not args or args[0].lower() != "history":
-            return f"save: unknown sub-command '{args[0] if args else ''}'"
+            if args:
+                return f"save: unknown sub-command '{args[0]}'"
+            else:
+                return "save: unknown sub-command ''"
         bar = self._cmdline_bar
         if bar is None:
             return "save history: command-line bar not available"
-        path = Path(os.path.expanduser(args[1])) if len(args) >= 2 else None
+        if len(args) >= 2:
+            path = Path(os.path.expanduser(args[1]))
+        else:
+            path = None
         max_size = self.config.historysize
         return bar.save_history(path, max_size=max_size)
 

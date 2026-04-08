@@ -203,7 +203,10 @@ class _SourceContent(SourceViewRendering, Widget):
             except Exception:
                 same = False
             if same and 1 <= bp.line <= len(sf.lines):
-                sf.bp_flags[bp.line - 1] = BP_ENABLED if bp.enabled else BP_DISABLED
+                if bp.enabled:
+                    sf.bp_flags[bp.line - 1] = BP_ENABLED
+                else:
+                    sf.bp_flags[bp.line - 1] = BP_DISABLED
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -230,7 +233,10 @@ class _SourceContent(SourceViewRendering, Widget):
 
     def move_to(self, line: int) -> None:
         n = self._line_count()
-        self.sel_line = max(1, min(line, n if n else 1))
+        if n:
+            self.sel_line = max(1, min(line, n))
+        else:
+            self.sel_line = max(1, min(line, 1))
         self._ensure_visible(self.sel_line)
         self.refresh()
 
@@ -273,7 +279,10 @@ class _SourceContent(SourceViewRendering, Widget):
     def page_down(self) -> None:
         h = self._visible_height()
         n = self._line_count()
-        self.sel_line = min(n if n else 1, self.sel_line + h)
+        if n:
+            self.sel_line = min(n, self.sel_line + h)
+        else:
+            self.sel_line = min(1, self.sel_line + h)
         self._ensure_visible(self.sel_line)
         self.refresh()
 
@@ -287,7 +296,10 @@ class _SourceContent(SourceViewRendering, Widget):
         self.move_to(1)
 
     def goto_bottom(self, line: Optional[int] = None) -> None:
-        self.move_to(line if line is not None else self._line_count())
+        if line is not None:
+            self.move_to(line)
+        else:
+            self.move_to(self._line_count())
 
     def goto_executing(self) -> None:
         if self.exe_line > 0:
@@ -321,24 +333,35 @@ class _SourceContent(SourceViewRendering, Widget):
         self, pattern: str, forward: bool = True, start: Optional[int] = None
     ) -> bool:
         sf = self.source_file
-        lines = sf.lines if sf else _LOGO_LINES
+        if sf:
+            lines = sf.lines
+        else:
+            lines = _LOGO_LINES
         if not lines or not pattern:
             return False
-        flags = re.IGNORECASE if self.ignorecase else 0
+        if self.ignorecase:
+            flags = re.IGNORECASE
+        else:
+            flags = 0
         try:
             rx = re.compile(pattern, flags)
         except re.error:
             return False
         n = len(lines)
-        s = (start if start is not None else self.sel_line) - 1
-        if forward:
-            order = list(range(s + 1, n)) + (
-                list(range(0, s + 1)) if self.wrapscan else []
-            )
+        if start is not None:
+            s = start - 1
         else:
-            order = list(range(s - 1, -1, -1)) + (
-                list(range(n - 1, s - 1, -1)) if self.wrapscan else []
-            )
+            s = self.sel_line - 1
+        if forward:
+            if self.wrapscan:
+                order = list(range(s + 1, n)) + list(range(0, s + 1))
+            else:
+                order = list(range(s + 1, n))
+        else:
+            if self.wrapscan:
+                order = list(range(s - 1, -1, -1)) + list(range(n - 1, s - 1, -1))
+            else:
+                order = list(range(s - 1, -1, -1))
         for idx in order:
             if rx.search(lines[idx]):
                 self._last_jump_line = self.sel_line
@@ -377,7 +400,10 @@ class _SourceContent(SourceViewRendering, Widget):
     def jump_to_mark(self, ch: str) -> bool:
         sf = self.source_file
         if ch.islower():
-            line = sf.marks_local.get(ch) if sf else None
+            if sf:
+                line = sf.marks_local.get(ch)
+            else:
+                line = None
             if line is not None:
                 self._last_jump_line = self.sel_line
                 self.move_to(line)
@@ -430,7 +456,10 @@ class _SourceContent(SourceViewRendering, Widget):
             self._num_buf += char
             return True
         has_prefix = bool(self._num_buf)
-        count = int(self._num_buf) if self._num_buf else 1
+        if self._num_buf:
+            count = int(self._num_buf)
+        else:
+            count = 1
         self._num_buf = ""
 
         consumed = True
@@ -611,8 +640,13 @@ class SourceView(PaneBase):
 
     def title(self) -> Optional[str]:
         content = self.__dict__.get("_content")
-        sf = getattr(content, "source_file", None) if content is not None else None
-        return sf.path if sf is not None else None
+        if content is not None:
+            sf = getattr(content, "source_file", None)
+        else:
+            sf = None
+        if sf is not None:
+            return sf.path
+        return None
 
     def align(self) -> str:
         return "left"

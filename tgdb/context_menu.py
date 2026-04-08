@@ -167,7 +167,10 @@ class _PanelWidget(Widget):
 
         assert row.item_index is not None
         item = panel.items[row.item_index]
-        row_rich = sel_rich if row.item_index == panel.selected_index else border_rich
+        if row.item_index == panel.selected_index:
+            row_rich = sel_rich
+        else:
+            row_rich = border_rich
         inner = _item_row_text(panel, item)
         segs = (
             [Segment("│", border_rich)]
@@ -248,7 +251,10 @@ class ContextMenu(Widget):
         super().__init__(**kwargs)
         self.hl = hl
         self._items: tuple[ContextMenuItem, ...] = tuple(items or ())
-        self._selection_path: list[int] = [0] if self._items else []
+        if self._items:
+            self._selection_path: list[int] = [0]
+        else:
+            self._selection_path: list[int] = []
         self._requested_x = 0
         self._requested_y = 0
         self._panels: list[_PanelLayout] = []
@@ -269,7 +275,10 @@ class ContextMenu(Widget):
 
     def set_items(self, items: Sequence[ContextMenuItem]) -> None:
         self._items = tuple(items)
-        self._selection_path = [0] if self._items else []
+        if self._items:
+            self._selection_path = [0]
+        else:
+            self._selection_path = []
         if self.is_open:
             self._relayout()
 
@@ -357,15 +366,14 @@ class ContextMenu(Widget):
     def _inner_width(self, items: tuple[ContextMenuItem, ...]) -> int:
         base_padding = _PADDING_LEFT + _PADDING_RIGHT
         submenu_tail = 3
-        return max(
-            (
-                cell_len(item.label)
-                + base_padding
-                + (submenu_tail if item.has_children else 0)
-                for item in items
-            ),
-            default=1,
-        )
+        widths = []
+        for item in items:
+            if item.has_children:
+                extra = submenu_tail
+            else:
+                extra = 0
+            widths.append(cell_len(item.label) + base_padding + extra)
+        return max(widths, default=1)
 
     def _normalize_selection_path(self) -> None:
         if not self._items:

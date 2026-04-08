@@ -49,7 +49,10 @@ class _TitleBar(Widget):
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
         hl = getattr(self._pane, "hl", None)
-        style = hl.style(self._pane.color()) if hl is not None else ""
+        if hl is not None:
+            style = hl.style(self._pane.color())
+        else:
+            style = ""
         title = self._pane.title()
         if title:
             align = self._pane.align()

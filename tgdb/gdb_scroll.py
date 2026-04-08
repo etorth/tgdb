@@ -129,7 +129,10 @@ class ScrollMixin:
                 line = lines[idx].copy()
                 if self._search_pattern:
                     try:
-                        flags = re.IGNORECASE if self.ignorecase else 0
+                        if self.ignorecase:
+                            flags = re.IGNORECASE
+                        else:
+                            flags = 0
                         rx = re.compile(self._search_pattern, flags)
                         for m in rx.finditer(line.plain):
                             line.stylize(self.hl.style("Search"), m.start(), m.end())
@@ -175,7 +178,10 @@ class ScrollMixin:
         total = len(lines)
         if not total or not pattern:
             return False
-        flags = re.IGNORECASE if self.ignorecase else 0
+        if self.ignorecase:
+            flags = re.IGNORECASE
+        else:
+            flags = 0
         try:
             rx = re.compile(pattern, flags)
         except re.error:
@@ -183,13 +189,17 @@ class ScrollMixin:
         h = self._visible_height()
         cur = max(0, total - h - self._scroll_offset)
         if forward:
-            order = list(range(cur + 1, total)) + (
-                list(range(0, cur + 1)) if self.wrapscan else []
-            )
+            if self.wrapscan:
+                wrap_part = list(range(0, cur + 1))
+            else:
+                wrap_part = []
+            order = list(range(cur + 1, total)) + wrap_part
         else:
-            order = list(range(cur - 1, -1, -1)) + (
-                list(range(total - 1, cur - 1, -1)) if self.wrapscan else []
-            )
+            if self.wrapscan:
+                wrap_part = list(range(total - 1, cur - 1, -1))
+            else:
+                wrap_part = []
+            order = list(range(cur - 1, -1, -1)) + wrap_part
         for idx in order:
             if rx.search(lines[idx].plain):
                 self._scroll_offset = max(0, total - h - idx)
@@ -205,7 +215,10 @@ class ScrollMixin:
         if char.isdigit() and char != "0":
             self._num_buf += char
             return
-        count = int(self._num_buf) if self._num_buf else 1
+        if self._num_buf:
+            count = int(self._num_buf)
+        else:
+            count = 1
         self._num_buf = ""
 
         if key == "escape":

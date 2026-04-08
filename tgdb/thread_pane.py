@@ -35,7 +35,10 @@ class _ThreadContent(Widget):
         self.refresh()
 
     def _thread_text(self, thread: ThreadInfo) -> str:
-        marker = ">" if thread.is_current else " "
+        if thread.is_current:
+            marker = ">"
+        else:
+            marker = " "
         state = thread.state or "unknown"
         text = f"{marker} {thread.id} {state}"
         if thread.name:
@@ -59,11 +62,10 @@ class _ThreadContent(Widget):
         for i, thread in enumerate(self._threads[:height]):
             if i > 0:
                 result.append("\n")
-            style = (
-                self.hl.style("SelectedLineHighlight")
-                if thread.is_current
-                else self.hl.style("Normal")
-            )
+            if thread.is_current:
+                style = self.hl.style("SelectedLineHighlight")
+            else:
+                style = self.hl.style("Normal")
             result.append(fit_cells(self._thread_text(thread), width), style=style)
         remaining = height - min(height, len(self._threads))
         for i in range(max(0, remaining)):

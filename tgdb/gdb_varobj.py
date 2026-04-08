@@ -312,6 +312,7 @@ class VarobjMixin:
         )
         payload = result.get("payload") or {}
         changelist = payload.get("changelist", [])
-        changelist = changelist if isinstance(changelist, list) else []
+        if not isinstance(changelist, list):
+            changelist = []
         _log.debug("var_update %s -> %d changes", varobj_name, len(changelist))
         return changelist

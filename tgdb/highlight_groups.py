@@ -37,7 +37,9 @@ class HighlightStyle:
             parts.append(self.fg)
         if self.bg:
             parts.append(f"on {self.bg}")
-        return " ".join(parts) if parts else "default"
+        if parts:
+            return " ".join(parts)
+        return "default"
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +84,9 @@ def resolve_color(name: str) -> str:
     lower = name.lower()
     if lower.lstrip("-").isdigit():
         number = int(lower)
-        return "" if number < 0 else f"color({number})"
+        if number < 0:
+            return ""
+        return f"color({number})"
     return CGDB_COLORS.get(lower, lower)
 
 
@@ -167,7 +171,11 @@ class HighlightGroups:
             grp.fg = resolve_color(fg) or None
         if bg:
             grp.bg = resolve_color(bg) or None
-        for attr in (a.strip().lower() for a in attrs.split(",") if a.strip()):
+        for attr_raw in attrs.split(","):
+            attr_raw = attr_raw.strip()
+            if not attr_raw:
+                continue
+            attr = attr_raw.lower()
             if attr in ("normal", "none"):
                 grp.bold = grp.underline = grp.reverse = grp.italic = False
                 grp.dim = grp.blink = False

@@ -70,7 +70,10 @@ class WorkspaceMixin:
         return self._register_pane
 
     def _make_stack_pane(self: TGDBApp) -> StackPane:
-        current_level = self.gdb.current_frame.level if self.gdb.current_frame else 0
+        if self.gdb.current_frame:
+            current_level = self.gdb.current_frame.level
+        else:
+            current_level = 0
         if self._stack_pane is None:
             self._stack_pane = StackPane(self.hl)
         self._stack_pane.set_frames(self._current_stack, current_level=current_level)
@@ -94,7 +97,9 @@ class WorkspaceMixin:
 
     def _pane_label(self: TGDBApp, pane_kind: str) -> str:
         descriptor = self._pane_descriptors.get(pane_kind)
-        return descriptor.label if descriptor is not None else pane_kind
+        if descriptor is not None:
+            return descriptor.label
+        return pane_kind
 
     def _pane_is_attached(self: TGDBApp, pane_kind: str) -> bool:
         return self._widget_attached(self._pane_widget(pane_kind))
@@ -128,14 +133,13 @@ class WorkspaceMixin:
         return menu.contains_point(screen_x, screen_y)
 
     def _build_context_menu_items(self: TGDBApp) -> list[ContextMenuItem]:
-        add_children = [
-            ContextMenuItem(
-                self._pane_label(pane_kind),
-                action=f"add:{pane_kind}",
-            )
-            for pane_kind in self._add_menu_order
-            if not self._pane_is_attached(pane_kind)
-        ]
+        add_children = []
+        for pane_kind in self._add_menu_order:
+            if not self._pane_is_attached(pane_kind):
+                add_children.append(ContextMenuItem(
+                    self._pane_label(pane_kind),
+                    action=f"add:{pane_kind}",
+                ))
         if not add_children:
             add_children = [ContextMenuItem("No panes available")]
 
@@ -202,7 +206,10 @@ class WorkspaceMixin:
             parent = current.parent
             if isinstance(parent, PaneContainer):
                 return current
-            current = parent if isinstance(parent, Widget) else None
+            if isinstance(parent, Widget):
+                current = parent
+            else:
+                current = None
         return None
 
     async def _ensure_dynamic_workspace(self: TGDBApp) -> Optional[PaneContainer]:
@@ -215,7 +222,10 @@ class WorkspaceMixin:
     async def _replace_workspace_item(
         self: TGDBApp, target: Widget, new_item: Widget
     ) -> bool:
-        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if isinstance(target.parent, PaneContainer):
+            parent = target.parent
+        else:
+            parent = None
         if parent is None:
             return False
         await parent.replace_item(target, new_item)
@@ -226,9 +236,10 @@ class WorkspaceMixin:
     ) -> Optional[Widget]:
         current = container
         while True:
-            parent = (
-                current.parent if isinstance(current.parent, PaneContainer) else None
-            )
+            if isinstance(current.parent, PaneContainer):
+                parent = current.parent
+            else:
+                parent = None
             item_count = len(current.items)
             if parent is None:
                 if item_count == 0:
@@ -251,7 +262,10 @@ class WorkspaceMixin:
         pane = self._create_pane(pane_kind)
         if pane is None:
             return None
-        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if isinstance(target.parent, PaneContainer):
+            parent = target.parent
+        else:
+            parent = None
         if parent is None:
             return None
 
@@ -275,7 +289,10 @@ class WorkspaceMixin:
         return None
 
     async def _delete_workspace_item(self: TGDBApp, target: Widget) -> Optional[Widget]:
-        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if isinstance(target.parent, PaneContainer):
+            parent = target.parent
+        else:
+            parent = None
         if parent is None:
             return None
         await parent.take_item(target)
@@ -284,9 +301,15 @@ class WorkspaceMixin:
     async def _apply_context_menu_action(
         self: TGDBApp, target: Widget, direction: str
     ) -> bool:
-        axis = "horizontal" if direction in ("left", "right") else "vertical"
+        if direction in ("left", "right"):
+            axis = "horizontal"
+        else:
+            axis = "vertical"
         insert_before = direction in ("left", "up")
-        parent = target.parent if isinstance(target.parent, PaneContainer) else None
+        if isinstance(target.parent, PaneContainer):
+            parent = target.parent
+        else:
+            parent = None
         if parent is None:
             return False
 
@@ -345,7 +368,10 @@ class WorkspaceMixin:
                 self._show_status("Unable to hide cell")
                 self._restore_focus_after_context_menu()
                 return
-            label = self._pane_label(pane_kind) if pane_kind is not None else "pane"
+            if pane_kind is not None:
+                label = self._pane_label(pane_kind)
+            else:
+                label = "pane"
             self._show_status(f"Hid {label}")
             self._restore_focus_after_context_menu()
             return
@@ -359,7 +385,10 @@ class WorkspaceMixin:
             self._restore_focus_after_context_menu()
             return
 
-        direction = action.split(":", 1)[1] if action.startswith("split:") else None
+        if action.startswith("split:"):
+            direction = action.split(":", 1)[1]
+        else:
+            direction = None
         if direction is None:
             self._show_status(f"Context menu: {action}")
             self._restore_focus_after_context_menu()

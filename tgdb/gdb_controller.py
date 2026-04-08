@@ -341,9 +341,12 @@ class GDBController(ParsingMixin, VarobjMixin):
                 self._emit_threads()
             register_names = results.get("register-names")
             if isinstance(register_names, list):
-                self.register_names = [
-                    name if isinstance(name, str) else "" for name in register_names
-                ]
+                self.register_names = []
+                for name in register_names:
+                    if isinstance(name, str):
+                        self.register_names.append(name)
+                    else:
+                        self.register_names.append("")
                 self._emit_registers()
             register_values = results.get("register-values")
             if isinstance(register_values, list):
@@ -461,7 +464,10 @@ class GDBController(ParsingMixin, VarobjMixin):
         )
 
     def set_breakpoint(self, location: str, temporary: bool = False) -> None:
-        flag = "-t " if temporary else ""
+        if temporary:
+            flag = "-t "
+        else:
+            flag = ""
         self.mi_command(f"-break-insert {flag}{location}")
         asyncio.create_task(self._delayed_break_list())
 

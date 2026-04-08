@@ -128,11 +128,19 @@ class ParsingMixin:
             arg = item.get("arg", 0)
             value = item.get("value")
             var_type = item.get("type")
+            if isinstance(value, str):
+                value_str = value
+            else:
+                value_str = ""
+            if isinstance(var_type, str):
+                type_str = var_type
+            else:
+                type_str = ""
             locals_list.append(
                 LocalVariable(
                     name=str(item.get("name", "")),
-                    value=value if isinstance(value, str) else "",
-                    type=var_type if isinstance(var_type, str) else "",
+                    value=value_str,
+                    type=type_str,
                     is_arg=str(arg).lower() not in ("", "0", "false", "no", "n"),
                 )
             )
@@ -183,6 +191,10 @@ class ParsingMixin:
         threads: list[ThreadInfo] = []
         for raw in threads_raw:
             frame = raw.get("frame")
+            if isinstance(frame, dict):
+                parsed_frame = self._parse_frame(frame)
+            else:
+                parsed_frame = None
             threads.append(
                 ThreadInfo(
                     id=str(raw.get("id", "")),
@@ -190,7 +202,7 @@ class ParsingMixin:
                     name=str(raw.get("name", "")),
                     state=str(raw.get("state", "")),
                     core=str(raw.get("core", "")),
-                    frame=self._parse_frame(frame) if isinstance(frame, dict) else None,
+                    frame=parsed_frame,
                     is_current=str(raw.get("id", "")) == self.current_thread_id,
                 )
             )
@@ -212,7 +224,10 @@ class ParsingMixin:
             if number < 0:
                 continue
             value = item.get("value")
-            values[number] = value if isinstance(value, str) else ""
+            if isinstance(value, str):
+                values[number] = value
+            else:
+                values[number] = ""
         return values
 
     def _emit_registers(self) -> None:
@@ -221,11 +236,10 @@ class ParsingMixin:
 
         registers: list[RegisterInfo] = []
         for number, value in sorted(self._register_values.items()):
-            name = (
-                self.register_names[number]
-                if 0 <= number < len(self.register_names)
-                else ""
-            )
+            if 0 <= number < len(self.register_names):
+                name = self.register_names[number]
+            else:
+                name = ""
             if not name:
                 continue
             registers.append(RegisterInfo(number=number, name=name, value=value))

@@ -37,7 +37,10 @@ class _StackContent(Widget):
         self.refresh()
 
     def _frame_text(self, frame: Frame) -> str:
-        marker = ">" if frame.level == self._current_level else " "
+        if frame.level == self._current_level:
+            marker = ">"
+        else:
+            marker = " "
         func = frame.func or "??"
         text = f"{marker} #{frame.level} {func}"
         location = frame_location(frame)
@@ -52,11 +55,10 @@ class _StackContent(Widget):
         for i, frame in enumerate(self._frames[:height]):
             if i > 0:
                 result.append("\n")
-            style = (
-                self.hl.style("SelectedLineHighlight")
-                if frame.level == self._current_level
-                else self.hl.style("Normal")
-            )
+            if frame.level == self._current_level:
+                style = self.hl.style("SelectedLineHighlight")
+            else:
+                style = self.hl.style("Normal")
             result.append(fit_cells(self._frame_text(frame), width), style=style)
         remaining = height - min(height, len(self._frames))
         for i in range(max(0, remaining)):

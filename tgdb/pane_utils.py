@@ -48,7 +48,9 @@ def frame_location(frame: Frame | None) -> str:
     path = frame.fullname or frame.file
     if path:
         name = os.path.basename(path)
-        return f"{name}:{frame.line}" if frame.line > 0 else name
+        if frame.line > 0:
+            return f"{name}:{frame.line}"
+        return name
     if frame.addr:
         return frame.addr
     return ""

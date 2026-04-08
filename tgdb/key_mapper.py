@@ -85,7 +85,10 @@ class KeyMapper:
         pass-through when no map matches.
         """
         now = time.monotonic()
-        elapsed_ms = (now - self._last_key_time) * 1000 if self._last_key_time else 9999
+        if self._last_key_time:
+            elapsed_ms = (now - self._last_key_time) * 1000
+        else:
+            elapsed_ms = 9999
         self._last_key_time = now
 
         buf = self._buf.setdefault(mode, [])

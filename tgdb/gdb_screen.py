@@ -69,7 +69,10 @@ def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) 
     for col in range(width):
         if row is None:
             data = " "
-            st = Style(reverse=True, blink=True) if col == cursor_col else Style()
+            if col == cursor_col:
+                st = Style(reverse=True, blink=True)
+            else:
+                st = Style()
         else:
             # Use .get() rather than row[col] so that both pyte's
             # StaticDefaultDict rows AND plain dict rows (restored from
@@ -80,7 +83,10 @@ def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) 
             char = row.get(col)
             if char is None:
                 data = " "
-                st = Style(reverse=True, blink=True) if col == cursor_col else Style()
+                if col == cursor_col:
+                    st = Style(reverse=True, blink=True)
+                else:
+                    st = Style()
                 result.append(data, style=st)
                 continue
             data = char.data or " "

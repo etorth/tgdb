@@ -37,18 +37,26 @@ class LayoutMixin:
     def _split_axis(self: TGDBApp, is_horizontal: bool) -> int:
         try:
             container = self.query_one("#split-container")
-            axis = container.size.width if is_horizontal else container.size.height
+            if is_horizontal:
+                axis = container.size.width
+            else:
+                axis = container.size.height
             if axis:
                 return max(1, axis)
         except NoMatches:
             pass
-        return max(
-            1, self.size.width if is_horizontal else max(1, self.size.height - 1)
-        )
+        if is_horizontal:
+            fallback = self.size.width
+        else:
+            fallback = max(1, self.size.height - 1)
+        return max(1, fallback)
 
     def _pane_axis(self: TGDBApp, is_horizontal: bool) -> int:
         # Subtract 1 only for horizontal mode where a 1-column Splitter exists.
-        splitter_size = 1 if is_horizontal else 0
+        if is_horizontal:
+            splitter_size = 1
+        else:
+            splitter_size = 0
         return max(0, self._split_axis(is_horizontal) - splitter_size)
 
     def _reset_window_shift(self: TGDBApp, is_horizontal: bool) -> None:
@@ -73,7 +81,10 @@ class LayoutMixin:
             self._window_shift = 0
             return
         base = axis // 2
-        min_size = self.cfg.winminwidth if is_horizontal else self.cfg.winminheight
+        if is_horizontal:
+            min_size = self.cfg.winminwidth
+        else:
+            min_size = self.cfg.winminheight
         min_shift = min_size - base
         max_shift = (axis - min_size) - base
 
@@ -88,7 +99,10 @@ class LayoutMixin:
     def _compute_split_sizes(
         self: TGDBApp, is_horizontal: bool, axis: int | None = None
     ) -> tuple[int, int]:
-        axis = self._pane_axis(is_horizontal) if axis is None else max(0, axis)
+        if axis is None:
+            axis = self._pane_axis(is_horizontal)
+        else:
+            axis = max(0, axis)
         if self._cur_win_split == -2:
             return 0, axis
         if self._cur_win_split == 2:
@@ -155,9 +169,10 @@ class LayoutMixin:
             self._apply_split()
 
     def on_toggle_orientation(self: TGDBApp, _: ToggleOrientation) -> None:
-        new_orientation = (
-            "vertical" if self.cfg.winsplitorientation == "horizontal" else "horizontal"
-        )
+        if self.cfg.winsplitorientation == "horizontal":
+            new_orientation = "vertical"
+        else:
+            new_orientation = "horizontal"
         self.cfg.winsplitorientation = new_orientation
         self._set_window_shift_from_ratio(
             new_orientation == "horizontal", self._split_ratio
@@ -203,16 +218,28 @@ class LayoutMixin:
                 container.set_orientation(self.cfg.winsplitorientation)
             if is_horizontal:
                 container.styles.layout = "horizontal"
-                src.styles.display = "none" if src_size <= 0 else "block"
-                gdb.styles.display = "none" if gdb_size <= 0 else "block"
+                if src_size <= 0:
+                    src.styles.display = "none"
+                else:
+                    src.styles.display = "block"
+                if gdb_size <= 0:
+                    gdb.styles.display = "none"
+                else:
+                    gdb.styles.display = "block"
                 src.styles.width = src_size
                 src.styles.height = "1fr"
                 gdb.styles.width = gdb_size
                 gdb.styles.height = "1fr"
             else:
                 container.styles.layout = "vertical"
-                src.styles.display = "none" if src_size <= 0 else "block"
-                gdb.styles.display = "none" if gdb_size <= 0 else "block"
+                if src_size <= 0:
+                    src.styles.display = "none"
+                else:
+                    src.styles.display = "block"
+                if gdb_size <= 0:
+                    gdb.styles.display = "none"
+                else:
+                    gdb.styles.display = "block"
                 src.styles.width = "1fr"
                 src.styles.height = src_size
                 gdb.styles.width = "1fr"
@@ -242,7 +269,10 @@ class LayoutMixin:
 
         origin_x = getattr(root.region, "x", 0)
         origin_y = getattr(root.region, "y", 0)
-        pos = (msg.screen_x - origin_x) if is_horizontal else (msg.screen_y - origin_y)
+        if is_horizontal:
+            pos = msg.screen_x - origin_x
+        else:
+            pos = msg.screen_y - origin_y
         pos = max(0, min(axis, int(pos)))
         self._cur_win_split = self._WIN_SPLIT_FREE
         self._window_shift = pos - (axis // 2)

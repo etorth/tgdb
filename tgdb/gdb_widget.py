@@ -313,7 +313,10 @@ class _GDBContent(ScrollMixin, Widget):
         for r in range(min(h, self._pyte_rows)):
             if r > 0:
                 result.append("\n")
-            cursor_col = cx if (r == cy and self.gdb_focused) else -1
+            if r == cy and self.gdb_focused:
+                cursor_col = cx
+            else:
+                cursor_col = -1
             # Use buf.get(r) — NOT buf[r] — to avoid creating phantom empty
             # entries in pyte's defaultdict buffer.  Phantom entries confuse
             # pyte's delete_lines logic on the next resize: it sees them as

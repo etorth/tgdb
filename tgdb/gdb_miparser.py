@@ -341,7 +341,9 @@ _PARSER_FUNCTION = Callable[[Match, _StringStream], Dict]
 
 def _extract_token(match: Match) -> Optional[int]:
     token = match["token"]
-    return int(token) if token is not None else None
+    if token is not None:
+        return int(token)
+    return None
 
 
 def _extract_payload(match: Match, stream: _StringStream) -> Optional[Dict]:

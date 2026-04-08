@@ -66,7 +66,10 @@ class SourceViewRendering:
 
     # Width of the line-number field (minimum 1, grows with file size)
     def _nr_width(self) -> int:
-        n = len(self.source_file.lines) if self.source_file else 0
+        if self.source_file:
+            n = len(self.source_file.lines)
+        else:
+            n = 0
         return max(1, len(str(max(n, 1))))
 
     def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
@@ -84,7 +87,10 @@ class SourceViewRendering:
         line_no = line_idx + 1
         is_exe = line_no == self.exe_line
         is_sel = line_no == self.sel_line
-        bp_flag = sf.bp_flags[line_idx] if line_idx < len(sf.bp_flags) else BP_NONE
+        if line_idx < len(sf.bp_flags):
+            bp_flag = sf.bp_flags[line_idx]
+        else:
+            bp_flag = BP_NONE
         exe_disp = self.executing_line_display
         sel_disp = self.selected_line_display
 
@@ -137,7 +143,10 @@ class SourceViewRendering:
         # sel_col is _col_offset (horizontal scroll position)
         col_off = 0
         if disp == "longarrow":
-            src_line = sf.lines[line_idx] if line_idx < len(sf.lines) else ""
+            if line_idx < len(sf.lines):
+                src_line = sf.lines[line_idx]
+            else:
+                src_line = ""
             leading_ws = len(src_line) - len(src_line.lstrip())
             col_off = max(0, leading_ws - 1 - self._col_offset)
 
@@ -178,7 +187,10 @@ class SourceViewRendering:
             line_bg = ""
 
         tokens = sf.tokenize(self.tabstop)
-        spans = tokens[line_idx] if line_idx < len(tokens) else []
+        if line_idx < len(tokens):
+            spans = tokens[line_idx]
+        else:
+            spans = []
         if not spans:
             spans = [(sf.lines[line_idx], "Normal")]
 
@@ -203,7 +215,10 @@ class SourceViewRendering:
                     attrs.append("reverse")
                 if hs.underline:
                     attrs.append("underline")
-                st = " ".join(attrs) if attrs else ""
+                if attrs:
+                    st = " ".join(attrs)
+                else:
+                    st = ""
             styled_spans.append((tok_text, st))
 
         src_t = self._clip_spans_to_cells(styled_spans, total_skip, source_width)
@@ -211,7 +226,10 @@ class SourceViewRendering:
         # hlsearch overlay
         if self.hlsearch and self._search_pattern:
             try:
-                flags = re.IGNORECASE if self.ignorecase else 0
+                if self.ignorecase:
+                    flags = re.IGNORECASE
+                else:
+                    flags = 0
                 rx = re.compile(self._search_pattern, flags)
                 for m in rx.finditer(src_t.plain):
                     src_t.stylize(self.hl.style("Search"), m.start(), m.end())

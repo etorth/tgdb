@@ -100,10 +100,16 @@ class FileDialog(Widget):
             return (group, path)
 
         self._files = sorted(filtered, key=sort_key)
-        self._sel = 0 if self._files else -1
+        if self._files:
+            self._sel = 0
+        else:
+            self._sel = -1
         self._sel_col = 0
         self._query_pending = False
-        self._body_message = None if self._files else self._EMPTY_MESSAGE
+        if self._files:
+            self._body_message = None
+        else:
+            self._body_message = self._EMPTY_MESSAGE
         self.refresh()
 
     @property
@@ -111,7 +117,10 @@ class FileDialog(Widget):
         return self.has_class("visible")
 
     def _reset_interaction(self) -> None:
-        self._sel = 0 if self._files else -1
+        if self._files:
+            self._sel = 0
+        else:
+            self._sel = -1
         self._sel_col = 0
         self._search_active = False
         self._search_buf = ""
@@ -208,20 +217,30 @@ class FileDialog(Widget):
         n = len(self._files)
         if n == 0 or not pattern:
             return False
-        flags = re.IGNORECASE if self.ignorecase else 0
+        if self.ignorecase:
+            flags = re.IGNORECASE
+        else:
+            flags = 0
         try:
             rx = re.compile(pattern, flags)
         except re.error:
             return False
-        start = self._sel if origin is None else origin
-        if forward:
-            order = list(range(start + 1, n)) + (
-                list(range(0, start + 1)) if self.wrapscan else []
-            )
+        if origin is None:
+            start = self._sel
         else:
-            order = list(range(start - 1, -1, -1)) + (
-                list(range(n - 1, start - 1, -1)) if self.wrapscan else []
-            )
+            start = origin
+        if forward:
+            if self.wrapscan:
+                wrap_part = list(range(0, start + 1))
+            else:
+                wrap_part = []
+            order = list(range(start + 1, n)) + wrap_part
+        else:
+            if self.wrapscan:
+                wrap_part = list(range(n - 1, start - 1, -1))
+            else:
+                wrap_part = []
+            order = list(range(start - 1, -1, -1)) + wrap_part
         for idx in order:
             if rx.search(self._files[idx]):
                 self._sel = idx
@@ -292,9 +311,10 @@ class FileDialog(Widget):
 
             filename = self._files[file_idx]
             # Horizontal scroll
-            display_name = (
-                filename[self._sel_col :] if self._sel_col < len(filename) else ""
-            )
+            if self._sel_col < len(filename):
+                display_name = filename[self._sel_col :]
+            else:
+                display_name = ""
 
             if file_idx == self._sel:
                 # Selected line: bold number + "→" arrow (cgdb uses '->')
@@ -318,10 +338,16 @@ class FileDialog(Widget):
         result.append("\n")
         bar_style = self.hl.style("StatusLine")
         if self._search_active:
-            pfx = "/" if self._search_forward else "?"
+            if self._search_forward:
+                pfx = "/"
+            else:
+                pfx = "?"
             bar = f"{pfx}{self._search_buf}"
         else:
-            current = self._sel + 1 if self._sel >= 0 else 0
+            if self._sel >= 0:
+                current = self._sel + 1
+            else:
+                current = 0
             bar = f" {current}/{count}  j/k=move  Enter=open  /=search  q=quit"
         result.append(bar[:w].ljust(w), style=bar_style)
 
@@ -361,7 +387,10 @@ class FileDialog(Widget):
             self._num_buf += char
             event.stop()
             return
-        count = int(self._num_buf) if self._num_buf else 1
+        if self._num_buf:
+            count = int(self._num_buf)
+        else:
+            count = 1
         had_count = bool(self._num_buf)
         self._num_buf = ""
 
@@ -385,7 +414,11 @@ class FileDialog(Widget):
             self._move(-self._list_height() // 2)
         elif char == "G":
             # [N]G → jump to file N (1-indexed); G alone → jump to last
-            self._sel = self._clamp(count - 1 if had_count else len(self._files) - 1)
+            if had_count:
+                target_idx = count - 1
+            else:
+                target_idx = len(self._files) - 1
+            self._sel = self._clamp(target_idx)
             self.refresh()
         elif char == "g":
             self._await_g = True

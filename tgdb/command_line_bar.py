@@ -475,7 +475,10 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         self._ml_active = True
         self._ml_cmd = cmd.lower()
         self._ml_marker = marker
-        self._ml_header = original if original else f"{cmd} << {marker}"
+        if original:
+            self._ml_header = original
+        else:
+            self._ml_header = f"{cmd} << {marker}"
         self._ml_buf = []
         self._input_buf = ""
         self._set_height(2)  # header row + current-input row

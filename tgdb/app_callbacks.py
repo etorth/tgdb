@@ -147,7 +147,11 @@ class CallbacksMixin:
         self._show_help_in_source()
 
     def on_scroll_mode_change(self, msg: ScrollModeChange) -> None:
-        self._set_mode("GDB_SCROLL" if msg.active else "GDB_PROMPT")
+        if msg.active:
+            mode = "GDB_SCROLL"
+        else:
+            mode = "GDB_PROMPT"
+        self._set_mode(mode)
 
     def on_scroll_search_start(self, msg: ScrollSearchStart) -> None:
         try:
@@ -337,7 +341,10 @@ class CallbacksMixin:
 
     def _ui_set_stack(self, frames: list[Frame]) -> None:
         self._current_stack = list(frames)
-        current_level = self.gdb.current_frame.level if self.gdb.current_frame else 0
+        if self.gdb.current_frame:
+            current_level = self.gdb.current_frame.level
+        else:
+            current_level = 0
         if self._stack_pane is not None:
             self._stack_pane.set_frames(
                 self._current_stack, current_level=current_level

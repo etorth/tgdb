@@ -153,7 +153,10 @@ class KeyRoutingMixin:
         gdb_w = self._get_gdb_widget(mounted_only=True)
         for token in tokens:
             # Special tokens that need escape sequences
-            raw = gdb_w._KEY_BYTES.get(token) if gdb_w else None
+            if gdb_w:
+                raw = gdb_w._KEY_BYTES.get(token)
+            else:
+                raw = None
             if raw:
                 self.gdb.send_input(raw)
             else:
