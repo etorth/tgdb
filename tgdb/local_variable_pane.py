@@ -614,12 +614,19 @@ class LocalVariablePane(PaneBase):
                 # Check the value from -stack-list-variables BEFORE calling
                 # var_create.  For multi-line initialisers (e.g. std::map m
                 # { {k,v}, ... };) GDB reports the variable as in-scope before
-                # its constructor runs; the value already contains the error
-                # text at this stage.  var_create would succeed but return a
-                # clean-looking value, letting the bad varobj slip through to
-                # -var-update which then crashes GDB.
+                # its constructor runs.  In that case GDB appends
+                # "<error reading variable: Cannot access memory...>" to the
+                # type description.  var_create would succeed but return a
+                # clean-looking truncated value, letting the bad varobj slip
+                # through to -var-update which then crashes GDB.
+                #
+                # Use "<error reading variable:" as the trigger, NOT the broad
+                # "Cannot access memory".  The broad form also appears when a
+                # struct member is a pointer to intentionally bad memory (e.g.
+                # char *ptr = 0x1), in which case the variable itself IS valid
+                # and must be registered normally.
                 bval = bvar.value or ""
-                if "<error reading" in bval or "Cannot access memory" in bval:
+                if "<error reading variable:" in bval:
                     shadow_suffix = "  ← shadowed" if (bname, baddr) in shadowed_keys else ""
                     placeholder = tree.root.add_leaf(
                         f"{bvar.name} = <not yet initialized>{shadow_suffix}",
@@ -649,12 +656,9 @@ class LocalVariablePane(PaneBase):
                 varobj_name = info.get("name", "")
                 value = info.get("value", "")
 
-                # Belt-and-suspenders: also check the var_create response value
-                # in case GDB does include error text there on some versions.
-                if varobj_name and (
-                    "<error reading" in value
-                    or "Cannot access memory" in value
-                ):
+                # Belt-and-suspenders: also check the var_create response for
+                # the same specific GDB error prefix.
+                if varobj_name and "<error reading variable:" in value:
                     if self._var_delete:
                         try:
                             await self._var_delete(varobj_name)
