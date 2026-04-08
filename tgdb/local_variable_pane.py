@@ -219,8 +219,18 @@ class LocalVariablePane(PaneBase):
           "std::vector of length 2, capacity 2"  -> 2
           "std::map with 3 elements"             -> 3
           "std::set with 5 elements"             -> 5
-        Returns None if no length can be parsed.
+        Returns None if no length can be parsed, or if the value string
+        contains GDB error indicators (e.g. "<error reading variable: Cannot
+        access memory ...>").  In that case the varobj is backed by garbage
+        memory and calling -var-update would trigger GDB internal assertion
+        failures.
         """
+        # If GDB embedded an error inside the value string the varobj is
+        # pointing at invalid memory.  Treat it as garbage so we never call
+        # -var-update on it.
+        if "<error reading" in value_str or "Cannot access memory" in value_str:
+            return None
+
         match = cls._RE_CONTAINER_LENGTH.search(value_str)
         if not match:
             return None
