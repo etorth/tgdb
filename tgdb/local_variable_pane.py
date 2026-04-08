@@ -197,7 +197,14 @@ class LocalVariablePane(PaneBase):
     # Core update logic
     # ------------------------------------------------------------------
 
-    _RE_CONTAINER_LENGTH = re.compile(r"(?:length|size)\s+(\d+)", re.IGNORECASE)
+    # GDB pretty-printers use two formats for container sizes:
+    #   "std::vector of length 2, capacity 2"  -> group(1) matches "length 2"
+    #   "std::map with 3 elements"             -> group(2) matches "with 3 elements"
+    # Sets, unordered_map, unordered_set, etc. all use the "with N elements" form.
+    _RE_CONTAINER_LENGTH = re.compile(
+        r"(?:length|size)\s+(\d+)|with\s+(\d+)\s+elements",
+        re.IGNORECASE,
+    )
     # Threshold above which a reported container length is treated as garbage
     # (i.e. from an uninitialized variable).  Sending -var-update to GDB for
     # a container with a "length" of 10^18 causes GDB to iterate that many
@@ -209,14 +216,19 @@ class LocalVariablePane(PaneBase):
         """Return the container length from a GDB value string, or None.
 
         Handles patterns like:
-          "std::vector of length 2, capacity 2"
-          "std::map with 3 elements"
+          "std::vector of length 2, capacity 2"  -> 2
+          "std::map with 3 elements"             -> 3
+          "std::set with 5 elements"             -> 5
         Returns None if no length can be parsed.
         """
         match = cls._RE_CONTAINER_LENGTH.search(value_str)
-        if match:
+        if not match:
+            return None
+        # group(1): "length N" or "size N" format (vectors, deques, etc.)
+        # group(2): "with N elements" format (maps, sets, unordered containers)
+        if match.group(1) is not None:
             return int(match.group(1))
-        return None
+        return int(match.group(2))
 
     async def _do_var_update(self) -> list[dict]:
         """Update all tracked varobjs, returning merged changelist.
