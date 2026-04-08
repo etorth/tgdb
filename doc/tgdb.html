@@ -957,6 +957,22 @@ option draws the entire line in inverse video and the &lsquo;<samp>block</samp>&
 draws an inverse block (cursor) next to the source code being executed.
 </p>
 </dd>
+<dt><kbd>:set expandchildlimit=<var>N</var></kbd></dt>
+<dd><p>Controls how many items are loaded at once when expanding a variable in the
+locals pane.  When set to 0 (the default), all children are fetched in a
+single request.  When set to a positive integer, only <var>N</var> items are
+fetched initially; a &lsquo;<samp>load more items</samp>&rsquo; sentinel appears at the bottom
+of the expanded node and can itself be expanded to fetch the next batch.
+</p>
+<p>For variables whose GDB pretty-printer reports
+<code>displayhint = &quot;map&quot;</code> (e.g. <code>std::map</code>,
+<code>std::unordered_map</code>), each item is a key&ndash;value <em>pair</em>.
+GDB internally represents each pair as two alternating children (key then
+value), so <var>N</var> is multiplied by two when making the GDB request.
+This means <kbd>:set expandchildlimit=5</kbd> always shows 5 complete
+key&ndash;value pairs regardless of the container type.
+</p>
+</dd>
 <dt><kbd>:set hls</kbd></dt>
 <dt><kbd>:set hlsearch</kbd></dt>
 <dd><p>When enabled, if there is a previous search pattern, highlight all its matches.
