@@ -249,6 +249,30 @@ class LocalVariablePane(PaneBase):
             return int(match.group(1))
         return int(match.group(2))
 
+    def _child_fetch_limit(self, displayhint: str) -> int:
+        """Return the raw GDB child count to request for the given displayhint.
+
+        For ``displayhint="map"`` GDB sends alternating key/value children
+        (2 raw items per logical pair), so the raw fetch limit must be doubled
+        so that ``cfg.expandchildlimit`` means *pairs*.  When the limit is 0
+        (fetch all), no doubling is needed.
+        """
+        limit = self._cfg.expandchildlimit
+        if displayhint == "map" and limit > 0:
+            return limit * 2
+        return limit
+
+    @staticmethod
+    def _child_display_count(raw_count: int, displayhint: str) -> int:
+        """Convert a raw GDB child count to a user-visible item count.
+
+        For ``displayhint="map"`` two raw items form one displayed pair, so
+        the display count is ``raw_count // 2``.
+        """
+        if displayhint == "map":
+            return raw_count // 2
+        return raw_count
+
     async def _do_var_update(self) -> list[dict]:
         """Update all tracked varobjs, returning merged changelist.
 
@@ -619,6 +643,13 @@ class LocalVariablePane(PaneBase):
                 # type description.  var_create would succeed but return a
                 # clean-looking truncated value, letting the bad varobj slip
                 # through to -var-update which then crashes GDB.
+                #
+                # NOTE: "<error reading variable:" is a GDB-internal string, not
+                # part of the MI specification.  It has been stable across GDB
+                # 7.x-16.x (since ~2009) and is not locale-sensitive.  There is
+                # no MI-spec alternative: -stack-list-variables --all-values is
+                # the only place GDB returns the untruncated error text, and
+                # switching to --simple-values removes this signal entirely.
                 #
                 # Use "<error reading variable:" as the trigger, NOT the broad
                 # "Cannot access memory".  The broad form also appears when a
@@ -1044,7 +1075,7 @@ class LocalVariablePane(PaneBase):
         dh = data.get("displayhint", "")
         try:
             children, has_more = await self._var_list_children(
-                varobj, limit=self._cfg.expandchildlimit
+                varobj, limit=self._child_fetch_limit(dh)
             )
             if children:
                 await self._add_children(node, children, dh)
@@ -1116,9 +1147,13 @@ class LocalVariablePane(PaneBase):
             self._varobj_to_node.pop(k, None)
             self._dynamic_varobjs.discard(k)
         node.remove_children()
+        if isinstance(node.data, dict):
+            parent_dh = node.data.get("displayhint", "")
+        else:
+            parent_dh = ""
         try:
             children, has_more = await self._var_list_children(
-                varobj_name, limit=self._cfg.expandchildlimit
+                varobj_name, limit=self._child_fetch_limit(parent_dh)
             )
         except Exception as e:
             node.add_leaf(f"⚠ {e}")
@@ -1134,10 +1169,6 @@ class LocalVariablePane(PaneBase):
         )
         # Pass the parent node's displayhint so _add_children knows how to
         # lay out the children (e.g. "map" → pair key-value, "array" → index).
-        if isinstance(node.data, dict):
-            parent_dh = node.data.get("displayhint", "")
-        else:
-            parent_dh = ""
         await self._add_children(node, children, parent_dh)
         if has_more:
             self._add_load_more_node(node, varobj_name, len(children), parent_dh)
@@ -1151,10 +1182,11 @@ class LocalVariablePane(PaneBase):
     ) -> None:
         """Add an expandable sentinel node that fetches the next batch on expand."""
         limit = self._cfg.expandchildlimit
+        shown = self._child_display_count(from_idx, parent_dh)
         if limit > 0:
-            label = f"load more items [{from_idx} shown]"
+            label = f"load more items [{shown} shown]"
         else:
-            label = f"load remaining items [{from_idx} shown]"
+            label = f"load remaining items [{shown} shown]"
         sentinel = parent.add(
             label,
             expand=False,
@@ -1184,7 +1216,7 @@ class LocalVariablePane(PaneBase):
             return
         try:
             children, has_more = await self._var_list_children(
-                varobj_name, from_idx, limit=self._cfg.expandchildlimit
+                varobj_name, from_idx, limit=self._child_fetch_limit(parent_dh)
             )
         except Exception as e:
             parent.add_leaf(f"⚠ {e}")
