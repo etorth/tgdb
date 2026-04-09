@@ -70,7 +70,7 @@ class _MemoryContent(Widget):
         self.can_focus = False
         self._rows: list[tuple[str, list[int], str]] = []
         self._address: str = ""
-        self._size: int = 64
+        self._byte_count: int = 64
         self._read_fn: Optional[Callable] = None
 
     def set_rows(self, rows: list[tuple[str, list[int], str]]) -> None:
