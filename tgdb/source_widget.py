@@ -428,7 +428,10 @@ class _SourceContent(SourceViewRendering, Widget):
     # Width of the line-number field (minimum 1, grows with file size)
 
     def on_resize(self, event: events.Resize) -> None:
-        self._ensure_visible(self.sel_line)
+        # Re-center on the executing line if one is set; otherwise keep
+        # the selected line visible.
+        center_on = self.exe_line if self.exe_line > 0 else self.sel_line
+        self._ensure_visible(center_on)
         self.refresh()
 
     # ------------------------------------------------------------------
