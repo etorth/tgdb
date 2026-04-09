@@ -65,6 +65,11 @@ class Pane(enum.Enum):
     REGISTERS = "registers"
     STACK = "stack"
     THREADS = "threads"
+    MI_LOG = "mi_log"
+    FILES = "files"
+    WATCH = "watch"
+    MEMORY = "memory"
+    DISASM = "disasm"
 
 
 # ---------------------------------------------------------------------------

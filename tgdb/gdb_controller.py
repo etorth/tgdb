@@ -105,7 +105,6 @@ class GDBController(ParsingMixin, VarobjMixin):
         self.on_stack: Callable[[list[Frame]], None] = lambda v: None
         self.on_threads: Callable[[list[ThreadInfo]], None] = lambda v: None
         self.on_registers: Callable[[list[RegisterInfo]], None] = lambda v: None
-        self.on_mi_log: Callable[[str], None] = lambda text: None
         self.on_exit: Callable[[], None] = lambda: None
         self.on_error: Callable[[str], None] = lambda m: None
 
@@ -269,7 +268,6 @@ class GDBController(ParsingMixin, VarobjMixin):
     def _dispatch(self, line: str) -> None:
         if not line:
             return
-        self.on_mi_log(line)
         rec = GDBMIParser.parse_response(line)
         t = rec["type"]
         if t == "result":

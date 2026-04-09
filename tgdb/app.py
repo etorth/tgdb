@@ -45,8 +45,6 @@ from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
-from .mi_log_pane import MILogPane
-from .file_browser_pane import FileBrowserPane
 from .watch_pane import WatchPane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
@@ -175,8 +173,6 @@ class TGDBApp(
         self._current_threads: list[ThreadInfo] = []
         self._register_pane: Optional[RegisterPane] = None
         self._current_registers: list[RegisterInfo] = []
-        self._mi_log_pane: Optional[MILogPane] = None
-        self._file_browser_pane: Optional[FileBrowserPane] = None
         self._watch_pane: Optional[WatchPane] = None
         self._memory_pane: Optional[MemoryPane] = None
         self._disasm_pane: Optional[DisasmPane] = None
@@ -210,16 +206,6 @@ class TGDBApp(
                 lambda: self._thread_pane,
                 lambda: self.gdb.request_current_threads(report_error=False),
             ),
-            "mi_log": PaneDescriptor(
-                "MI Log",
-                self._make_mi_log_pane,
-                lambda: self._mi_log_pane,
-            ),
-            "files": PaneDescriptor(
-                "Files",
-                self._make_file_browser_pane,
-                lambda: self._file_browser_pane,
-            ),
             "watch": PaneDescriptor(
                 "Watch",
                 self._make_watch_pane,
@@ -243,11 +229,9 @@ class TGDBApp(
             "registers",
             "threads",
             "stack",
-            "files",
             "watch",
             "disasm",
             "memory",
-            "mi_log",
         )
 
     # ------------------------------------------------------------------
@@ -348,7 +332,6 @@ class TGDBApp(
         self.gdb.on_registers = lambda v: self.call_later(self._ui_set_registers, v)
         self.gdb.on_stack = lambda v: self.call_later(self._ui_set_stack, v)
         self.gdb.on_threads = lambda v: self.call_later(self._ui_set_threads, v)
-        self.gdb.on_mi_log = lambda text: self.call_later(self._ui_mi_log, text)
         self.gdb.on_exit = lambda: self.call_later(self._ui_gdb_exit)
         self.gdb.on_error = lambda m: self.call_later(self._show_status, f"Error: {m}")
 

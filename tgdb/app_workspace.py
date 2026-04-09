@@ -21,8 +21,6 @@ from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
-from .mi_log_pane import MILogPane
-from .file_browser_pane import FileBrowserPane
 from .watch_pane import WatchPane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
@@ -89,18 +87,6 @@ class WorkspaceMixin:
             self._thread_pane = ThreadPane(self.hl)
         self._thread_pane.set_threads(self._current_threads)
         return self._thread_pane
-
-    def _make_mi_log_pane(self: TGDBApp) -> MILogPane:
-        if self._mi_log_pane is None:
-            self._mi_log_pane = MILogPane(self.hl)
-        return self._mi_log_pane
-
-    def _make_file_browser_pane(self: TGDBApp) -> FileBrowserPane:
-        if self._file_browser_pane is None:
-            self._file_browser_pane = FileBrowserPane(self.hl)
-        # Populate with current source files if available
-        self._file_browser_pane.set_files(list(self.gdb.source_files))
-        return self._file_browser_pane
 
     def _make_watch_pane(self: TGDBApp) -> WatchPane:
         if self._watch_pane is None:
