@@ -191,8 +191,11 @@ class WorkspaceMixin:
             # Both actions are always available; the distinction (limited vs
             # full load for array/map) is handled inside do_expand_some.
             locals_items: list[ContextMenuItem] = [
-                ContextMenuItem("Expand Some", action="locals:expand_some"),
-                ContextMenuItem("Expand All", action="locals:expand_all"),
+                ContextMenuItem("Expand", children=(
+                    ContextMenuItem("Some", action="locals:expand_some"),
+                    ContextMenuItem("All", action="locals:expand_all"),
+                )),
+                ContextMenuItem("Fold", action="locals:fold"),
             ]
             # Visual separator before the standard pane management items.
             pane_items[0] = replace(pane_items[0], separator_before=True)

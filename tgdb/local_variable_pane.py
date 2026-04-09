@@ -1290,7 +1290,11 @@ class LocalVariablePane(PaneBase):
                 await self.do_expand_all(child_node, _depth + 1)
 
     def do_fold(self, node: TreeNode) -> None:
-        """Collapse a tree node."""
+        """Recursively collapse *node* and every expanded descendant."""
+        for child_node in list(node.children):
+            c_data = child_node.data
+            if isinstance(c_data, dict) and c_data.get("has_children"):
+                self.do_fold(child_node)
         node.collapse()
 
     async def _load_children(self, node: TreeNode, varobj_name: str) -> None:
