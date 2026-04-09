@@ -66,8 +66,6 @@ class CommandsMixin:
             "_goto_line": self._cmd_goto_line,
             # New features
             "signal": self._cmd_signal,
-            "break-condition": self._cmd_break_condition,
-            "bc": self._cmd_break_condition,
             "watch": self._cmd_watch,
             "unwatch": self._cmd_unwatch,
             "memory": self._cmd_memory,
@@ -277,7 +275,6 @@ class CommandsMixin:
             "  :break :continue :next :step :finish :run :quit",
             "  :shell [cmd]  run shell command    :capturescreen [file.svg]",
             "  :signal SIGNAME     send signal to inferior (e.g. :signal SIGTERM)",
-            "  :bc N [expr]        set/clear breakpoint condition  (alias: :break-condition)",
             "  :watch expr         add expression to Watch pane",
             "  :unwatch N          remove watch expression by index",
             "  :memory addr [N]    inspect N bytes from addr in Memory pane",
@@ -299,26 +296,6 @@ class CommandsMixin:
         if not args:
             return "signal: requires a signal name or number (e.g. :signal SIGTERM)"
         self.gdb.send_signal(args[0])
-        return None
-
-    def _cmd_break_condition(self: TGDBApp, args: list) -> Optional[str]:
-        """Set or clear a breakpoint condition.
-
-        :bc N expr     — set condition ``expr`` on breakpoint N
-        :bc N          — clear condition on breakpoint N
-        """
-        if not args:
-            return "break-condition: requires breakpoint number (e.g. :bc 1 x>0)"
-        try:
-            num = int(args[0])
-        except ValueError:
-            return f"break-condition: {args[0]!r} is not a valid breakpoint number"
-        condition = " ".join(args[1:])
-        self.gdb.set_breakpoint_condition(num, condition)
-        if condition:
-            self._show_status(f"Breakpoint {num} condition: {condition}")
-        else:
-            self._show_status(f"Breakpoint {num} condition cleared")
         return None
 
     def _cmd_watch(self: TGDBApp, args: list) -> Optional[str]:

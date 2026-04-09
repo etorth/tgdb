@@ -506,18 +506,6 @@ class GDBController(ParsingMixin, VarobjMixin):
     def disable_breakpoint(self, number: int) -> None:
         self.mi_command(f"-break-disable {number}")
 
-    def set_breakpoint_condition(self, number: int, condition: str) -> None:
-        """Set or clear a condition on an existing breakpoint.
-
-        ``condition`` is the GDB expression to evaluate; pass an empty string
-        to remove the condition (``-break-condition N ""`` resets it).
-        """
-        if condition:
-            self.mi_command(f"-break-condition {number} {condition}")
-        else:
-            self.mi_command(f"-break-condition {number}")
-        asyncio.create_task(self._delayed_break_list())
-
     def send_signal(self, signal_name: str) -> None:
         """Send a signal to the inferior process via GDB's ``signal`` command."""
         self.send_input(f"signal {signal_name}\n")
