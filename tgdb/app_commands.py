@@ -66,8 +66,8 @@ class CommandsMixin:
             "_goto_line": self._cmd_goto_line,
             # New features
             "signal": self._cmd_signal,
-            "evaluate": self._cmd_watch,
-            "unevaluate": self._cmd_unwatch,
+            "evaluate": self._cmd_evaluate,
+            "unevaluate": self._cmd_unevaluate,
             "memory": self._cmd_memory,
             "disasm": self._cmd_disasm,
         }
@@ -275,7 +275,7 @@ class CommandsMixin:
             "  :break :continue :next :step :finish :run :quit",
             "  :shell [cmd]  run shell command    :capturescreen [file.svg]",
             "  :signal SIGNAME     send signal to inferior (e.g. :signal SIGTERM)",
-            "  :evaluate expr       add expression to Watch pane",
+            "  :evaluate expr       add expression to Evaluations pane",
             "  :unevaluate N        remove watch expression by index",
             "  :memory addr [N]    inspect N bytes from addr in Memory pane",
             "  :disasm [on|off]    toggle inline disassembly in source pane",
@@ -298,30 +298,30 @@ class CommandsMixin:
         self.gdb.send_signal(args[0])
         return None
 
-    def _cmd_watch(self: TGDBApp, args: list) -> Optional[str]:
-        """Add an expression to the Watch pane: :evaluate expr."""
+    def _cmd_evaluate(self: TGDBApp, args: list) -> Optional[str]:
+        """Add an expression to the Evaluations pane: :evaluate expr."""
         if not args:
             return "evaluate: requires an expression (e.g. :evaluate myvar)"
         expr = " ".join(args)
-        watch_pane = getattr(self, "_watch_pane", None)
-        if watch_pane is None:
-            return "evaluate: Watch pane is not open (add it from context menu first)"
-        watch_pane.add_expression(expr)
+        evaluate_pane = getattr(self, "_evaluate_pane", None)
+        if evaluate_pane is None:
+            return "evaluate: Evaluations pane is not open (add it from context menu first)"
+        evaluate_pane.add_expression(expr)
         self._show_status(f"Evaluating: {expr}")
         return None
 
-    def _cmd_unwatch(self: TGDBApp, args: list) -> Optional[str]:
-        """Remove a watch expression by 1-based index: :unevaluate N."""
+    def _cmd_unevaluate(self: TGDBApp, args: list) -> Optional[str]:
+        """Remove an expression by 1-based index: :unevaluate N."""
         if not args:
             return "unevaluate: requires an index (e.g. :unevaluate 1)"
         try:
             idx = int(args[0])
         except ValueError:
             return f"unevaluate: {args[0]!r} is not a valid index"
-        watch_pane = getattr(self, "_watch_pane", None)
-        if watch_pane is None:
-            return "unevaluate: Watch pane is not open"
-        removed = watch_pane.remove_expression(idx - 1)
+        evaluate_pane = getattr(self, "_evaluate_pane", None)
+        if evaluate_pane is None:
+            return "unevaluate: Evaluations pane is not open"
+        removed = evaluate_pane.remove_expression(idx - 1)
         if removed:
             self._show_status(f"Removed: {removed}")
         else:

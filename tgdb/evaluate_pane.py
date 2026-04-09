@@ -1,5 +1,5 @@
 """
-Watch pane — user-defined expression evaluator.
+Evaluate pane — user-defined expression evaluator.
 Expressions are evaluated via GDB -data-evaluate-expression on each stop.
 """
 
@@ -16,11 +16,11 @@ from .pane_base import PaneBase
 from .pane_utils import fit_cells
 
 
-class _WatchContent(Widget):
+class _EvaluateContent(Widget):
     """Renders the watch expression list (no title row)."""
 
     DEFAULT_CSS = """
-    _WatchContent {
+    _EvaluateContent {
         width: 1fr;
         height: 1fr;
         overflow: hidden;
@@ -53,12 +53,12 @@ class _WatchContent(Widget):
         return result
 
 
-class WatchPane(PaneBase):
-    """Watch pane: title bar + expression/value list."""
+class EvaluatePane(PaneBase):
+    """Evaluate pane: title bar + expression/value list."""
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         super().__init__(hl, **kwargs)
-        self._content = _WatchContent(hl)
+        self._content = _EvaluateContent(hl)
         self._expressions: list[str] = []
         self._values: list[str] = []
         self._eval_fn: Optional[Callable] = None

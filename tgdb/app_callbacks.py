@@ -309,8 +309,8 @@ class CallbacksMixin:
             self.gdb.request_source_files()
         asyncio.create_task(self._refresh_breakpoints_async())
         # Refresh watch and disasm panes when stopped
-        if self._watch_pane is not None:
-            asyncio.create_task(self._watch_pane.refresh_all())
+        if self._evaluate_pane is not None:
+            asyncio.create_task(self._evaluate_pane.refresh_all())
         if self._disasm_pane is not None:
             asyncio.create_task(
                 self._disasm_pane.refresh_disasm(

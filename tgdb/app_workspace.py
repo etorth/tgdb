@@ -21,7 +21,7 @@ from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
-from .watch_pane import WatchPane
+from .evaluate_pane import EvaluatePane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
 from .workspace import EmptyPane, PaneContainer, Splitter
@@ -88,11 +88,11 @@ class WorkspaceMixin:
         self._thread_pane.set_threads(self._current_threads)
         return self._thread_pane
 
-    def _make_watch_pane(self: TGDBApp) -> WatchPane:
-        if self._watch_pane is None:
-            self._watch_pane = WatchPane(self.hl)
-            self._watch_pane.set_eval_fn(self.gdb.eval_expr)
-        return self._watch_pane
+    def _make_evaluate_pane(self: TGDBApp) -> EvaluatePane:
+        if self._evaluate_pane is None:
+            self._evaluate_pane = EvaluatePane(self.hl)
+            self._evaluate_pane.set_eval_fn(self.gdb.eval_expr)
+        return self._evaluate_pane
 
     def _make_memory_pane(self: TGDBApp) -> MemoryPane:
         if self._memory_pane is None:

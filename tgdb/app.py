@@ -45,7 +45,7 @@ from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
-from .watch_pane import WatchPane
+from .evaluate_pane import EvaluatePane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
 from .workspace import PaneContainer, PaneDescriptor
@@ -173,7 +173,7 @@ class TGDBApp(
         self._current_threads: list[ThreadInfo] = []
         self._register_pane: Optional[RegisterPane] = None
         self._current_registers: list[RegisterInfo] = []
-        self._watch_pane: Optional[WatchPane] = None
+        self._evaluate_pane: Optional[EvaluatePane] = None
         self._memory_pane: Optional[MemoryPane] = None
         self._disasm_pane: Optional[DisasmPane] = None
         self._in_map_replay: bool = False
@@ -206,10 +206,10 @@ class TGDBApp(
                 lambda: self._thread_pane,
                 lambda: self.gdb.request_current_threads(report_error=False),
             ),
-            "watch": PaneDescriptor(
+            "evaluate": PaneDescriptor(
                 "Evaluations",
-                self._make_watch_pane,
-                lambda: self._watch_pane,
+                self._make_evaluate_pane,
+                lambda: self._evaluate_pane,
             ),
             "memory": PaneDescriptor(
                 "Memory",
@@ -229,7 +229,7 @@ class TGDBApp(
             "registers",
             "threads",
             "stack",
-            "watch",
+            "evaluate",
             "disasm",
             "memory",
         )
