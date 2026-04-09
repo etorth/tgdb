@@ -38,6 +38,7 @@ from .command_line_bar import (
     MessageDismissed,
 )
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
+from .file_browser_pane import OpenSourceFile
 from .gdb_controller import Breakpoint, Frame, LocalVariable, ThreadInfo, RegisterInfo
 
 _log = logging.getLogger("tgdb.app")
@@ -278,6 +279,14 @@ class CallbacksMixin:
             self._update_status_file_info()
         self._switch_to_tgdb()
 
+    def on_open_source_file(self, msg: OpenSourceFile) -> None:
+        """Open a source file selected from the file browser pane."""
+        src = self._get_source_view()
+        if src is not None:
+            src.load_file(msg.path)
+            self._update_status_file_info()
+        self._switch_to_tgdb()
+
     def on_file_dialog_closed(self, _: FileDialogClosed) -> None:
         self._file_dialog_pending = False
         self.query_one("#file-dlg", FileDialog).close()
@@ -308,6 +317,15 @@ class CallbacksMixin:
         if self._file_dialog_pending:
             self.gdb.request_source_files()
         asyncio.create_task(self._refresh_breakpoints_async())
+        # Refresh watch and disasm panes when stopped
+        if self._watch_pane is not None:
+            asyncio.create_task(self._watch_pane.refresh_all())
+        if self._disasm_pane is not None:
+            asyncio.create_task(
+                self._disasm_pane.refresh_disasm(
+                    path or "", frame.line
+                )
+            )
 
     async def _refresh_breakpoints_async(self) -> None:
         await asyncio.sleep(0.15)
@@ -355,6 +373,11 @@ class CallbacksMixin:
         if self._thread_pane is not None:
             self._thread_pane.set_threads(self._current_threads)
 
+    def _ui_mi_log(self, text: str) -> None:
+        """Forward raw MI line to the MI log pane if it is mounted."""
+        if self._mi_log_pane is not None:
+            self._mi_log_pane.append_line(text)
+
     def _ui_set_source_files(self, files: list[str]) -> None:
         try:
             fd = self.query_one("#file-dlg", FileDialog)
@@ -364,8 +387,13 @@ class CallbacksMixin:
         pending = self._file_dialog_pending
         self._file_dialog_pending = False
         if not pending or not fd.is_open:
+            # Still update the file browser pane if it's open
+            if self._file_browser_pane is not None:
+                self._file_browser_pane.set_files(files)
             return
         fd.files = files
+        if self._file_browser_pane is not None:
+            self._file_browser_pane.set_files(files)
 
     def _ui_load_source_file(self, path: str, line: int = 0) -> None:
         """Load a specific source file (from -file-list-exec-source-file)."""

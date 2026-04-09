@@ -64,6 +64,14 @@ class CommandsMixin:
             "up": gdb_cmd("up"),
             "down": gdb_cmd("down"),
             "_goto_line": self._cmd_goto_line,
+            # New features
+            "signal": self._cmd_signal,
+            "break-condition": self._cmd_break_condition,
+            "bc": self._cmd_break_condition,
+            "watch": self._cmd_watch,
+            "unwatch": self._cmd_unwatch,
+            "memory": self._cmd_memory,
+            "disasm": self._cmd_disasm,
         }
         for name, fn in cmds.items():
             self.cp.register_handler(name, fn)
@@ -247,6 +255,7 @@ class CommandsMixin:
             "  Ctrl-W   toggle split orientation",
             "  -/=      shrink/grow source pane  _/+  by 25%",
             "  F5=run  F6=continue  F7=finish  F8=next  F10=step",
+            "  Rs/Rn/Rc/Rf  reverse-step/next/continue/finish (needs record)",
             "  i        switch to GDB mode",
             "  s        switch to GDB scroll mode",
             "  :        command-line (CMD) mode",
@@ -267,6 +276,12 @@ class CommandsMixin:
             "  :map <F8> :next<Enter>  :imap <F8> :next<Enter>",
             "  :break :continue :next :step :finish :run :quit",
             "  :shell [cmd]  run shell command    :capturescreen [file.svg]",
+            "  :signal SIGNAME     send signal to inferior (e.g. :signal SIGTERM)",
+            "  :bc N [expr]        set/clear breakpoint condition  (alias: :break-condition)",
+            "  :watch expr         add expression to Watch pane",
+            "  :unwatch N          remove watch expression by index",
+            "  :memory addr [N]    inspect N bytes from addr in Memory pane",
+            "  :disasm [on|off]    toggle inline disassembly in source pane",
             "  :set clipboardpath=/path/to/xclip  (sets pyperclip backend + PATH)",
         ]
         sf = SourceFile("<help>", lines)
@@ -274,3 +289,102 @@ class CommandsMixin:
         src.exe_line = 0
         src.move_to(1)
         self._switch_to_tgdb()
+
+    # ------------------------------------------------------------------
+    # New feature commands
+    # ------------------------------------------------------------------
+
+    def _cmd_signal(self: TGDBApp, args: list) -> Optional[str]:
+        """Send a signal to the inferior: :signal SIGNAME (e.g. SIGTERM, 9)."""
+        if not args:
+            return "signal: requires a signal name or number (e.g. :signal SIGTERM)"
+        self.gdb.send_signal(args[0])
+        return None
+
+    def _cmd_break_condition(self: TGDBApp, args: list) -> Optional[str]:
+        """Set or clear a breakpoint condition.
+
+        :bc N expr     — set condition ``expr`` on breakpoint N
+        :bc N          — clear condition on breakpoint N
+        """
+        if not args:
+            return "break-condition: requires breakpoint number (e.g. :bc 1 x>0)"
+        try:
+            num = int(args[0])
+        except ValueError:
+            return f"break-condition: {args[0]!r} is not a valid breakpoint number"
+        condition = " ".join(args[1:])
+        self.gdb.set_breakpoint_condition(num, condition)
+        if condition:
+            self._show_status(f"Breakpoint {num} condition: {condition}")
+        else:
+            self._show_status(f"Breakpoint {num} condition cleared")
+        return None
+
+    def _cmd_watch(self: TGDBApp, args: list) -> Optional[str]:
+        """Add an expression to the Watch pane: :watch expr."""
+        if not args:
+            return "watch: requires an expression (e.g. :watch myvar)"
+        expr = " ".join(args)
+        watch_pane = getattr(self, "_watch_pane", None)
+        if watch_pane is None:
+            return "watch: Watch pane is not open (add it from context menu first)"
+        watch_pane.add_expression(expr)
+        self._show_status(f"Watching: {expr}")
+        return None
+
+    def _cmd_unwatch(self: TGDBApp, args: list) -> Optional[str]:
+        """Remove a watch expression by 1-based index: :unwatch N."""
+        if not args:
+            return "unwatch: requires an index (e.g. :unwatch 1)"
+        try:
+            idx = int(args[0])
+        except ValueError:
+            return f"unwatch: {args[0]!r} is not a valid index"
+        watch_pane = getattr(self, "_watch_pane", None)
+        if watch_pane is None:
+            return "unwatch: Watch pane is not open"
+        removed = watch_pane.remove_expression(idx - 1)
+        if removed:
+            self._show_status(f"Removed watch: {removed}")
+        else:
+            self._show_status(f"unwatch: no expression at index {idx}")
+        return None
+
+    def _cmd_memory(self: TGDBApp, args: list) -> Optional[str]:
+        """Inspect memory in the Memory pane: :memory addr [size].
+
+        addr may be a hex literal (0x...), decimal, or a GDB expression.
+        size defaults to 64 bytes.
+        """
+        if not args:
+            return "memory: requires an address (e.g. :memory 0x7fffffffd000)"
+        memory_pane = getattr(self, "_memory_pane", None)
+        if memory_pane is None:
+            return "memory: Memory pane is not open (add it from context menu first)"
+        addr = args[0]
+        try:
+            size = int(args[1]) if len(args) > 1 else 64
+        except ValueError:
+            return f"memory: invalid size {args[1]!r}"
+        memory_pane.set_address(addr, size)
+        return None
+
+    def _cmd_disasm(self: TGDBApp, args: list) -> Optional[str]:
+        """Toggle inline disassembly in the source pane: :disasm [on|off]."""
+        src = self._get_source_view()
+        if src is None:
+            return "disasm: no source pane available"
+        if args:
+            val = args[0].lower()
+            if val in ("on", "1", "yes"):
+                src.disasm_mode = True
+            elif val in ("off", "0", "no"):
+                src.disasm_mode = False
+            else:
+                return f"disasm: unknown value {args[0]!r} (use on/off)"
+        else:
+            src.disasm_mode = not getattr(src, "disasm_mode", False)
+        state = "on" if getattr(src, "disasm_mode", False) else "off"
+        self._show_status(f"Disassembly: {state}")
+        return None

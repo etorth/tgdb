@@ -21,6 +21,11 @@ from .local_variable_pane import LocalVariablePane
 from .register_pane import RegisterPane
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
+from .mi_log_pane import MILogPane
+from .file_browser_pane import FileBrowserPane
+from .watch_pane import WatchPane
+from .memory_pane import MemoryPane
+from .disasm_pane import DisasmPane
 from .workspace import EmptyPane, PaneContainer, Splitter
 
 if TYPE_CHECKING:
@@ -84,6 +89,36 @@ class WorkspaceMixin:
             self._thread_pane = ThreadPane(self.hl)
         self._thread_pane.set_threads(self._current_threads)
         return self._thread_pane
+
+    def _make_mi_log_pane(self: TGDBApp) -> MILogPane:
+        if self._mi_log_pane is None:
+            self._mi_log_pane = MILogPane(self.hl)
+        return self._mi_log_pane
+
+    def _make_file_browser_pane(self: TGDBApp) -> FileBrowserPane:
+        if self._file_browser_pane is None:
+            self._file_browser_pane = FileBrowserPane(self.hl)
+        # Populate with current source files if available
+        self._file_browser_pane.set_files(list(self.gdb.source_files))
+        return self._file_browser_pane
+
+    def _make_watch_pane(self: TGDBApp) -> WatchPane:
+        if self._watch_pane is None:
+            self._watch_pane = WatchPane(self.hl)
+            self._watch_pane.set_eval_fn(self.gdb.eval_expr)
+        return self._watch_pane
+
+    def _make_memory_pane(self: TGDBApp) -> MemoryPane:
+        if self._memory_pane is None:
+            self._memory_pane = MemoryPane(self.hl)
+            self._memory_pane.set_read_fn(self.gdb.read_memory_bytes_async)
+        return self._memory_pane
+
+    def _make_disasm_pane(self: TGDBApp) -> DisasmPane:
+        if self._disasm_pane is None:
+            self._disasm_pane = DisasmPane(self.hl)
+            self._disasm_pane.set_disasm_fn(self.gdb.request_disassembly_async)
+        return self._disasm_pane
 
     # ------------------------------------------------------------------
     # Pane queries

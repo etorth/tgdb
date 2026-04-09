@@ -105,6 +105,7 @@ class GDBController(ParsingMixin, VarobjMixin):
         self.on_stack: Callable[[list[Frame]], None] = lambda v: None
         self.on_threads: Callable[[list[ThreadInfo]], None] = lambda v: None
         self.on_registers: Callable[[list[RegisterInfo]], None] = lambda v: None
+        self.on_mi_log: Callable[[str], None] = lambda text: None
         self.on_exit: Callable[[], None] = lambda: None
         self.on_error: Callable[[str], None] = lambda m: None
 
@@ -268,6 +269,7 @@ class GDBController(ParsingMixin, VarobjMixin):
     def _dispatch(self, line: str) -> None:
         if not line:
             return
+        self.on_mi_log(line)
         rec = GDBMIParser.parse_response(line)
         t = rec["type"]
         if t == "result":
@@ -283,6 +285,10 @@ class GDBController(ParsingMixin, VarobjMixin):
         meta: dict[str, object] = {}
         if token is not None:
             meta = self._request_meta.pop(token, {})
+            # Resolve any future waiting on this token
+            fut = self._pending.pop(token, None)
+            if fut is not None and not fut.done():
+                fut.set_result(rec)
         _log.debug("MI result token=%s cls=%s", token, cls)
 
         if cls == "error":
@@ -412,6 +418,24 @@ class GDBController(ParsingMixin, VarobjMixin):
     ) -> int | None:
         return self._send_mi_command(cmd, report_error=report_error, kind=kind)
 
+    async def mi_command_async(self, cmd: str) -> dict:
+        """Send an MI command and await its result dict.
+
+        Returns the full GDB/MI record dict with keys ``type``, ``message``,
+        ``payload``, ``token``.  On timeout or error, returns an empty dict.
+        """
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        token = self._send_mi_command(cmd, report_error=False)
+        if token is None:
+            return {}
+        self._pending[token] = fut
+        try:
+            return await asyncio.wait_for(asyncio.shield(fut), timeout=5.0)
+        except (asyncio.TimeoutError, Exception):
+            self._pending.pop(token, None)
+            return {}
+
     # ------------------------------------------------------------------
     # Varobj commands — structured variable inspection
     # ------------------------------------------------------------------
@@ -483,6 +507,77 @@ class GDBController(ParsingMixin, VarobjMixin):
 
     def disable_breakpoint(self, number: int) -> None:
         self.mi_command(f"-break-disable {number}")
+
+    def set_breakpoint_condition(self, number: int, condition: str) -> None:
+        """Set or clear a condition on an existing breakpoint.
+
+        ``condition`` is the GDB expression to evaluate; pass an empty string
+        to remove the condition (``-break-condition N ""`` resets it).
+        """
+        if condition:
+            self.mi_command(f"-break-condition {number} {condition}")
+        else:
+            self.mi_command(f"-break-condition {number}")
+        asyncio.create_task(self._delayed_break_list())
+
+    def send_signal(self, signal_name: str) -> None:
+        """Send a signal to the inferior process via GDB's ``signal`` command."""
+        self.send_input(f"signal {signal_name}\n")
+
+    async def read_memory_bytes_async(
+        self, address: str, count: int = 64
+    ) -> list[dict]:
+        """Read *count* bytes from *address* using ``-data-read-memory-bytes``.
+
+        Returns a list of dicts with keys ``begin``, ``offset``, ``end``,
+        ``contents`` (hex string of raw bytes), as returned by GDB/MI.
+        """
+        result = await self.mi_command_async(
+            f"-data-read-memory-bytes {address} {count}"
+        )
+        payload = result.get("payload") or {}
+        raw = payload.get("memory") or []
+        if isinstance(raw, dict):
+            raw = [raw]
+        return raw if isinstance(raw, list) else []
+
+    async def request_disassembly_async(
+        self, filename: str, line: int, mode: int = 1
+    ) -> list[dict]:
+        """Disassemble the function containing *filename*:*line*.
+
+        *mode* follows GDB MI ``-data-disassemble`` mode flag:
+          0 = disasm only, 1 = disasm+source, 2 = disasm+source (opcode bytes),
+          4 = disasm only (opcode bytes)
+
+        Returns a list of ``src_and_asm_line`` dicts (mixed mode) or ``asm_insn``
+        dicts (pure disasm mode), as returned by GDB/MI.
+        """
+        result = await self.mi_command_async(
+            f"-data-disassemble -f {filename} -l {line} -n -1 -- {mode}"
+        )
+        payload = result.get("payload") or {}
+        asm = payload.get("asm_insns") or []
+        if isinstance(asm, dict):
+            asm = [asm]
+        return asm if isinstance(asm, list) else []
+
+    async def eval_expr(self, expr: str) -> str:
+        """Evaluate *expr* in the current GDB context.
+
+        Uses ``-data-evaluate-expression``; returns the value string or
+        ``<error: message>`` on failure.
+        """
+        result = await self.mi_command_async(
+            f"-data-evaluate-expression {expr!r}"
+        )
+        payload = result.get("payload") or {}
+        message = result.get("message", "")
+        if message == "error":
+            msg = payload.get("msg", "unknown error") if isinstance(payload, dict) else "error"
+            return f"<error: {msg}>"
+        val = payload.get("value", "") if isinstance(payload, dict) else str(payload)
+        return str(val)
 
     # ------------------------------------------------------------------
     # Internal helpers
