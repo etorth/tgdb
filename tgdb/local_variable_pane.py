@@ -1193,18 +1193,60 @@ class LocalVariablePane(PaneBase):
             return None
         return tree.get_node_at_line(line_no)
 
-    async def do_expand_some(self, node: TreeNode) -> None:
-        """Reload node's children using cfg.expandchildlimit (same as a normal expand)."""
+    async def do_expand_some(self, node: TreeNode, _depth: int = 0) -> None:
+        """Recursively expand with limited loading for array/map nodes.
+
+        For nodes whose displayhint is ``"array"`` or ``"map"`` the child load
+        is capped at ``cfg.expandchildlimit``; for every other type (structs,
+        classes, …) all children are loaded.  The same rule is applied
+        recursively to every child that itself has children.
+        """
+        if _depth > 20:  # sanity guard
+            return
         data = node.data
         if not isinstance(data, dict):
             return
         varobj = data.get("varobj", "")
         if not varobj or not self._var_list_children:
             return
-        # Mark as loaded so on_tree_node_expanded won't double-load when we expand().
-        data["loaded"] = True
-        await self._load_children(node, varobj)
-        node.expand()
+        dh = data.get("displayhint", "")
+        is_collection = dh in ("array", "map")
+        data["loaded"] = True  # prevent double-load from on_tree_node_expanded
+
+        if is_collection:
+            # _load_children respects cfg.expandchildlimit and adds a "load
+            # more" sentinel when there are additional children.
+            await self._load_children(node, varobj)
+            node.expand()
+        else:
+            # For non-collection types load every child with no limit.
+            prefix = varobj + "."
+            for k in [k for k in self._varobj_to_node if k.startswith(prefix)]:
+                self._varobj_to_node.pop(k, None)
+                self._dynamic_varobjs.discard(k)
+            node.remove_children()
+            try:
+                children, _ = await self._var_list_children(varobj, limit=0)
+            except Exception as e:
+                node.add_leaf(f"⚠ {e}")
+                node.expand()
+                return
+            if not children:
+                node.add_leaf("(empty)")
+                node.expand()
+                return
+            await self._add_children(node, children, dh)
+            node.expand()
+
+        # Recurse into expandable children; skip "load more" sentinels.
+        for child_node in list(node.children):
+            c_data = child_node.data
+            if (
+                isinstance(c_data, dict)
+                and c_data.get("has_children")
+                and not c_data.get("load_more")
+            ):
+                await self.do_expand_some(child_node, _depth + 1)
 
     async def do_expand_all(self, node: TreeNode, _depth: int = 0) -> None:
         """Expand node loading ALL children (no limit), then recursively do the same."""
@@ -1237,10 +1279,14 @@ class LocalVariablePane(PaneBase):
             return
         await self._add_children(node, children, dh)
         node.expand()
-        # Recurse into children that have their own children.
+        # Recurse into children that have their own children (skip sentinels).
         for child_node in list(node.children):
             c_data = child_node.data
-            if isinstance(c_data, dict) and c_data.get("has_children"):
+            if (
+                isinstance(c_data, dict)
+                and c_data.get("has_children")
+                and not c_data.get("load_more")
+            ):
                 await self.do_expand_all(child_node, _depth + 1)
 
     def do_fold(self, node: TreeNode) -> None:
