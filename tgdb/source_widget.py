@@ -429,9 +429,16 @@ class _SourceContent(SourceViewRendering, Widget):
 
     def on_resize(self, event: events.Resize) -> None:
         # Re-center on the executing line if one is set; otherwise keep
-        # the selected line visible.
+        # the selected line visible. Use the new size from the event directly
+        # since self.size may not yet reflect the post-layout dimensions.
+        h = max(1, event.size.height)
+        n = self._line_count()
         center_on = self.exe_line if self.exe_line > 0 else self.sel_line
-        self._ensure_visible(center_on)
+        idx = center_on - 1
+        if n > 0 and n >= h:
+            self._scroll_top = max(0, min(idx - h // 2, n - h))
+        else:
+            self._scroll_top = 0
         self.refresh()
 
     # ------------------------------------------------------------------
