@@ -193,7 +193,6 @@ class WorkspaceMixin:
             locals_items: list[ContextMenuItem] = [
                 ContextMenuItem("Expand Some", action="locals:expand_some"),
                 ContextMenuItem("Expand All", action="locals:expand_all"),
-                ContextMenuItem("Fold", action="locals:fold"),
             ]
             # Visual separator before the standard pane management items.
             pane_items[0] = replace(pane_items[0], separator_before=True)
