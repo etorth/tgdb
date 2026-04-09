@@ -54,22 +54,26 @@ class SourceViewRendering:
             return result
 
         render_top = self._scroll_top
-        # When GDB stops and _follow_exe is set, always re-centre to the
-        # executing line using the CURRENT widget height.  This handles the
-        # case where the pane was resized (e.g. a new pane was added) after
-        # exe_line was last set — render() fires with the updated size so the
-        # centering is always exact, with no dependency on Resize event timing.
-        if getattr(self, "_follow_exe", False) and self.exe_line > 0:
-            n = self._line_count()
-            idx = self.exe_line - 1
-            if n > 0 and n >= h:
+        n = len(sf.lines)
+
+        if h != getattr(self, "_last_render_h", h):
+            # Pane height changed (drag-resize or add/remove pane) —
+            # re-centre sel_line using the new height.
+            idx = self.sel_line - 1
+            if n >= h:
                 render_top = max(0, min(idx - h // 2, n - h))
             else:
                 render_top = 0
             self._scroll_top = render_top
-        if len(sf.lines) < h:
-            render_top = (len(sf.lines) - h) // 2
-            render_top = (len(sf.lines) - h) // 2
+        elif n >= h:
+            # Clamp to prevent blank ~-lines at bottom when pane grew.
+            render_top = max(0, min(render_top, n - h))
+            self._scroll_top = render_top
+
+        self._last_render_h = h
+
+        if n < h:
+            render_top = (n - h) // 2  # vertically centre small files
 
         for y in range(h):
             line_idx = render_top + y  # 0-based; may be negative for vertical centering

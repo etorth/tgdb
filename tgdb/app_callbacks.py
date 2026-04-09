@@ -300,8 +300,7 @@ class CallbacksMixin:
                 elif self.cfg.autosourcereload:
                     src.reload_if_changed()
                 src.exe_line = frame.line
-                src._follow_exe = True
-                src.move_to(frame.line, _follow=True)
+                src.move_to(frame.line)
                 self._update_status_file_info()
         # Refresh the full source-file list only when the file dialog is waiting
         # for it; on large binaries this MI query can block interactive GDB input
