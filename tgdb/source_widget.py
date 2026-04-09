@@ -89,6 +89,7 @@ class _SourceContent(SourceViewRendering, Widget):
         self._pane: Optional["SourceView"] = None
         self.source_file: Optional[SourceFile] = None
         self.exe_line: int = 0  # 1-based; 0 = none
+        self._follow_exe: bool = False  # re-center to exe_line on every render
         self.sel_line: int = 1  # 1-based cursor
         self._scroll_top: int = 0  # 0-based first visible line
         self._search_pattern: str = ""
@@ -231,12 +232,16 @@ class _SourceContent(SourceViewRendering, Widget):
         else:
             self._scroll_top = max(0, min(idx - h // 2, n - h))
 
-    def move_to(self, line: int) -> None:
+    def move_to(self, line: int, _follow: bool = False) -> None:
+        """Move cursor to line.  Pass _follow=True when called from GDB
+        stopped events to keep the executing line auto-centered on resize."""
         n = self._line_count()
         if n:
             self.sel_line = max(1, min(line, n))
         else:
             self.sel_line = max(1, min(line, 1))
+        if not _follow:
+            self._follow_exe = False
         self._ensure_visible(self.sel_line)
         self.refresh()
 
@@ -617,6 +622,7 @@ class _SourceContent(SourceViewRendering, Widget):
 _SRC_DELEGATE_SET = frozenset(
     {
         "exe_line",
+        "_follow_exe",
         "sel_line",
         "executing_line_display",
         "selected_line_display",
@@ -661,21 +667,6 @@ class SourceView(PaneBase):
 
     def on_key(self, event: events.Key) -> None:
         self._content.on_key(event)
-
-    def on_resize(self, event: events.Resize) -> None:
-        """Re-center the executing line whenever this pane is resized."""
-        c = self._content
-        exe = c.exe_line
-        center_on = exe if exe > 0 else c.sel_line
-        # Content height = pane height minus 1-row title bar
-        h = max(1, event.size.height - 1)
-        n = c._line_count()
-        idx = center_on - 1
-        if n > 0 and n >= h:
-            c._scroll_top = max(0, min(idx - h // 2, n - h))
-        else:
-            c._scroll_top = 0
-        c.refresh()
 
     def refresh(self, *args, **kwargs):
         # Refresh title bar in case source_file path changed.
