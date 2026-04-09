@@ -107,7 +107,6 @@ class _SourceContent(SourceViewRendering, Widget):
         self._last_jump_line: int = 1
         self._num_buf: str = ""
         self._await_g: bool = False  # true after first 'g' (for 'gg')
-        self._await_R: bool = False  # true after 'R' (for reverse-step Rs, Rn, Rc, Rf)
         self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)
         self._show_logo: bool = False  # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}
@@ -444,30 +443,12 @@ class _SourceContent(SourceViewRendering, Widget):
         # 'g' double-press for gg (goto top)
         if self._await_g:
             self._await_g = False
-            self._await_R = False
             if char == "g":
                 self._num_buf = ""
                 self.goto_top()
                 return True
             # Not 'gg' — treat buffered 'g' as nothing, reprocess current key
             self._num_buf = ""
-
-        # 'R' prefix for reverse execution (Rs/Rn/Rc/Rf)
-        if self._await_R:
-            self._await_R = False
-            if char == "s":
-                self.post_message(GDBCommand("reverse-step"))
-                return True
-            elif char == "n":
-                self.post_message(GDBCommand("reverse-next"))
-                return True
-            elif char == "c":
-                self.post_message(GDBCommand("reverse-continue"))
-                return True
-            elif char == "f":
-                self.post_message(GDBCommand("reverse-finish"))
-                return True
-            # Not a valid reverse key — fall through to normal handling
 
         # Numeric prefix: 1-9 always starts/extends a count; 0 extends an
         # already-started count (e.g. "20j" → count 20) but alone means col-0.
@@ -582,10 +563,6 @@ class _SourceContent(SourceViewRendering, Widget):
             self.post_message(GDBCommand("next"))
         elif key == "f10":
             self.post_message(GDBCommand("step"))
-        elif char == "R":
-            # 'R' prefix for reverse execution — arm the two-key handler
-            self._await_R = True
-            self._await_g = False
         else:
             consumed = False
 
