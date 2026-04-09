@@ -554,8 +554,10 @@ class GDBController(ParsingMixin, VarobjMixin):
         Uses ``-data-evaluate-expression``; returns the value string or
         ``<error: message>`` on failure.
         """
+        # GDB MI requires double-quoted strings; escape backslashes and quotes.
+        escaped = expr.replace("\\", "\\\\").replace('"', '\\"')
         result = await self.mi_command_async(
-            f"-data-evaluate-expression {expr!r}"
+            f'-data-evaluate-expression "{escaped}"'
         )
         payload = result.get("payload") or {}
         message = result.get("message", "")
