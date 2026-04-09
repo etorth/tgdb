@@ -254,6 +254,19 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         if _cmd_m:
             return await self._cmd_command(_cmd_m.group(1))
 
+        # :evaluate / :signal take an arbitrary expression — pass the raw
+        # remainder to avoid shlex stripping quotes inside the expression.
+        _raw_expr_m = re.match(
+            r"^(evaluate|signal)\b\s*(.*)", line, re.DOTALL | re.IGNORECASE
+        )
+        if _raw_expr_m:
+            _ecmd = _raw_expr_m.group(1).lower()
+            _erest = _raw_expr_m.group(2)
+            handler = self._handlers.get(_ecmd)
+            if handler is not None:
+                return handler([_erest] if _erest else [])
+            return None
+
         # :map / :imap need raw handling so spaces in the RHS are preserved.
         _map_m = re.match(
             r"^(imap|im|map)\b\s*(\S+)\s*(.*)", line, re.DOTALL | re.IGNORECASE
