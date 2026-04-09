@@ -188,14 +188,22 @@ class WorkspaceMixin:
             and node.data.get("has_children")
             and not node.data.get("load_more")
         ):
-            limit_cfg = getattr(self._context_menu_target, "_cfg", None)
-            limit_val = getattr(limit_cfg, "expandchildlimit", 0) if limit_cfg else 0
-            limit_str = str(limit_val) if limit_val > 0 else "all"
-            locals_items: list[ContextMenuItem] = [
-                ContextMenuItem(f"Expand Some ({limit_str})", action="locals:expand_some"),
-                ContextMenuItem("Expand All", action="locals:expand_all"),
-                ContextMenuItem("Fold", action="locals:fold"),
-            ]
+            # "Expand Some" (limited load) only makes sense for collection
+            # types that can have many children.  Plain structs/classes always
+            # expand fully in one shot.
+            displayhint = node.data.get("displayhint", "")
+            is_collection = displayhint in ("array", "map")
+            if is_collection:
+                locals_items: list[ContextMenuItem] = [
+                    ContextMenuItem("Expand Some", action="locals:expand_some"),
+                    ContextMenuItem("Expand All", action="locals:expand_all"),
+                    ContextMenuItem("Fold", action="locals:fold"),
+                ]
+            else:
+                locals_items = [
+                    ContextMenuItem("Expand", action="locals:expand_all"),
+                    ContextMenuItem("Fold", action="locals:fold"),
+                ]
             # Visual separator before the standard pane management items.
             pane_items[0] = replace(pane_items[0], separator_before=True)
             return locals_items + pane_items
