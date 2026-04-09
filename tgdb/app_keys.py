@@ -372,7 +372,11 @@ class KeyRoutingMixin:
                 clicked_widget = event.widget
             target = self._find_workspace_item(clicked_widget)
 
-            selected = self.screen.get_selected_text()
+            try:
+                selected = self.screen.get_selected_text()
+            except (IndexError, Exception):
+                self.screen.clear_selection()
+                selected = None
             if selected:
                 # Selected text anywhere → copy to system clipboard.
                 _copy_clipboard(self, selected)
