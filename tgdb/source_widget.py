@@ -427,20 +427,6 @@ class _SourceContent(SourceViewRendering, Widget):
 
     # Width of the line-number field (minimum 1, grows with file size)
 
-    def on_resize(self, event: events.Resize) -> None:
-        # Re-center on the executing line if one is set; otherwise keep
-        # the selected line visible. Use the new size from the event directly
-        # since self.size may not yet reflect the post-layout dimensions.
-        h = max(1, event.size.height)
-        n = self._line_count()
-        center_on = self.exe_line if self.exe_line > 0 else self.sel_line
-        idx = center_on - 1
-        if n > 0 and n >= h:
-            self._scroll_top = max(0, min(idx - h // 2, n - h))
-        else:
-            self._scroll_top = 0
-        self.refresh()
-
     # ------------------------------------------------------------------
     # Key handling
     # ------------------------------------------------------------------
@@ -675,6 +661,21 @@ class SourceView(PaneBase):
 
     def on_key(self, event: events.Key) -> None:
         self._content.on_key(event)
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Re-center the executing line whenever this pane is resized."""
+        c = self._content
+        exe = c.exe_line
+        center_on = exe if exe > 0 else c.sel_line
+        # Content height = pane height minus 1-row title bar
+        h = max(1, event.size.height - 1)
+        n = c._line_count()
+        idx = center_on - 1
+        if n > 0 and n >= h:
+            c._scroll_top = max(0, min(idx - h // 2, n - h))
+        else:
+            c._scroll_top = 0
+        c.refresh()
 
     def refresh(self, *args, **kwargs):
         # Refresh title bar in case source_file path changed.
