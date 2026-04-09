@@ -1235,7 +1235,7 @@ class LocalVariablePane(PaneBase):
                 node.add_leaf("(empty)")
                 node.expand()
                 return
-            await self._add_children(node, children, dh)
+            await self._add_children(node, children, dh, flat_limit=0)
             node.expand()
 
         # Recurse into expandable children; skip "load more" sentinels.
@@ -1277,7 +1277,7 @@ class LocalVariablePane(PaneBase):
             node.add_leaf("(empty)")
             node.expand()
             return
-        await self._add_children(node, children, dh)
+        await self._add_children(node, children, dh, flat_limit=0)
         node.expand()
         # Recurse into children that have their own children (skip sentinels).
         for child_node in list(node.children):
@@ -1395,6 +1395,7 @@ class LocalVariablePane(PaneBase):
         node: TreeNode,
         children: list[dict],
         displayhint: str = "",
+        flat_limit: Optional[int] = None,
     ) -> None:
         """Add child nodes to *node*.
 
@@ -1406,6 +1407,12 @@ class LocalVariablePane(PaneBase):
         * ``"array"`` / ``""`` / anything else — show each child individually
           with its ``exp`` label, flattening access-specifier pseudo-nodes
           (``public`` / ``private`` / ``protected``) inline.
+
+        *flat_limit* controls how many grandchildren to fetch when flattening
+        access-specifier pseudo-nodes.  ``None`` → use ``cfg.expandchildlimit``
+        (normal interactive expansion); ``0`` → no limit (used by
+        ``do_expand_all`` / ``do_expand_some`` on non-collection types so that
+        all struct/class members are always shown).
         """
         if displayhint == "map":
             # GDB sends alternating key/value children.  Pair them.
@@ -1474,10 +1481,15 @@ class LocalVariablePane(PaneBase):
 
             if exp in _ACCESS and has_children:
                 try:
-                    grandchildren, more = await self._var_list_children(
-                        child_name, limit=self._cfg.expandchildlimit
+                    acc_limit = (
+                        self._cfg.expandchildlimit
+                        if flat_limit is None
+                        else flat_limit
                     )
-                    await self._add_children(node, grandchildren)
+                    grandchildren, more = await self._var_list_children(
+                        child_name, limit=acc_limit
+                    )
+                    await self._add_children(node, grandchildren, flat_limit=flat_limit)
                     if more:
                         # The access-specifier block has more members than
                         # expandchildlimit — add a "load more" sentinel so the
