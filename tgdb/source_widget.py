@@ -612,47 +612,6 @@ class _SourceContent(SourceViewRendering, Widget):
     # Hover tooltip: evaluate word under mouse cursor
     # ------------------------------------------------------------------
 
-    _WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\[[^\]]*\])?")
-
-    def on_mouse_move(self, event: events.MouseMove) -> None:
-        """Show the value of the identifier under the mouse cursor in the status bar."""
-        import asyncio
-        sf = self.source_file
-        if sf is None or not sf.lines:
-            return
-        # Convert widget-relative coords to source line/column
-        line_idx = self._scroll_top + int(event.y)  # 0-based index
-        col = self._col_offset + int(event.x) - 6   # subtract gutter width (~6)
-        if col < 0:
-            col = 0
-        if line_idx < 0 or line_idx >= len(sf.lines):
-            return
-        raw_line = sf.lines[line_idx]
-        # Find the word at column position
-        word = None
-        for m in self._WORD_RE.finditer(raw_line):
-            if m.start() <= col <= m.end():
-                word = m.group()
-                break
-        if not word or word == getattr(self, "_last_hover_word", None):
-            return
-        self._last_hover_word = word
-        # Evaluate asynchronously; guard against running inferior
-        app = self.app
-        if getattr(app, "gdb", None) is None:
-            return
-        if getattr(app.gdb, "_inferior_running", True):
-            return
-        asyncio.create_task(self._eval_hover(word))
-
-    async def _eval_hover(self, word: str) -> None:
-        try:
-            value = await self.app.gdb.eval_expr(word)
-            if value:
-                self.post_message(StatusMessage(f"{word} = {value}"))
-        except Exception:
-            pass
-
 
 # ---------------------------------------------------------------------------
 # Public pane wrapper
