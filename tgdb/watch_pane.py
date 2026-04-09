@@ -64,7 +64,7 @@ class WatchPane(PaneBase):
         self._eval_fn: Optional[Callable] = None
 
     def title(self) -> str:
-        return "WATCH"
+        return "EVALUATIONS"
 
     def compose(self):
         yield from super().compose()

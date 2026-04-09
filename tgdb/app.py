@@ -207,7 +207,7 @@ class TGDBApp(
                 lambda: self.gdb.request_current_threads(report_error=False),
             ),
             "watch": PaneDescriptor(
-                "Watch",
+                "Evaluations",
                 self._make_watch_pane,
                 lambda: self._watch_pane,
             ),
