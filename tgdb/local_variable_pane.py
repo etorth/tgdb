@@ -1176,6 +1176,77 @@ class LocalVariablePane(PaneBase):
             return
         asyncio.create_task(self._load_children(node, varobj))
 
+    # ------------------------------------------------------------------
+    # Right-click context menu helpers
+    # ------------------------------------------------------------------
+
+    def _get_node_at_screen(self, screen_x: int, screen_y: int) -> Optional[TreeNode]:
+        """Return the tree node whose row contains (screen_x, screen_y), or None."""
+        try:
+            tree = self.query_one(Tree)
+        except Exception:
+            return None
+        tree_region = tree.region  # screen-absolute in Textual
+        y = screen_y - tree_region.y
+        line_no = y + int(tree.scroll_offset.y)
+        if line_no < 0:
+            return None
+        return tree.get_node_at_line(line_no)
+
+    async def do_expand_some(self, node: TreeNode) -> None:
+        """Reload node's children using cfg.expandchildlimit (same as a normal expand)."""
+        data = node.data
+        if not isinstance(data, dict):
+            return
+        varobj = data.get("varobj", "")
+        if not varobj or not self._var_list_children:
+            return
+        # Mark as loaded so on_tree_node_expanded won't double-load when we expand().
+        data["loaded"] = True
+        await self._load_children(node, varobj)
+        node.expand()
+
+    async def do_expand_all(self, node: TreeNode, _depth: int = 0) -> None:
+        """Expand node loading ALL children (no limit), then recursively do the same."""
+        if _depth > 20:  # sanity guard against runaway recursion
+            return
+        data = node.data
+        if not isinstance(data, dict):
+            return
+        varobj = data.get("varobj", "")
+        if not varobj or not self._var_list_children:
+            return
+        dh = data.get("displayhint", "")
+        data["loaded"] = True
+        # Purge stale child entries before rebuilding.
+        prefix = varobj + "."
+        stale = [k for k in self._varobj_to_node if k.startswith(prefix)]
+        for k in stale:
+            self._varobj_to_node.pop(k, None)
+            self._dynamic_varobjs.discard(k)
+        node.remove_children()
+        try:
+            children, _ = await self._var_list_children(varobj, limit=0)
+        except Exception as e:
+            node.add_leaf(f"⚠ {e}")
+            node.expand()
+            return
+        if not children:
+            node.add_leaf("(empty)")
+            node.expand()
+            return
+        await self._add_children(node, children, dh)
+        node.expand()
+        # Recurse into children that have their own children.
+        for child_node in list(node.children):
+            c_data = child_node.data
+            if isinstance(c_data, dict) and c_data.get("has_children"):
+                await self.do_expand_all(child_node, _depth + 1)
+
+    def do_fold(self, node: TreeNode) -> None:
+        """Collapse a tree node."""
+        node.collapse()
+
     async def _load_children(self, node: TreeNode, varobj_name: str) -> None:
         # Purge stale child entries from previous load before refreshing.
         prefix = varobj_name + "."

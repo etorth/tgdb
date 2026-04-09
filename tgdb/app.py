@@ -163,6 +163,7 @@ class TGDBApp(
         self._file_dialog_pending: bool = False
         self._inf_tty_fd: Optional[int] = None
         self._context_menu_target: Optional[Widget] = None
+        self._locals_context_node: Optional[object] = None  # TreeNode | None
         self._source_view: Optional[SourceView] = None
         self._gdb_widget: Optional[GDBWidget] = None
         self._locals_pane: Optional[LocalVariablePane] = None

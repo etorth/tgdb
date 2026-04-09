@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from typing import Optional, TYPE_CHECKING
 
 from textual.widget import Widget
@@ -170,12 +172,35 @@ class WorkspaceMixin:
             ContextMenuItem("◧ Left", action="split:left"),
             ContextMenuItem("◨ Right", action="split:right"),
         ]
-        return [
+        pane_items: list[ContextMenuItem] = [
             ContextMenuItem("Add", children=tuple(add_children)),
             ContextMenuItem("Split", children=tuple(split_children)),
             ContextMenuItem("Hide", action="hide", separator_before=True),
             ContextMenuItem("Delete", action="delete"),
         ]
+
+        # Prepend locals-node actions when right-clicking an expandable node.
+        node = getattr(self, "_locals_context_node", None)
+        if (
+            isinstance(self._context_menu_target, LocalVariablePane)
+            and node is not None
+            and isinstance(getattr(node, "data", None), dict)
+            and node.data.get("has_children")
+            and not node.data.get("load_more")
+        ):
+            limit_cfg = getattr(self._context_menu_target, "_cfg", None)
+            limit_val = getattr(limit_cfg, "expandchildlimit", 0) if limit_cfg else 0
+            limit_str = str(limit_val) if limit_val > 0 else "all"
+            locals_items: list[ContextMenuItem] = [
+                ContextMenuItem(f"Expand Some ({limit_str})", action="locals:expand_some"),
+                ContextMenuItem("Expand All", action="locals:expand_all"),
+                ContextMenuItem("Fold", action="locals:fold"),
+            ]
+            # Visual separator before the standard pane management items.
+            pane_items[0] = replace(pane_items[0], separator_before=True)
+            return locals_items + pane_items
+
+        return pane_items
 
     def _open_context_menu(self: TGDBApp, screen_x: int, screen_y: int) -> None:
         menu = self._get_context_menu()
@@ -364,6 +389,20 @@ class WorkspaceMixin:
             return
 
         action = msg.action
+
+        if action.startswith("locals:"):
+            node = getattr(self, "_locals_context_node", None)
+            self._locals_context_node = None
+            if node is not None and isinstance(target, LocalVariablePane):
+                sub = action[len("locals:"):]
+                if sub == "expand_some":
+                    asyncio.create_task(target.do_expand_some(node))
+                elif sub == "expand_all":
+                    asyncio.create_task(target.do_expand_all(node))
+                elif sub == "fold":
+                    target.do_fold(node)
+            self._restore_focus_after_context_menu()
+            return
 
         if action.startswith("add:"):
             pane_kind = action.split(":", 1)[1]

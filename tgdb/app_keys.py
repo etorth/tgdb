@@ -8,6 +8,7 @@ from textual import events
 from textual.css.query import NoMatches
 
 from .command_line_bar import CommandLineBar, CommandSubmit
+from .local_variable_pane import LocalVariablePane
 
 if TYPE_CHECKING:
     from .app import TGDBApp
@@ -394,6 +395,15 @@ class KeyRoutingMixin:
 
             if target is not None:
                 self._context_menu_target = target
+                # If the right-click landed on a LocalVariablePane, remember
+                # which tree node (if any) was hit so the context menu can
+                # offer node-specific actions.
+                if isinstance(target, LocalVariablePane):
+                    self._locals_context_node = target._get_node_at_screen(
+                        screen_x, screen_y
+                    )
+                else:
+                    self._locals_context_node = None
                 self._open_context_menu(screen_x, screen_y)
                 event.stop()
                 return
