@@ -296,6 +296,11 @@ class LayoutMixin:
         self._window_shift = msg.new_before_size - (axis // 2)
         self.cfg.winsplit = "free"
         self._validate_window_shift(is_horizontal)
+        # Apply absolute pixel heights (same as -/= keys) so Textual fires
+        # proper Resize events on SourceView and _SourceContent.  Without
+        # this, _apply_orientation() leaves fractional "fr" heights that
+        # don't reliably trigger Resize, leaving blank rows in the source pane.
+        self._apply_split()
 
     def on_resize(self: TGDBApp, event: events.Resize) -> None:
         self._apply_split()
