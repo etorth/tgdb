@@ -41,6 +41,11 @@ from .pane_base import PaneBase
 
 _log = logging.getLogger("tgdb.locals")
 
+# Label suffix added to nodes whose binding is shadowed by an inner-scope
+# variable with the same name.  Used in set_label() calls and in
+# _sync_shadow_labels() to add/remove the suffix on update cycles.
+_SHADOW_SUFFIX = "  ← shadowed"
+
 
 # ---------------------------------------------------------------------------
 # Varobj display helpers
@@ -63,6 +68,15 @@ def _suppress_children(varobj_info: dict) -> bool:
     (``0x... "hello"``), so expansion is simply unnecessary, not harmful.
     """
     return varobj_info.get("displayhint", "") == "string"
+
+
+def _is_child_of_any(varobj: str, parent_set: set[str]) -> bool:
+    """Return True if *varobj* is a GDB child of any varobj in *parent_set*.
+
+    GDB child varobjs are named ``<parent>.<something>``, so a simple prefix
+    check is sufficient.
+    """
+    return any(varobj.startswith(parent + ".") for parent in parent_set)
 
 
 class LocalVariablePane(PaneBase):
@@ -356,33 +370,19 @@ class LocalVariablePane(PaneBase):
                     )
 
         # Step 3: update non-dynamic varobjs and children of dynamic roots.
-        # Iterate _varobj_to_node which includes roots AND children.
-        # Skip:
-        #   - dynamic roots (handled above)
-        #   - children of garbage dynamic roots (unsafe — can crash GDB)
-        #   - children of fully-updated dynamic roots (already covered)
-        safe_to_update: list[str] = []
-        for vo in self._varobj_to_node:
-            if vo in self._dynamic_varobjs:
-                continue
-            skip = False
-            for dyn_root in safe_dynamic_updated:
-                if vo.startswith(dyn_root + "."):
-                    skip = True
-                    break
-            if not skip:
-                for dyn_root in garbage_dynamic:
-                    if vo.startswith(dyn_root + "."):
-                        _log.debug("Skipping garbage child varobj %s in update", vo)
-                        skip = True
-                        break
-            if skip:
-                continue
-            safe_to_update.append(vo)
+        # Skip dynamic roots (handled above), children of garbage dynamic
+        # roots (unsafe — can crash GDB), and children of fully-updated
+        # dynamic roots (already covered by -var-update on the root).
+        safe_to_update = [
+            varobj for varobj in self._varobj_to_node
+            if varobj not in self._dynamic_varobjs
+            and not _is_child_of_any(varobj, safe_dynamic_updated)
+            and not _is_child_of_any(varobj, garbage_dynamic)
+        ]
 
-        for vo in safe_to_update:
+        for varobj in safe_to_update:
             try:
-                result = await self._var_update(vo, timeout=10.0)
+                result = await self._var_update(varobj, timeout=10.0)
                 changelist.extend(result)
             except Exception as exc:
                 err = str(exc)
@@ -391,36 +391,31 @@ class LocalVariablePane(PaneBase):
                     # re-created after a type change or scope transition).
                     # Purge it and all its children so we don't keep
                     # hammering GDB with stale names.
-                    _log.debug("Purging stale varobj %s: %s", vo, exc)
-                    self._purge_varobj_subtree(vo)
+                    _log.debug("Purging stale varobj %s: %s", varobj, exc)
+                    self._purge_varobj_subtree(varobj)
                 else:
-                    _log.warning("Skipped varobj %s during update: %s", vo, exc)
+                    _log.warning("Skipped varobj %s during update: %s", varobj, exc)
 
         return changelist
 
-    async def _update_variables(
+    async def _eval_variable_addresses(
         self,
         gen: int,
-        frame: Frame | None,
         variables: list[LocalVariable],
-    ) -> None:
-        """Incremental update: keep unchanged variables as-is, handle changes."""
-        if self._rebuild_gen != gen:
-            return
+    ) -> dict[str, str] | None:
+        """Evaluate the stack address of each unique variable name.
 
-        try:
-            tree = self.query_one(Tree)
-        except Exception:
-            return
-
-        # ── 1. Evaluate addresses for innermost binding of each unique name ─
+        Returns a name→address dict, or ``None`` if the generation becomes
+        stale mid-way (caller should abort the current rebuild cycle).
+        Falls back to the variable's type string when ``&name`` fails.
+        """
         addrs: dict[str, str] = {}
         if self._var_eval:
             for var in variables:
                 if var.name in addrs:
                     continue
                 if self._rebuild_gen != gen:
-                    return
+                    return None
                 try:
                     addrs[var.name] = await self._var_eval(f"&{var.name}")
                 except Exception:
@@ -429,66 +424,79 @@ class LocalVariablePane(PaneBase):
             for var in variables:
                 if var.name not in addrs:
                     addrs[var.name] = var.type
+        return addrs
 
-        if self._rebuild_gen != gen:
-            return
+    async def _filter_by_decl_lines(
+        self,
+        variables: list[LocalVariable],
+        frame: Frame | None,
+    ) -> list[LocalVariable]:
+        """Remove variables whose constructor hasn't run yet.
 
-        # ── 1b. Fetch DWARF declaration lines and filter out variables that
-        #         haven't been initialized yet (current line ≤ decl line).
-        #
-        # GDB stops BEFORE executing the indicated line. So if the program is
-        # stopped at line N, lines 1..N-1 have already run. A variable declared
-        # on line D has had its constructor run only if N > D.
-        #
-        # We only filter non-argument variables: function arguments are always
-        # valid once the function is entered.
-        if frame:
-            current_line = frame.line
-        else:
-            current_line = 0
-        if current_line > 0 and self._get_decl_lines:
-            try:
-                decl_lines = await self._get_decl_lines()
-            except Exception as exc:
-                _log.debug("get_decl_lines failed: %s", exc)
-                decl_lines = {}
-            if decl_lines:
-                filtered: list[LocalVariable] = []
-                # Track which names we've already evaluated as innermost.
-                # GDB returns variables innermost-first; the FIRST occurrence
-                # of a name is the innermost binding.  The decl-line check
-                # applies only to that innermost occurrence: outer (shadowed)
-                # bindings with the same name are always already initialized.
-                innermost_seen: set[str] = set()
-                for var in variables:
-                    if var.is_arg:
-                        filtered.append(var)
-                        continue
-                    if var.name in innermost_seen:
-                        # Outer shadowed binding — always initialized, always show.
-                        filtered.append(var)
-                        continue
-                    innermost_seen.add(var.name)
-                    decl = decl_lines.get(var.name, 0)
-                    if decl > 0 and current_line <= decl:
-                        _log.debug(
-                            "Hiding uninitialized var %s (decl=%d current=%d)",
-                            var.name,
-                            decl,
-                            current_line,
-                        )
-                    else:
-                        filtered.append(var)
-                variables = filtered
+        GDB stops *before* executing the current source line.  A variable
+        declared on line D has had its constructor called only when
+        ``current_line > D``.  Function arguments are always valid.
 
-        if self._rebuild_gen != gen:
-            return
+        Returns the filtered list unchanged when no decl-line info is
+        available (no frame, zero line number, or callback not wired up).
+        """
+        current_line = frame.line if frame else 0
+        if not (current_line > 0 and self._get_decl_lines):
+            return variables
+        try:
+            decl_lines = await self._get_decl_lines()
+        except Exception as exc:
+            _log.debug("get_decl_lines failed: %s", exc)
+            return variables
+        if not decl_lines:
+            return variables
+        filtered: list[LocalVariable] = []
+        # GDB returns variables innermost-first; the first occurrence of a
+        # name is the innermost binding.  Apply the decl-line check only to
+        # that binding — outer shadowed bindings are always already initialized.
+        innermost_seen: set[str] = set()
+        for var in variables:
+            if var.is_arg:
+                filtered.append(var)
+                continue
+            if var.name in innermost_seen:
+                filtered.append(var)  # outer shadowed binding — always valid
+                continue
+            innermost_seen.add(var.name)
+            decl = decl_lines.get(var.name, 0)
+            if decl > 0 and current_line <= decl:
+                _log.debug(
+                    "Hiding uninitialized var %s (decl=%d current=%d)",
+                    var.name, decl, current_line,
+                )
+            else:
+                filtered.append(var)
+        return filtered
 
-        # ── 2. Build complete binding list ─────────────────────────────────
-        # GDB returns variables innermost-first; duplicate names are outer
-        # (shadowed) bindings.  For outer bindings we need their address —
-        # &name always returns the innermost, so we look them up from the
-        # addresses already stored as keys in _tracked.
+    def _compute_bindings(
+        self,
+        variables: list[LocalVariable],
+        addrs: dict[str, str],
+    ) -> tuple[
+        list[tuple[str, str, LocalVariable]],
+        set[tuple[str, str]],
+        set[tuple[str, str]],
+    ]:
+        """Build the complete binding list and determine shadow status.
+
+        GDB returns variables innermost-first; duplicate names are outer
+        (shadowed) bindings.  For outer bindings ``&name`` returns the
+        innermost address, so we recover the outer address from ``_tracked``.
+
+        Returns ``(new_bindings, new_binding_keys, shadowed_keys)`` where:
+
+        * ``new_bindings`` — list of ``(name, addr, var)`` for every binding
+        * ``new_binding_keys`` — set of ``(name, addr)`` pairs
+        * ``shadowed_keys`` — subset of keys whose ``addr`` is not the
+          innermost address for that name
+        """
+        # Collect outer-binding addresses from _tracked (those that differ
+        # from the current innermost address returned by &name).
         tracked_outer: dict[str, list[str]] = {}
         for (tname, taddr) in self._tracked:
             if addrs.get(tname) != taddr:
@@ -505,12 +513,11 @@ class LocalVariablePane(PaneBase):
                 if outer_addrs:
                     outer_addr = outer_addrs.pop(0)
                     new_bindings.append((var.name, outer_addr, var))
-                # else: unknown outer binding address (only when attaching
-                # mid-execution inside an inner scope we've never seen) — skip.
+                # else: unknown outer binding (attaching mid-execution inside
+                # an inner scope we've never seen before) — skip.
 
-        # ── 3. Determine shadow status ─────────────────────────────────────
-        # A binding (name, addr) is shadowed iff addr != innermost addr for
-        # that name, i.e. there exists a more-inner binding with the same name.
+        # A binding is shadowed when its addr differs from the innermost addr
+        # for that name (i.e. a more-inner binding with the same name exists).
         new_binding_keys: set[tuple[str, str]] = set()
         shadowed_keys: set[tuple[str, str]] = set()
         for bname, baddr, _ in new_bindings:
@@ -518,6 +525,42 @@ class LocalVariablePane(PaneBase):
             new_binding_keys.add(key)
             if addrs.get(bname) != baddr:
                 shadowed_keys.add(key)
+
+        return new_bindings, new_binding_keys, shadowed_keys
+
+    async def _update_variables(
+        self,
+        gen: int,
+        frame: Frame | None,
+        variables: list[LocalVariable],
+    ) -> None:
+        """Incremental update: keep unchanged variables as-is, handle changes."""
+        if self._rebuild_gen != gen:
+            return
+
+        try:
+            tree = self.query_one(Tree)
+        except Exception:
+            return
+
+        # ── 1. Evaluate stack addresses ────────────────────────────────────
+        addrs = await self._eval_variable_addresses(gen, variables)
+        if addrs is None:
+            return  # generation became stale during address evaluation
+
+        if self._rebuild_gen != gen:
+            return
+
+        # ── 1b. Filter variables not yet constructed (decl-line check) ─────
+        variables = await self._filter_by_decl_lines(variables, frame)
+
+        if self._rebuild_gen != gen:
+            return
+
+        # ── 2+3. Build binding list and compute shadow status ──────────────
+        new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(
+            variables, addrs
+        )
 
         # ── 4. Compute new frame key ───────────────────────────────────────
         new_frame_key: tuple | None = None
@@ -698,7 +741,7 @@ class LocalVariablePane(PaneBase):
                 # and must be registered normally.
                 bval = bvar.value or ""
                 if "<error reading variable:" in bval:
-                    shadow_suffix = "  ← shadowed" if (bname, baddr) in shadowed_keys else ""
+                    shadow_suffix = _SHADOW_SUFFIX if (bname, baddr) in shadowed_keys else ""
                     placeholder = tree.root.add_leaf(
                         f"{bvar.name} = <not yet initialized>{shadow_suffix}",
                         data={"varobj": "", "exp": bvar.name, "has_children": False, "displayhint": ""},
@@ -735,7 +778,7 @@ class LocalVariablePane(PaneBase):
                             await self._var_delete(varobj_name)
                         except Exception:
                             pass
-                    shadow_suffix = "  ← shadowed" if (bname, baddr) in shadowed_keys else ""
+                    shadow_suffix = _SHADOW_SUFFIX if (bname, baddr) in shadowed_keys else ""
                     placeholder = tree.root.add_leaf(
                         f"{bvar.name} = <not yet initialized>{shadow_suffix}",
                         data={"varobj": "", "exp": bvar.name, "has_children": False, "displayhint": ""},
@@ -762,14 +805,11 @@ class LocalVariablePane(PaneBase):
                 has_children = (
                     numchild > 0 or info.get("dynamic", "0") == "1"
                 ) and not _suppress_children(info)
-                dh = info.get("displayhint", "")
+                displayhint = info.get("displayhint", "")
 
                 # New bindings from to_add are always innermost (non-shadowed)
                 # in normal stepping flow; add shadow suffix defensively if not.
-                if (bname, baddr) in shadowed_keys:
-                    shadow_suffix = "  ← shadowed"
-                else:
-                    shadow_suffix = ""
+                shadow_suffix = _SHADOW_SUFFIX if (bname, baddr) in shadowed_keys else ""
 
                 if has_children:
                     label = bvar.name
@@ -783,7 +823,7 @@ class LocalVariablePane(PaneBase):
                             "exp": bvar.name,
                             "loaded": False,
                             "has_children": True,
-                            "displayhint": dh,
+                            "displayhint": displayhint,
                         },
                     )
                     node.add_leaf("⏳ loading...")
@@ -795,7 +835,7 @@ class LocalVariablePane(PaneBase):
                             "varobj": varobj_name,
                             "exp": bvar.name,
                             "has_children": False,
-                            "displayhint": dh,
+                            "displayhint": displayhint,
                         },
                     )
 
@@ -934,7 +974,7 @@ class LocalVariablePane(PaneBase):
                     label = f"{exp} = {value}"
                 else:
                     label = exp
-            node.set_label(label + "  ← shadowed")
+            node.set_label(label + _SHADOW_SUFFIX)
 
             # If the node was expanded and had loaded children, reload them
             # under the new varobj name (old children varobjs are now gone).
@@ -945,20 +985,20 @@ class LocalVariablePane(PaneBase):
                 asyncio.create_task(self._load_children(node, new_varobj))
         else:
             # No existing node — create a fresh one.
-            dh = info.get("displayhint", "")
+            displayhint = info.get("displayhint", "")
             if has_children:
                 label = name
                 if value:
                     label += f" = {self._compact_value(value)}"
                 node_new = tree.root.add(
-                    label + "  ← shadowed",
+                    label + _SHADOW_SUFFIX,
                     expand=False,
                     data={
                         "varobj": new_varobj,
                         "exp": name,
                         "loaded": False,
                         "has_children": True,
-                        "displayhint": dh,
+                        "displayhint": displayhint,
                     },
                 )
                 node_new.add_leaf("⏳ loading...")
@@ -968,12 +1008,12 @@ class LocalVariablePane(PaneBase):
                 else:
                     label = name
                 node_new = tree.root.add_leaf(
-                    label + "  ← shadowed",
+                    label + _SHADOW_SUFFIX,
                     data={
                         "varobj": new_varobj,
                         "exp": name,
                         "has_children": False,
-                        "displayhint": dh,
+                        "displayhint": displayhint,
                     },
                 )
             if new_varobj:
@@ -997,14 +1037,14 @@ class LocalVariablePane(PaneBase):
                 label_plain = node.label.plain
             else:
                 label_plain = str(node.label)
-            is_currently_shadowed = label_plain.endswith("  ← shadowed")
+            is_currently_shadowed = label_plain.endswith(_SHADOW_SUFFIX)
             should_be_shadowed = (name, addr) in shadowed_keys
             if should_be_shadowed == is_currently_shadowed:
                 continue
             if should_be_shadowed:
-                node.set_label(label_plain + "  ← shadowed")
+                node.set_label(label_plain + _SHADOW_SUFFIX)
             else:
-                node.set_label(label_plain[: -len("  ← shadowed")])
+                node.set_label(label_plain.removesuffix(_SHADOW_SUFFIX))
 
     # ------------------------------------------------------------------
     # Value update helper
@@ -1058,7 +1098,7 @@ class LocalVariablePane(PaneBase):
                 else:
                     label = exp
             if is_pinned:
-                label += "  ← shadowed"
+                label += _SHADOW_SUFFIX
             node.set_label(label)
             new_num_children = change.get("new_num_children")
             if new_num_children is not None and data.get("loaded"):
@@ -1485,13 +1525,13 @@ class LocalVariablePane(PaneBase):
 
             if exp in _ACCESS and has_children:
                 try:
-                    acc_limit = (
+                    access_spec_limit = (
                         self._cfg.expandchildlimit
                         if flat_limit is None
                         else flat_limit
                     )
                     grandchildren, more = await self._var_list_children(
-                        child_name, limit=acc_limit
+                        child_name, limit=access_spec_limit
                     )
                     await self._add_children(node, grandchildren, flat_limit=flat_limit)
                     if more:
@@ -1544,10 +1584,6 @@ class LocalVariablePane(PaneBase):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    async def _recreate_dynamic_varobj(self, vo: str) -> str:
-        # No longer used — kept as stub to avoid merge noise.
-        return ""
 
     def _purge_varobj_subtree(self, varobj_name: str) -> None:
         """Remove *varobj_name* and all its child varobjs from tracking dicts.
