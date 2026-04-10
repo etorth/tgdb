@@ -202,12 +202,12 @@ class CallbacksMixin:
         if hist:
             cmdline._add_to_history(hist, max_size=self.cfg.historysize)
 
-        gen = cmdline.lock_for_task()
+        task_lock_gen = cmdline.lock_for_task()
         error_output: Optional[str] = None
         cancelled = False
 
         def _print_fn(chunk: str) -> None:
-            cmdline.append_output(chunk, task_gen=gen)
+            cmdline.append_output(chunk, task_gen=task_lock_gen)
 
         try:
             result = await self.cp.execute_async(cmd, print_fn=_print_fn)

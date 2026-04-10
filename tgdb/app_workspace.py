@@ -379,6 +379,67 @@ class WorkspaceMixin:
     # Context menu message handlers
     # ------------------------------------------------------------------
 
+    def _get_parent_container(
+        self: TGDBApp, widget: Widget
+    ) -> Optional[PaneContainer]:
+        """Return *widget*'s parent if it is a PaneContainer, else None."""
+        parent = widget.parent
+        return parent if isinstance(parent, PaneContainer) else None
+
+    async def _handle_locals_context_action(
+        self: TGDBApp, target: Widget, sub: str
+    ) -> None:
+        """Dispatch a 'locals:*' context-menu action on an expandable tree node."""
+        node = getattr(self, "_locals_context_node", None)
+        self._locals_context_node = None
+        if node is not None and isinstance(target, LocalVariablePane):
+            if sub == "expand_some":
+                asyncio.create_task(target.do_expand_some(node))
+            elif sub == "expand_all":
+                asyncio.create_task(target.do_expand_all(node))
+            elif sub == "fold":
+                target.do_fold(node)
+
+    async def _handle_add_context_action(
+        self: TGDBApp, target: Widget, pane_kind: str
+    ) -> None:
+        """Add a pane of *pane_kind* next to *target*."""
+        if self._pane_is_attached(pane_kind):
+            self._show_status(f"{self._pane_label(pane_kind)} is already shown")
+            return
+        if await self._add_pane_to_workspace(target, pane_kind) is None:
+            self._show_status(f"Unable to add {self._pane_label(pane_kind)}")
+            return
+        self._show_status(f"Added {self._pane_label(pane_kind)}")
+
+    async def _handle_hide_context_action(self: TGDBApp, target: Widget) -> None:
+        """Replace *target* with an EmptyPane."""
+        if isinstance(target, EmptyPane):
+            self._show_status("Cell is already empty")
+            return
+        pane_kind = self._pane_kind_for_widget(target)
+        if await self._hide_workspace_item(target) is None:
+            self._show_status("Unable to hide cell")
+            return
+        label = self._pane_label(pane_kind) if pane_kind is not None else "pane"
+        self._show_status(f"Hid {label}")
+
+    async def _handle_delete_context_action(self: TGDBApp, target: Widget) -> None:
+        """Remove *target* from the workspace tree."""
+        if await self._delete_workspace_item(target) is None:
+            self._show_status("Unable to delete cell")
+            return
+        self._show_status("Deleted cell")
+
+    async def _handle_split_context_action(
+        self: TGDBApp, target: Widget, direction: str
+    ) -> None:
+        """Insert a new empty cell adjacent to *target* in *direction*."""
+        if await self._apply_context_menu_action(target, direction):
+            self._show_status(f"Added window {direction}")
+        else:
+            self._show_status(f"Unable to add window {direction}")
+
     async def on_context_menu_selected(self: TGDBApp, msg: ContextMenuSelected) -> None:
         target = self._context_menu_target
         self._close_context_menu(restore_focus=False)
@@ -390,76 +451,27 @@ class WorkspaceMixin:
             return
 
         action = msg.action
-
-        if action.startswith("locals:"):
-            node = getattr(self, "_locals_context_node", None)
-            self._locals_context_node = None
-            if node is not None and isinstance(target, LocalVariablePane):
-                sub = action[len("locals:"):]
-                if sub == "expand_some":
-                    asyncio.create_task(target.do_expand_some(node))
-                elif sub == "expand_all":
-                    asyncio.create_task(target.do_expand_all(node))
-                elif sub == "fold":
-                    target.do_fold(node)
-            self._restore_focus_after_context_menu()
-            return
-
-        if action.startswith("add:"):
-            pane_kind = action.split(":", 1)[1]
-            if self._pane_is_attached(pane_kind):
-                self._show_status(f"{self._pane_label(pane_kind)} is already shown")
-                self._restore_focus_after_context_menu()
-                return
-            if await self._add_pane_to_workspace(target, pane_kind) is None:
-                self._show_status(f"Unable to add {self._pane_label(pane_kind)}")
-                self._restore_focus_after_context_menu()
-                return
-            self._show_status(f"Added {self._pane_label(pane_kind)}")
-            self._restore_focus_after_context_menu()
-            return
-
-        if action == "hide":
-            pane_kind = self._pane_kind_for_widget(target)
-            if isinstance(target, EmptyPane):
-                self._show_status("Cell is already empty")
-                self._restore_focus_after_context_menu()
-                return
-            if await self._hide_workspace_item(target) is None:
-                self._show_status("Unable to hide cell")
-                self._restore_focus_after_context_menu()
-                return
-            if pane_kind is not None:
-                label = self._pane_label(pane_kind)
+        try:
+            if action.startswith("locals:"):
+                await self._handle_locals_context_action(
+                    target, action[len("locals:"):]
+                )
+            elif action.startswith("add:"):
+                await self._handle_add_context_action(
+                    target, action.split(":", 1)[1]
+                )
+            elif action == "hide":
+                await self._handle_hide_context_action(target)
+            elif action == "delete":
+                await self._handle_delete_context_action(target)
+            elif action.startswith("split:"):
+                await self._handle_split_context_action(
+                    target, action.split(":", 1)[1]
+                )
             else:
-                label = "pane"
-            self._show_status(f"Hid {label}")
+                self._show_status(f"Context menu: {action}")
+        finally:
             self._restore_focus_after_context_menu()
-            return
-
-        if action == "delete":
-            if await self._delete_workspace_item(target) is None:
-                self._show_status("Unable to delete cell")
-                self._restore_focus_after_context_menu()
-                return
-            self._show_status("Deleted cell")
-            self._restore_focus_after_context_menu()
-            return
-
-        if action.startswith("split:"):
-            direction = action.split(":", 1)[1]
-        else:
-            direction = None
-        if direction is None:
-            self._show_status(f"Context menu: {action}")
-            self._restore_focus_after_context_menu()
-            return
-
-        if await self._apply_context_menu_action(target, direction):
-            self._show_status(f"Added window {direction}")
-        else:
-            self._show_status(f"Unable to add window {direction}")
-        self._restore_focus_after_context_menu()
 
     def on_context_menu_closed(self: TGDBApp, _: ContextMenuClosed) -> None:
         self._close_context_menu()

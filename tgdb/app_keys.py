@@ -182,12 +182,11 @@ class KeyRoutingMixin:
                     self.gdb.send_input(char.encode())
 
     def _dispatch_key_internal(self: TGDBApp, key: str) -> bool:
-        """
-        Route a single key-name token through the mode-aware dispatch stack.
-        Used when replaying a key map expansion.
+        """Route a key-name token through the mode-aware dispatch stack.
 
-        Returns True when replay should pause and queue the remaining tokens
-        (used for replayed <CR> that submits an async command task).
+        Used when replaying a key-map expansion.  Returns True when replay
+        should pause and queue the remaining tokens (e.g. a replayed <CR>
+        that submits an async command task).
         """
         # Derive character: a single printable char is its own character
         if len(key) == 1 and key.isprintable():
@@ -202,69 +201,80 @@ class KeyRoutingMixin:
         if key == "escape" or key.lower() == tgdb_key:
             if self._mode in ("GDB_PROMPT", "CMD", "GDB_SCROLL", "ML_MESSAGE"):
                 self._switch_to_tgdb()
-            return False  # no-op when already in TGDB
+            return False
 
         if self._mode == "ML_MESSAGE":
-            try:
-                bar = self.query_one("#cmdline", CommandLineBar)
-                bar.feed_key(key, char)
-                # If the key dismissed the message (non-scroll), sync mode now
-                # so the next replay token sees TGDB instead of MESSAGE.
-                if not bar._msg_lines:
-                    self._switch_to_tgdb()
-            except NoMatches:
-                pass
-            return False
+            return self._dispatch_ml_message_key(key, char)
 
         if self._mode == "CMD":
-            try:
-                bar = self.query_one("#cmdline", CommandLineBar)
-            except NoMatches:
-                return False
-            if key in ("enter", "return"):
-                cmd = bar._input_buf
-                bar._reset_history_browse()
-                bar._input_active = False
-                bar._input_buf = ""
-                bar.refresh()
-                # Post CommandSubmit so the command goes through the async
-                # task path (_run_cmd_task / execute_async) — same as if the
-                # user pressed Enter manually.  This is important for :python
-                # blocks which need to run as async def so 'await' works.
-                if cmd.strip():
-                    self.post_message(CommandSubmit(cmd))
-                    return True
-                elif self._mode == "CMD":
-                    self._switch_to_tgdb()
-            else:
-                bar.feed_key(key, char)
-            return False
+            return self._dispatch_cmd_mode_key(key, char)
 
         if self._mode == "TGDB":
-            src = self._get_source_view(mounted_only=True)
-            if src is not None and src.handle_tgdb_key(key, char):
-                return False
-            # ":" enters CMD mode even when source pane is absent
-            if key == "colon" or char == ":":
-                self._enter_cmd_mode()
-                return False
-            if key == "i":
-                self._switch_to_gdb()
-                return False
-            if key == "s":
-                self._switch_to_gdb()
-                gdb_w = self._get_gdb_widget(mounted_only=True)
-                if gdb_w is not None:
-                    gdb_w.enter_scroll_mode()
-                return False
+            return self._dispatch_tgdb_replay_key(key, char)
 
-        # GDB mode — send char or Enter to the terminal
-        if self._mode == "GDB_PROMPT":
-            if char:
-                self.gdb.send_input(char.encode())
-            elif key == "enter":
-                self.gdb.send_input(b"\n")
+        # GDB_PROMPT mode — forward char or Enter to the terminal
+        if char:
+            self.gdb.send_input(char.encode())
+        elif key == "enter":
+            self.gdb.send_input(b"\n")
         return False
+
+    def _dispatch_ml_message_key(self: TGDBApp, key: str, char: str) -> bool:
+        """Forward a key to the CommandLineBar while in ML_MESSAGE mode."""
+        try:
+            bar = self.query_one("#cmdline", CommandLineBar)
+            bar.feed_key(key, char)
+            # If the message was dismissed (non-scroll), sync to TGDB mode so
+            # the next replay token sees the correct mode.
+            if not bar._msg_lines:
+                self._switch_to_tgdb()
+        except NoMatches:
+            pass
+        return False
+
+    def _dispatch_cmd_mode_key(self: TGDBApp, key: str, char: str) -> bool:
+        """Route a key while in CMD mode.  Returns True if replay should pause."""
+        try:
+            bar = self.query_one("#cmdline", CommandLineBar)
+        except NoMatches:
+            return False
+        if key in ("enter", "return"):
+            cmd = bar._input_buf
+            bar._reset_history_browse()
+            bar._input_active = False
+            bar._input_buf = ""
+            bar.refresh()
+            # Post CommandSubmit so the command goes through the async task
+            # path (_run_cmd_task / execute_async) — same as manual Enter.
+            # This is important for :python blocks which need 'await' support.
+            if cmd.strip():
+                self.post_message(CommandSubmit(cmd))
+                return True  # pause replay until task finishes
+            elif self._mode == "CMD":
+                self._switch_to_tgdb()
+        else:
+            bar.feed_key(key, char)
+        return False
+
+    def _dispatch_tgdb_replay_key(self: TGDBApp, key: str, char: str) -> bool:
+        """Route a key while in TGDB mode (replay path)."""
+        src = self._get_source_view(mounted_only=True)
+        if src is not None and src.handle_tgdb_key(key, char):
+            return False
+        # ':' enters CMD mode even when the source pane is absent
+        if key == "colon" or char == ":":
+            self._enter_cmd_mode()
+            return False
+        if key == "i":
+            self._switch_to_gdb()
+            return False
+        if key == "s":
+            self._switch_to_gdb()
+            gdb_w = self._get_gdb_widget(mounted_only=True)
+            if gdb_w is not None:
+                gdb_w.enter_scroll_mode()
+        return False
+
 
     def _handle_non_gdb_focus_key(self: TGDBApp, key: str, char: str) -> bool:
         """Absorb keys that arrive at GDB during focus handoff to CGDB/STATUS."""
