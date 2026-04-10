@@ -3,35 +3,29 @@ import os
 from pathlib import Path
 
 
+def _xdg_home(env_var: str, default_subpath: str) -> Path:
+    """Return the XDG directory for *env_var*, falling back to *default_subpath* under $HOME."""
+    value = os.environ.get(env_var, "")
+    return Path(value) if value else Path.home() / default_subpath
+
+
 class XDGPath:
     @staticmethod
     def config_home() -> Path:
         """Return $XDG_CONFIG_HOME or its default (~/.config)."""
-        v = os.environ.get("XDG_CONFIG_HOME", "")
-        if v:
-            return Path(v)
-        return Path.home() / ".config"
+        return _xdg_home("XDG_CONFIG_HOME", ".config")
 
     @staticmethod
     def data_home() -> Path:
         """Return $XDG_DATA_HOME or its default (~/.local/share)."""
-        v = os.environ.get("XDG_DATA_HOME", "")
-        if v:
-            return Path(v)
-        return Path.home() / ".local" / "share"
+        return _xdg_home("XDG_DATA_HOME", ".local/share")
 
     @staticmethod
     def cache_home() -> Path:
         """Return $XDG_CACHE_HOME or its default (~/.cache)."""
-        v = os.environ.get("XDG_CACHE_HOME", "")
-        if v:
-            return Path(v)
-        return Path.home() / ".cache"
+        return _xdg_home("XDG_CACHE_HOME", ".cache")
 
     @staticmethod
     def state_home() -> Path:
         """Return $XDG_STATE_HOME or its default (~/.local/state)."""
-        v = os.environ.get("XDG_STATE_HOME", "")
-        if v:
-            return Path(v)
-        return Path.home() / ".local" / "state"
+        return _xdg_home("XDG_STATE_HOME", ".local/state")

@@ -171,28 +171,28 @@ class HighlightGroups:
             grp.fg = resolve_color(fg) or None
         if bg:
             grp.bg = resolve_color(bg) or None
+
+        # Map attribute name → (attr_name, value) to set on grp
+        _ATTR_MAP: dict[str, tuple[str, bool]] = {
+            "bold":      ("bold", True),
+            "underline": ("underline", True),
+            "reverse":   ("reverse", True),
+            "inverse":   ("reverse", True),
+            "italic":    ("italic", True),
+            "dim":       ("dim", True),
+            "blink":     ("blink", True),
+            "standout":  ("bold", True),
+        }
         for attr_raw in attrs.split(","):
-            attr_raw = attr_raw.strip()
-            if not attr_raw:
+            attr = attr_raw.strip().lower()
+            if not attr:
                 continue
-            attr = attr_raw.lower()
             if attr in ("normal", "none"):
                 grp.bold = grp.underline = grp.reverse = grp.italic = False
                 grp.dim = grp.blink = False
-            elif attr == "bold":
-                grp.bold = True
-            elif attr == "underline":
-                grp.underline = True
-            elif attr in ("reverse", "inverse"):
-                grp.reverse = True
-            elif attr == "italic":
-                grp.italic = True
-            elif attr == "dim":
-                grp.dim = True
-            elif attr == "blink":
-                grp.blink = True
-            elif attr == "standout":
-                grp.bold = True
+            elif attr in _ATTR_MAP:
+                field, val = _ATTR_MAP[attr]
+                setattr(grp, field, val)
 
     def style(self, name: str) -> str:
         """Return a Rich style string for *name*."""

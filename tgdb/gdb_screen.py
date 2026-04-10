@@ -57,6 +57,35 @@ def _pyte_color(c: str) -> Optional[str]:
     return None
 
 
+def _cursor_style() -> Style:
+    """Return the Style used to render the terminal cursor position."""
+    return Style(reverse=True, blink=True)
+
+
+def _build_char_style(char, use_color: bool) -> Style:
+    """Build a Rich Style from a pyte character cell."""
+    if use_color:
+        fg = _pyte_color(char.fg)
+        bg = _pyte_color(char.bg)
+        if char.reverse:
+            fg, bg = bg, fg
+        return Style(
+            color=fg,
+            bgcolor=bg,
+            bold=char.bold,
+            italic=char.italics,
+            underline=char.underscore,
+            blink=char.blink,
+        )
+    return Style(
+        bold=char.bold,
+        italic=char.italics,
+        underline=char.underscore,
+        blink=char.blink,
+        reverse=char.reverse,
+    )
+
+
 def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) -> Text:
     """Convert one pyte screen row to a Rich Text line.
 
@@ -68,51 +97,24 @@ def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) 
     result = Text(no_wrap=True, overflow="crop")
     for col in range(width):
         if row is None:
-            data = " "
-            if col == cursor_col:
-                st = Style(reverse=True, blink=True)
-            else:
-                st = Style()
-        else:
-            # Use .get() rather than row[col] so that both pyte's
-            # StaticDefaultDict rows AND plain dict rows (restored from
-            # _scrollback_raw) work correctly.  StaticDefaultDict.__missing__
-            # is only triggered by [] syntax, not .get(), so .get() returns
-            # None for a missing column in either dict type — we treat that as
-            # a blank cell, which is the correct fallback.
-            char = row.get(col)
-            if char is None:
-                data = " "
-                if col == cursor_col:
-                    st = Style(reverse=True, blink=True)
-                else:
-                    st = Style()
-                result.append(data, style=st)
-                continue
-            data = char.data or " "
-            if use_color:
-                fg = _pyte_color(char.fg)
-                bg = _pyte_color(char.bg)
-                if char.reverse:
-                    fg, bg = bg, fg
-                st = Style(
-                    color=fg,
-                    bgcolor=bg,
-                    bold=char.bold,
-                    italic=char.italics,
-                    underline=char.underscore,
-                    blink=char.blink,
-                )
-            else:
-                st = Style(
-                    bold=char.bold,
-                    italic=char.italics,
-                    underline=char.underscore,
-                    blink=char.blink,
-                    reverse=char.reverse,
-                )
-            if col == cursor_col:
-                st = st + Style(reverse=True, blink=True)
+            st = _cursor_style() if col == cursor_col else Style()
+            result.append(" ", style=st)
+            continue
+        # Use .get() rather than row[col] so that both pyte's
+        # StaticDefaultDict rows AND plain dict rows (restored from
+        # _scrollback_raw) work correctly.  StaticDefaultDict.__missing__
+        # is only triggered by [] syntax, not .get(), so .get() returns
+        # None for a missing column in either dict type — we treat that as
+        # a blank cell, which is the correct fallback.
+        char = row.get(col)
+        if char is None:
+            st = _cursor_style() if col == cursor_col else Style()
+            result.append(" ", style=st)
+            continue
+        data = char.data or " "
+        st = _build_char_style(char, use_color)
+        if col == cursor_col:
+            st = st + _cursor_style()
         result.append(data, style=st)
     return result
 

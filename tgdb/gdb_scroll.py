@@ -215,11 +215,21 @@ class ScrollMixin:
         if char.isdigit() and char != "0":
             self._num_buf += char
             return
-        if self._num_buf:
-            count = int(self._num_buf)
-        else:
-            count = 1
+        count = int(self._num_buf) if self._num_buf else 1
         self._num_buf = ""
+
+        # 'g' double-press (gg) — must check before resetting _await_g
+        if char == "g":
+            if self._await_g:
+                self._await_g = False
+                self._scroll_offset = len(self._scrollback)
+                self.refresh()
+            else:
+                self._await_g = True
+            return
+
+        # All other keys reset the pending 'g' state
+        self._await_g = False
 
         if key == "escape":
             self.on_switch_to_tgdb()
@@ -227,56 +237,33 @@ class ScrollMixin:
         elif key in ("q", "i", "enter", "return"):
             self.exit_scroll_mode()
         elif key in ("j", "down", "ctrl+n"):
-            self._await_g = False
             self._scroll_down(count)
         elif key in ("k", "up", "ctrl+p"):
-            self._await_g = False
             self._scroll_up(count)
         elif key in ("h", "left"):
-            self._await_g = False
             self._scroll_left()
         elif key in ("l", "right"):
-            self._await_g = False
             self._scroll_right()
         elif char == "0":
-            self._await_g = False
             self._beginning_of_row()
         elif char == "$":
-            self._await_g = False
             self._end_of_row()
         elif key in ("pageup", "ctrl+b"):
-            self._await_g = False
             self._scroll_up(self._visible_height() * count)
         elif key in ("pagedown", "ctrl+f"):
-            self._await_g = False
             self._scroll_down(self._visible_height() * count)
         elif key == "ctrl+u":
-            self._await_g = False
             self._scroll_up(self._visible_height() // 2)
         elif key == "ctrl+d":
-            self._await_g = False
             self._scroll_down(self._visible_height() // 2)
         elif char == "G" or key in ("f12", "end"):
-            # G / F12 / End → go to end (most recent output)
-            self._await_g = False
             self._scroll_offset = 0
             self.refresh()
         elif key in ("f11", "home"):
-            # F11 / Home → go to beginning (same as gg)
-            self._await_g = False
             self._scroll_offset = len(self._scrollback)
             self.refresh()
-        elif char == "g":
-            if self._await_g:
-                # gg → go to beginning
-                self._await_g = False
-                self._scroll_offset = len(self._scrollback)
-                self.refresh()
-            else:
-                self._await_g = True
         elif key == "apostrophe":
-            # '' prefix handled at app level; '.' → jump to last line (bottom)
-            self._await_g = False
+            # '' prefix handled at app level; '.' → jump to bottom
             self._dot_pending = True
         elif self._dot_pending:
             self._dot_pending = False
@@ -284,25 +271,19 @@ class ScrollMixin:
                 self._scroll_offset = 0
                 self.refresh()
         elif key == "slash":
-            self._await_g = False
             self._search_active = True
             self._search_forward = True
             self._search_buf = ""
             self.post_message(ScrollSearchStart(True))
         elif key == "question_mark":
-            self._await_g = False
             self._search_active = True
             self._search_forward = False
             self._search_buf = ""
             self.post_message(ScrollSearchStart(False))
         elif char == "n":
-            self._await_g = False
             self._do_search(self._search_pattern, self._search_forward)
         elif char == "N":
-            self._await_g = False
             self._do_search(self._search_pattern, not self._search_forward)
-        else:
-            self._await_g = False
 
     # ------------------------------------------------------------------
     # Key handling — search input
