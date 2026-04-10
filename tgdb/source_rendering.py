@@ -90,12 +90,86 @@ class SourceViewRendering:
             n = 0
         return max(1, len(str(max(n, 1))))
 
+    def _get_line_number_style(self, bp_flag: int, is_exe: bool, is_sel: bool) -> str:
+        """Return the style for a line number cell.
+
+        Priority order matches cgdb: breakpoint > exe > sel > normal.
+        """
+        if bp_flag == BP_ENABLED:
+            return self.hl.style("Breakpoint")
+        if bp_flag == BP_DISABLED:
+            return self.hl.style("DisabledBreakpoint")
+        if is_exe:
+            return self.hl.style("ExecutingLineNr")
+        if is_sel:
+            return self.hl.style("SelectedLineNr")
+        return self.hl.style("LineNumber")
+
+    def _find_mark_for_line(self, sf, line_no: int) -> tuple[str | None, str]:
+        """Return ``(mark_char, mark_style)`` for *line_no*, or ``(None, "")``."""
+        if not self.showmarks:
+            return None, ""
+        for mk, ml in sf.marks_local.items():
+            if ml == line_no:
+                return mk, self.hl.style("Mark")
+        for mk, (mp, ml) in self._global_marks.items():
+            if mp == sf.path and ml == line_no:
+                return mk, self.hl.style("Mark")
+        return None, ""
+
+    def _get_arrow_info(
+        self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str
+    ) -> tuple[str, str]:
+        """Return ``(arrow_style, display_mode)`` for the current line.
+
+        *display_mode* is ``"shortarrow"`` / ``"longarrow"`` / ``""``.
+        """
+        if is_exe and exe_disp in ("shortarrow", "longarrow"):
+            return self.hl.style("ExecutingLineArrow"), exe_disp
+        if is_sel and sel_disp in ("shortarrow", "longarrow"):
+            return self.hl.style("SelectedLineArrow"), sel_disp
+        return "", ""
+
+    def _get_line_background_style(
+        self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str
+    ) -> str:
+        """Return the background style for a highlighted source line, or ``""``."""
+        if is_exe:
+            if exe_disp == "highlight":
+                return self.hl.style("ExecutingLineHighlight")
+            if exe_disp == "block":
+                return self.hl.style("ExecutingLineBlock")
+        elif is_sel:
+            if sel_disp == "highlight":
+                return self.hl.style("SelectedLineHighlight")
+            if sel_disp == "block":
+                return self.hl.style("SelectedLineBlock")
+        return ""
+
+    def _compile_search_pattern(self) -> "re.Pattern | None":
+        """Compile the current search pattern, respecting *ignorecase*.
+
+        Returns ``None`` when no pattern is set or the pattern is invalid.
+        """
+        if not (self.hlsearch and self._search_pattern):
+            return None
+        try:
+            flags = re.IGNORECASE if self.ignorecase else 0
+            return re.compile(self._search_pattern, flags)
+        except re.error:
+            return None
+
     def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
         """Build one visible line as Rich Text, matching cgdb's layout.
-        Called only when sf is not None (logo is handled in render())."""
+
+        Renders line number, gutter character, arrow (if any), syntax-
+        highlighted source text, hlsearch overlay, and selection background
+        padding — all clipped to the pane width.  Called only when *sf* is
+        not ``None`` (the logo case is handled in ``render()``).
+        """
         nr_w = self._nr_width()
 
-        # Beyond end of file → vim-style "~│" matching cgdb: (lwidth-1 spaces)(~)(│)
+        # Beyond end of file → vim-style "~│" matching cgdb
         if line_idx < 0 or line_idx >= len(sf.lines):
             filler = Text(no_wrap=True, overflow="crop")
             filler.append(" " * (nr_w - 1), style=self.hl.style("LineNumber"))
@@ -105,116 +179,52 @@ class SourceViewRendering:
         line_no = line_idx + 1
         is_exe = line_no == self.exe_line
         is_sel = line_no == self.sel_line
-        if line_idx < len(sf.bp_flags):
-            bp_flag = sf.bp_flags[line_idx]
-        else:
-            bp_flag = BP_NONE
+        bp_flag = sf.bp_flags[line_idx] if line_idx < len(sf.bp_flags) else BP_NONE
         exe_disp = self.executing_line_display
         sel_disp = self.selected_line_display
 
-        # ── Line number style (cgdb priority: breakpoint > exe > sel > normal) ──
-        if bp_flag == BP_ENABLED:
-            nr_style = self.hl.style("Breakpoint")
-        elif bp_flag == BP_DISABLED:
-            nr_style = self.hl.style("DisabledBreakpoint")
-        elif is_exe:
-            nr_style = self.hl.style("ExecutingLineNr")
-        elif is_sel:
-            nr_style = self.hl.style("SelectedLineNr")
-        else:
-            nr_style = self.hl.style("LineNumber")
+        nr_style = self._get_line_number_style(bp_flag, is_exe, is_sel)
+        mark_ch, mark_style = self._find_mark_for_line(sf, line_no)
+        arrow_style, arrow_disp = self._get_arrow_info(is_exe, is_sel, exe_disp, sel_disp)
+        line_bg = self._get_line_background_style(is_exe, is_sel, exe_disp, sel_disp)
 
-        # ── Mark: replaces │ with mark char (cgdb: vert_bar_char = mark char) ──
-        mark_ch = None
-        mark_st = ""
-        if self.showmarks:
-            for mk, ml in sf.marks_local.items():
-                if ml == line_no:
-                    mark_ch = mk
-                    mark_st = self.hl.style("Mark")
-                    break
-            if mark_ch is None:
-                for mk, (mp, ml) in self._global_marks.items():
-                    if mp == sf.path and ml == line_no:
-                        mark_ch = mk
-                        mark_st = self.hl.style("Mark")
-                        break
-
-        # ── Separator and arrow — matches cgdb sources.cpp ──
-        # cgdb: vert_bar = SWIN_SYM_LTEE (├) for arrow lines, SWIN_SYM_VLINE (│) otherwise
-        # After vert_bar: space for normal; '>' for short arrow;
-        #   '─'×col_off + '>' for long arrow, then source from col_off.
-        is_arrow_line = (is_exe and exe_disp in ("shortarrow", "longarrow")) or (
-            is_sel and sel_disp in ("shortarrow", "longarrow")
-        )
-        if is_exe and exe_disp in ("shortarrow", "longarrow"):
-            arrow_st = self.hl.style("ExecutingLineArrow")
-            disp = exe_disp
-        elif is_sel and sel_disp in ("shortarrow", "longarrow"):
-            arrow_st = self.hl.style("SelectedLineArrow")
-            disp = sel_disp
-        else:
-            arrow_st = ""
-            disp = ""
-
-        # Compute long-arrow column_offset (cgdb: leading_ws - (sel_col+1))
-        # sel_col is _col_offset (horizontal scroll position)
-        col_off = 0
-        if disp == "longarrow":
-            if line_idx < len(sf.lines):
-                src_line = sf.lines[line_idx]
-            else:
-                src_line = ""
+        # Compute leading-whitespace gap used only by the long-arrow display
+        # mode.  cgdb name: column_offset = leading_ws - (sel_col + 1) where
+        # sel_col is the horizontal scroll position (_col_offset).
+        arrow_indent = 0
+        if arrow_disp == "longarrow":
+            src_line = sf.lines[line_idx] if line_idx < len(sf.lines) else ""
             leading_ws = len(src_line) - len(src_line.lstrip())
-            col_off = max(0, leading_ws - 1 - self._col_offset)
+            arrow_indent = max(0, leading_ws - 1 - self._col_offset)
 
+        # ── Gutter: line number + separator + optional arrow ──────────────
         out = Text(no_wrap=True, overflow="crop")
-        # Right-aligned line number — no separate gutter column (matches cgdb)
         out.append(f"{line_no:{nr_w}d}", style=nr_style)
-        # vert_bar: ├ for arrow lines, mark char if set, │ otherwise
+        # Separator: ├ for arrow lines, mark char if set, │ otherwise
+        is_arrow_line = bool(arrow_disp)
         if is_arrow_line:
-            out.append("├", style=arrow_st)
+            out.append("├", style=arrow_style)
         elif mark_ch:
-            out.append(mark_ch, style=mark_st)
+            out.append(mark_ch, style=mark_style)
         else:
             out.append("│")
-        # Arrow body (after vert_bar)
-        if disp == "shortarrow":
-            out.append(">", style=arrow_st)
-        elif disp == "longarrow":
-            out.append("─" * col_off + ">", style=arrow_st)
+        # Arrow body (after separator)
+        if arrow_disp == "shortarrow":
+            out.append(">", style=arrow_style)
+        elif arrow_disp == "longarrow":
+            out.append("─" * arrow_indent + ">", style=arrow_style)
         else:
-            out.append(" ")  # normal line: space after │ (cgdb behaviour)
+            out.append(" ")  # normal line: space after │
 
-        # ── Source text ──
-        if is_exe:
-            if exe_disp == "highlight":
-                line_bg = self.hl.style("ExecutingLineHighlight")
-            elif exe_disp == "block":
-                line_bg = self.hl.style("ExecutingLineBlock")
-            else:
-                line_bg = ""
-        elif is_sel:
-            if sel_disp == "highlight":
-                line_bg = self.hl.style("SelectedLineHighlight")
-            elif sel_disp == "block":
-                line_bg = self.hl.style("SelectedLineBlock")
-            else:
-                line_bg = ""
-        else:
-            line_bg = ""
-
+        # ── Source text ───────────────────────────────────────────────────
         tokens = sf.tokenize(self.tabstop)
-        if line_idx < len(tokens):
-            spans = tokens[line_idx]
-        else:
-            spans = []
+        spans = tokens[line_idx] if line_idx < len(tokens) else []
         if not spans:
             spans = [(sf.lines[line_idx], "Normal")]
 
-        # For long arrow: skip col_off leading whitespace cells (cgdb: sel_col + column_offset)
-        # For horizontal scroll (_col_offset): skip additional display cells from the source text.
-        total_skip = col_off + self._col_offset
+        # For long arrow: skip arrow_indent leading whitespace cells.
+        # For horizontal scroll: skip _col_offset additional display cells.
+        total_skip = arrow_indent + self._col_offset
         source_width = max(0, (self.size.width or 80) - cell_len(out.plain))
         styled_spans: list[tuple[str, str]] = []
         for tok_text, group in spans:
@@ -223,49 +233,34 @@ class SourceViewRendering:
             elif self.color:
                 st = self.hl.style(group)
             else:
-                # :set color off — strip colors, keep only bold/reverse attrs
+                # :set color off — preserve bold/reverse/underline attrs only
                 # (matches cgdb: uses A_BOLD/A_REVERSE only when color disabled)
                 hs = self.hl.get(group)
-                attrs = []
-                if hs.bold:
-                    attrs.append("bold")
-                if hs.reverse:
-                    attrs.append("reverse")
-                if hs.underline:
-                    attrs.append("underline")
-                if attrs:
-                    st = " ".join(attrs)
-                else:
-                    st = ""
+                attrs = [a for a, on in
+                         [("bold", hs.bold), ("reverse", hs.reverse),
+                          ("underline", hs.underline)] if on]
+                st = " ".join(attrs)
             styled_spans.append((tok_text, st))
 
         src_t = self._clip_spans_to_cells(styled_spans, total_skip, source_width)
 
         # hlsearch overlay
-        if self.hlsearch and self._search_pattern:
-            try:
-                if self.ignorecase:
-                    flags = re.IGNORECASE
-                else:
-                    flags = 0
-                rx = re.compile(self._search_pattern, flags)
-                for m in rx.finditer(src_t.plain):
-                    src_t.stylize(self.hl.style("Search"), m.start(), m.end())
-            except re.error:
-                pass
+        rx = self._compile_search_pattern()
+        if rx is not None:
+            for m in rx.finditer(src_t.plain):
+                src_t.stylize(self.hl.style("Search"), m.start(), m.end())
 
         out.append_text(src_t)
-        # Pad the remainder of the row with the background style so the
-        # selection/execution highlight extends to the full pane width.
+        # Extend the selection/execution background to the full pane width.
         if line_bg:
             full_w = max(1, self.size.width or 80)
             used = cell_len(out.plain)
             if used < full_w:
                 out.append(" " * (full_w - used), style=line_bg)
-        # Match cgdb: source rows are clipped to the pane width instead of
-        # soft-wrapping onto following rows.
+        # Clip to pane width — source rows must not soft-wrap (matches cgdb).
         out.truncate(max(1, self.size.width or 80), overflow="crop")
         return out
+
 
     def _clip_spans_to_cells(
         self, spans: list[tuple[str, str]], start_cell: int, max_cells: int

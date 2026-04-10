@@ -106,8 +106,8 @@ class _SourceContent(SourceViewRendering, Widget):
         self.color: bool = True  # :set color — enables/disables syntax colors
         self._global_marks: dict[str, tuple[str, int]] = {}
         self._last_jump_line: int = 1
-        self._num_buf: str = ""
-        self._await_g: bool = False  # true after first 'g' (for 'gg')
+        self._count_buf: str = ""         # numeric repeat-count being typed (e.g. "20" before 'j')
+        self._g_pressed: bool = False     # True after first 'g' keypress (waiting for 'gg')
         self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)
         self._show_logo: bool = False  # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}
@@ -432,34 +432,10 @@ class _SourceContent(SourceViewRendering, Widget):
     # Key handling
     # ------------------------------------------------------------------
 
-    def handle_tgdb_key(self, key: str, char: str) -> bool:
-        if self._search_active:
-            self._handle_search_input(key, char)
-            return True
-
-        # 'g' double-press for gg (goto top)
-        if self._await_g:
-            self._await_g = False
-            if char == "g":
-                self._num_buf = ""
-                self.goto_top()
-                return True
-            # Not 'gg' — treat buffered 'g' as nothing, reprocess current key
-            self._num_buf = ""
-
-        # Numeric prefix: 1-9 always starts/extends a count; 0 extends an
-        # already-started count (e.g. "20j" → count 20) but alone means col-0.
-        if char.isdigit() and (char != "0" or self._num_buf):
-            self._num_buf += char
-            return True
-        has_prefix = bool(self._num_buf)
-        if self._num_buf:
-            count = int(self._num_buf)
-        else:
-            count = 1
-        self._num_buf = ""
-
-        consumed = True
+    def _handle_movement_key(
+        self, key: str, char: str, count: int, has_prefix: bool
+    ) -> bool:
+        """Handle cursor/scroll movement keys.  Returns True if consumed."""
         if key in ("j", "down"):
             self.scroll_down(count)
         elif key in ("k", "up"):
@@ -481,7 +457,7 @@ class _SourceContent(SourceViewRendering, Widget):
         elif key == "G":
             if has_prefix:
                 n = self._line_count() or 1
-                self.move_to(max(1, min(count, n)))
+                self.move_to(min(count, n))
             else:
                 self.goto_bottom()
         elif key == "H":
@@ -490,33 +466,55 @@ class _SourceContent(SourceViewRendering, Widget):
             self.goto_screen_middle()
         elif key == "L":
             self.goto_screen_bottom()
-        elif char == "g":
-            self._await_g = True  # wait for second 'g'
-        elif key == "slash":
-            self._search_active = True
-            self._search_forward = True
-            self._search_buf = ""
-            self.post_message(SearchStart(forward=True))
+        elif char == "0" and not has_prefix:
+            self.scroll_col_to(0)  # vim '0': go to column 0
+        elif char == "^":
+            self.scroll_col_to(0)  # vim '^': first non-blank (same as 0 here)
+        elif key == "dollar" or char == "$":
+            self.scroll_col_to(999999)  # vim '$': end of line
+        else:
+            return False
+        return True
+
+    def _handle_search_key(self, key: str, char: str) -> bool:
+        """Handle search-related keys.  Returns True if consumed."""
+        if key == "slash":
+            self._start_search(forward=True)
         elif key == "question_mark":
-            self._search_active = True
-            self._search_forward = False
-            self._search_buf = ""
-            self.post_message(SearchStart(forward=False))
+            self._start_search(forward=False)
         elif char == "n":
             if not self.search_next():
                 self.post_message(StatusMessage("Pattern not found"))
         elif char == "N":
             if not self.search_prev():
                 self.post_message(StatusMessage("Pattern not found"))
-        elif key == "space":
+        else:
+            return False
+        return True
+
+    def _start_search(self, forward: bool) -> None:
+        """Enter incremental search mode."""
+        self._search_active = True
+        self._search_forward = forward
+        self._search_buf = ""
+        self.post_message(SearchStart(forward=forward))
+
+    def _handle_breakpoint_key(self, key: str, char: str) -> bool:
+        """Handle breakpoint toggle keys.  Returns True if consumed."""
+        if key == "space":
             self.post_message(ToggleBreakpoint(self.sel_line))
         elif char == "t":
             self.post_message(ToggleBreakpoint(self.sel_line, temporary=True))
-        elif char == "u":
-            # cgdb source_input 'u': run until current cursor location
-            sf2 = self.source_file
-            if sf2:
-                self.post_message(GDBCommand(f"until {sf2.path}:{self.sel_line}"))
+        else:
+            return False
+        return True
+
+    def _handle_pane_and_gdb_key(self, key: str, char: str) -> bool:
+        """Handle pane control, GDB command, and function keys.  Returns True if consumed."""
+        if char == "u":
+            source_file = self.source_file
+            if source_file:
+                self.post_message(GDBCommand(f"until {source_file.path}:{self.sel_line}"))
         elif char == "o":
             self.post_message(OpenFileDialog())
         elif key == "colon" or char == ":":
@@ -529,7 +527,7 @@ class _SourceContent(SourceViewRendering, Widget):
             self.app.refresh()
         elif key == "minus":
             self.post_message(ResizeSource(-1, rows=True))
-        elif key in ("equal",) or char == "=":
+        elif key == "equal" or char == "=":
             self.post_message(ResizeSource(1, rows=True))
         elif key == "underscore":
             self.post_message(ResizeSource(-1, jump=True))
@@ -539,17 +537,8 @@ class _SourceContent(SourceViewRendering, Widget):
             self.post_message(ToggleOrientation())
         elif key == "ctrl+t":
             self.post_message(OpenTTY())
-        elif char == "0":
-            # vim: '0' = go to beginning of line (column 0)
-            self.scroll_col_to(0)
-        elif char == "^":
-            # vim: '^' = first visible char (same as 0 for source view)
-            self.scroll_col_to(0)
-        elif key == "dollar" or char == "$":
-            # vim: '$' = go to end of line
-            self.scroll_col_to(999999)
         elif key == "f1":
-            self.post_message(ShowHelp())  # cgdb: if_display_help
+            self.post_message(ShowHelp())
         elif key == "f5":
             self.post_message(GDBCommand("run"))
         elif key == "f6":
@@ -561,9 +550,45 @@ class _SourceContent(SourceViewRendering, Widget):
         elif key == "f10":
             self.post_message(GDBCommand("step"))
         else:
-            consumed = False
+            return False
+        return True
 
-        return consumed
+    def handle_tgdb_key(self, key: str, char: str) -> bool:
+        """Dispatch a source-mode key event.  Returns True if consumed."""
+        if self._search_active:
+            self._handle_search_input(key, char)
+            return True
+
+        # 'g' double-press for gg (goto top)
+        if self._g_pressed:
+            self._g_pressed = False
+            if char == "g":
+                self._count_buf = ""
+                self.goto_top()
+                return True
+            # Not 'gg' — discard buffered 'g' and reprocess the current key
+            self._count_buf = ""
+
+        # Numeric prefix: 1-9 always starts a count; '0' extends an already-
+        # started count (e.g. "20j" → 20) but alone is mapped to column-0.
+        if char.isdigit() and (char != "0" or self._count_buf):
+            self._count_buf += char
+            return True
+        has_prefix = bool(self._count_buf)
+        count = int(self._count_buf) if self._count_buf else 1
+        self._count_buf = ""
+
+        if self._handle_movement_key(key, char, count, has_prefix):
+            return True
+        if self._handle_search_key(key, char):
+            return True
+        if self._handle_breakpoint_key(key, char):
+            return True
+        if char == "g":
+            self._g_pressed = True  # wait for second 'g' (gg = goto top)
+            return True
+        return self._handle_pane_and_gdb_key(key, char)
+
 
     def on_key(self, event: events.Key) -> None:
         key = event.key
