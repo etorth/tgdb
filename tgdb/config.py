@@ -219,71 +219,38 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             return None
         if line.startswith(":"):
             line = line[1:].strip()
-        if not line:
+        if not line or line.startswith("#"):
             return None
 
-        # Comment: lines starting with '#' are a no-op.
-        if line.startswith("#"):
-            return None
-
-        # :python / :py and :pyfile / :pyf take raw (un-tokenised) argument.
-        _raw = re.match(
+        # :python / :py / :pyfile / :pyf take a raw (un-tokenised) argument.
+        py_match = re.match(
             r"^(python|pyfile|pyf|py)\s*(.*)", line, re.DOTALL | re.IGNORECASE
         )
-        if _raw:
-            _cmd, _raw_arg = _raw.group(1).lower(), _raw.group(2)
-            if _cmd in ("python", "py"):
-                # Handle heredoc format: "<<  MARKER\n...\nMARKER"
-                _hd = re.match(r"^<<\s*(\S+)\s*\n(.*)", _raw_arg, re.DOTALL)
-                if _hd:
-                    _marker, _body = _hd.group(1), _hd.group(2)
-                    # Strip the closing marker line
-                    _body_lines = _body.split("\n")
-                    code_lines = []
-                    for bl in _body_lines:
-                        if bl.strip() == _marker:
-                            break
-                        code_lines.append(bl)
-                    _raw_arg = "\n".join(code_lines)
-                return await self._exec_py_async(_raw_arg, "<tgdb:python>", print_fn)
-            else:
-                return await self._exec_pyfile_async(_raw_arg.strip(), print_fn)
+        if py_match:
+            return await self._dispatch_python_command(py_match, print_fn)
 
         # :command needs raw handling to preserve the replacement template.
-        _cmd_m = re.match(r"^command\b\s*(.*)", line, re.DOTALL | re.IGNORECASE)
-        if _cmd_m:
-            return await self._cmd_command(_cmd_m.group(1))
+        cmd_m = re.match(r"^command\b\s*(.*)", line, re.DOTALL | re.IGNORECASE)
+        if cmd_m:
+            return await self._cmd_command(cmd_m.group(1))
 
-        # :evaluate / :signal take an arbitrary expression — pass the raw
-        # remainder to avoid shlex stripping quotes inside the expression.
-        _raw_expr_m = re.match(
+        # :evaluate / :signal take an arbitrary expression.
+        eval_m = re.match(
             r"^(evaluate|signal)\b\s*(.*)", line, re.DOTALL | re.IGNORECASE
         )
-        if _raw_expr_m:
-            _ecmd = _raw_expr_m.group(1).lower()
-            _erest = _raw_expr_m.group(2)
-            handler = self._handlers.get(_ecmd)
+        if eval_m:
+            eval_cmd, eval_expr = eval_m.group(1).lower(), eval_m.group(2)
+            handler = self._handlers.get(eval_cmd)
             if handler is not None:
-                return handler([_erest] if _erest else [])
+                return handler([eval_expr] if eval_expr else [])
             return None
 
         # :map / :imap need raw handling so spaces in the RHS are preserved.
-        _map_m = re.match(
+        map_m = re.match(
             r"^(imap|im|map)\b\s*(\S+)\s*(.*)", line, re.DOTALL | re.IGNORECASE
         )
-        if _map_m:
-            _mcmd = _map_m.group(1).lower()
-            if _mcmd in ("imap", "im"):
-                _mode = "gdb"
-            else:
-                _mode = "tgdb"
-            _lhs = self._decode_keyseq_tokens(_map_m.group(2))
-            _rhs = self._decode_keyseq_tokens(_map_m.group(3))
-            if not _lhs:
-                return "map: empty lhs"
-            _log.debug("map %r -> %r", _lhs, _rhs)
-            self.km.map(_mode, _lhs, _rhs)
-            return None
+        if map_m:
+            return self._dispatch_map_command(map_m)
 
         try:
             parts = shlex.split(line)
@@ -292,7 +259,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         if not parts:
             return None
 
-        raw_cmd = parts[0]  # original case — needed for user-command lookup
+        raw_cmd = parts[0]
         cmd = raw_cmd.lower()
         args = parts[1:]
 
@@ -307,36 +274,79 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         if raw_cmd == "!!" or (raw_cmd.startswith("!") and raw_cmd[1:].isdigit()):
             return await self._cmd_history_run(raw_cmd)
 
-        # Registered handlers (sync callables — no await needed)
+        # Registered (app-side) handlers — sync callables, no await needed
         if cmd in self._handlers:
             return self._handlers[cmd](args)
 
-        # Built-in commands
+        return await self._dispatch_builtin_command(cmd, raw_cmd, args, print_fn, line)
+
+    async def _dispatch_python_command(
+        self, match: re.Match, print_fn: Optional[Callable]
+    ) -> Optional[str]:
+        """Dispatch :python/:py/:pyfile/:pyf commands."""
+        cmd, raw_arg = match.group(1).lower(), match.group(2)
+        if cmd in ("python", "py"):
+            # Handle heredoc format: "<< MARKER\n...\nMARKER"
+            heredoc_m = re.match(r"^<<\s*(\S+)\s*\n(.*)", raw_arg, re.DOTALL)
+            if heredoc_m:
+                marker = heredoc_m.group(1)
+                body_lines = heredoc_m.group(2).split("\n")
+                code_lines = []
+                for bl in body_lines:
+                    if bl.strip() == marker:
+                        break
+                    code_lines.append(bl)
+                raw_arg = "\n".join(code_lines)
+            return await self._exec_py_async(raw_arg, "<tgdb:python>", print_fn)
+        else:
+            return await self._exec_pyfile_async(raw_arg.strip(), print_fn)
+
+    def _dispatch_map_command(self, match: re.Match) -> Optional[str]:
+        """Dispatch :map / :imap / :im commands."""
+        mcmd = match.group(1).lower()
+        mode = "gdb" if mcmd in ("imap", "im") else "tgdb"
+        lhs = self._decode_keyseq_tokens(match.group(2))
+        rhs = self._decode_keyseq_tokens(match.group(3))
+        if not lhs:
+            return "map: empty lhs"
+        _log.debug("map %r -> %r", lhs, rhs)
+        self.km.map(mode, lhs, rhs)
+        return None
+
+    async def _dispatch_builtin_command(
+        self,
+        cmd: str,
+        raw_cmd: str,
+        args: list[str],
+        print_fn: Optional[Callable],
+        raw_line: str = "",
+    ) -> Optional[str]:
+        """Dispatch built-in :set / :highlight / :unmap / :source etc."""
         if cmd == "set":
             return await self._cmd_set(args)
-        elif cmd in ("highlight", "hi"):
+        if cmd in ("highlight", "hi"):
             return await self._cmd_highlight(args)
-        elif cmd in ("unmap", "unm"):
+        if cmd in ("unmap", "unm"):
             return await self._cmd_unmap("tgdb", args)
-        elif cmd in ("iunmap", "iu"):
+        if cmd in ("iunmap", "iu"):
             return await self._cmd_unmap("gdb", args)
-        elif cmd == "noh":
+        if cmd == "noh":
             self.config.hlsearch = False
             return None
-        elif cmd == "syntax":
+        if cmd == "syntax":
             if args:
                 return await self._set_option("syntax", args[0])
             return None
-        elif cmd in ("source", "so"):
+        if cmd in ("source", "so"):
             if not args:
                 return "source: missing filename"
             return await self.load_file_async(
                 os.path.expanduser(args[0]),
                 print_fn=print_fn,
             )
-        elif cmd == "save":
+        if cmd == "save":
             return await self._cmd_save(args)
-        elif cmd == "history":
+        if cmd == "history":
             return await self._cmd_history()
 
         # User-defined commands (must start with an uppercase letter)
@@ -345,11 +355,8 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
             if amb_err:
                 return amb_err
             if ucmd is not None:
-                m = re.match(r"\S+\s*(.*)", line, re.DOTALL)
-                if m:
-                    raw_args = m.group(1)
-                else:
-                    raw_args = ""
+                m = re.match(r"\S+\s*(.*)", raw_line, re.DOTALL)
+                raw_args = m.group(1) if m else ""
                 return await self._exec_user_command_async(
                     ucmd,
                     raw_args,

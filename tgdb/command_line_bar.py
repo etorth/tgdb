@@ -289,94 +289,98 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
 
     def feed_key(self, key: str, char: str) -> bool:
         """Handle one keystroke.  Returns True if the key was consumed."""
-
         # While a command task is running all keyboard input is blocked,
-        # except Ctrl+C which must propagate to TGDBApp.on_key for task
-        # cancellation (feed_key is called from CommandLineBar.on_key which
-        # fires first because the bar has focus; returning False lets the
-        # event bubble up so the app can call _cmd_task.cancel()).
+        # except Ctrl+C which must propagate up for task cancellation.
         if self._task_running:
             return key != "ctrl+c"
 
-        # ── Multiline message dismiss ─────────────────────────────────
         if self._msg_lines:
-            if key in ("j", "down"):
-                self._msg_scroll_down()
-                return True
-            if key in ("k", "up"):
-                self._msg_scroll_up()
-                return True
-            # Any other key (including enter/ESC) dismisses the message.
-            self.dismiss_message()
-            self.post_message(MessageDismissed())
-            return True
+            return self._handle_message_key(key)
 
-        # ── Heredoc continuation input ────────────────────────────────
         if self._ml_active:
-            # History-recalled multiline entry — read-only display
-            if self._ml_history_recall:
-                if key in ("enter", "return"):
-                    full_cmd = self._ml_history_full
-                    self._cancel_history_multiline()
-                    self._reset_history_browse()
-                    self.post_message(CommandSubmit(full_cmd))
-                    return True
-                if key == "escape":
-                    self._cancel_history_multiline()
-                    self._reset_history_browse()
-                    self._input_active = False
-                    self._set_height(1)
-                    self.refresh()
-                    self.post_message(CommandCancel())
-                    return True
-                if key == "up":
-                    self._history_up()
-                    return True
-                if key == "down":
-                    self._history_down()
-                    return True
-                return True  # swallow other keys in recall mode
+            return self._handle_multiline_key(key, char)
 
+        return self._handle_single_line_key(key, char)
+
+    def _handle_message_key(self, key: str) -> bool:
+        """Handle a key while a multiline message is displayed.
+
+        Scroll keys (j/k/arrows) scroll the message; any other key dismisses it.
+        Always returns True (message mode consumes all keys).
+        """
+        if key in ("j", "down"):
+            self._msg_scroll_down()
+            return True
+        if key in ("k", "up"):
+            self._msg_scroll_up()
+            return True
+        # Any other key (including enter/ESC) dismisses the message.
+        self.dismiss_message()
+        self.post_message(MessageDismissed())
+        return True
+
+    def _handle_multiline_key(self, key: str, char: str) -> bool:
+        """Handle a key during heredoc / multiline command entry."""
+        if self._ml_history_recall:
+            # History-recalled multiline entry — read-only display
+            if key in ("enter", "return"):
+                full_cmd = self._ml_history_full
+                self._cancel_history_multiline()
+                self._reset_history_browse()
+                self.post_message(CommandSubmit(full_cmd))
+                return True
             if key == "escape":
-                self._cancel_multiline()
+                self._cancel_history_multiline()
+                self._reset_history_browse()
+                self._input_active = False
+                self._set_height(1)
+                self.refresh()
                 self.post_message(CommandCancel())
                 return True
-
-            if key in ("enter", "return"):
-                line = self._input_buf
-                self._input_buf = ""
-                if line.strip() == self._ml_marker:
-                    # Terminator found — assemble and submit the block
-                    code = "\n".join(self._ml_buf)
-                    cmd = self._ml_cmd
-                    # Build verbatim history text: header + body lines + closing marker
-                    header = self._ml_header
-                    verbatim_lines = [header] + list(self._ml_buf) + [line]
-                    history_text = "\n".join(verbatim_lines)
-                    self._cancel_multiline()
-                    self.post_message(
-                        CommandSubmit(f"{cmd}\n{code}", history_text=history_text)
-                    )
-                else:
-                    self._ml_buf.append(line)
-                    # header + collected + current-input row
-                    self._set_height(2 + len(self._ml_buf))
-                self.refresh()
+            if key == "up":
+                self._history_up()
                 return True
-
-            if key in ("backspace", "ctrl+h"):
-                self._input_buf = self._input_buf[:-1]
-                self.refresh()
+            if key == "down":
+                self._history_down()
                 return True
+            return True  # swallow all other keys in recall mode
 
-            if char and char.isprintable():
-                self._input_buf += char
-                self.refresh()
-                return True
+        if key == "escape":
+            self._cancel_multiline()
+            self.post_message(CommandCancel())
+            return True
 
-            return False
+        if key in ("enter", "return"):
+            line = self._input_buf
+            self._input_buf = ""
+            if line.strip() == self._ml_marker:
+                # Terminator found — assemble and submit the block
+                code = "\n".join(self._ml_buf)
+                cmd = self._ml_cmd
+                verbatim_lines = [self._ml_header] + list(self._ml_buf) + [line]
+                history_text = "\n".join(verbatim_lines)
+                self._cancel_multiline()
+                self.post_message(CommandSubmit(f"{cmd}\n{code}", history_text=history_text))
+            else:
+                self._ml_buf.append(line)
+                self._set_height(2 + len(self._ml_buf))  # header + collected + input
+            self.refresh()
+            return True
 
-        # ── Normal single-line command input ──────────────────────────
+        if key in ("backspace", "ctrl+h"):
+            self._input_buf = self._input_buf[:-1]
+            self.refresh()
+            return True
+
+        if char and char.isprintable():
+            self._input_buf += char
+            self.refresh()
+            return True
+
+        return False
+
+    def _handle_single_line_key(self, key: str, char: str) -> bool:
+        """Handle a key during normal single-line command input."""
         if not self._input_active:
             return False
 
@@ -384,7 +388,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
             self._handle_tab()
             return True
 
-        # Cursor movement (readline-style)
+        # Readline-style cursor movement
         if key in ("left", "ctrl+b"):
             if self._cursor_pos > 0:
                 self._cursor_pos -= 1
@@ -404,7 +408,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
             self.refresh()
             return True
 
-        # History navigation — Up/Down arrows with prefix matching
+        # History navigation — Up/Down with prefix matching
         if key == "up":
             self._history_up()
             return True

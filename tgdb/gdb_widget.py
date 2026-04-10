@@ -114,7 +114,6 @@ class _GDBContent(ScrollMixin, Widget):
     def _init_pyte(self, rows: int, cols: int) -> None:
         """Create or resize the pyte terminal, preserving existing content."""
         if self._screen is None:
-            # First init — create fresh screen
             self._pyte_rows = rows
             self._pyte_cols = cols
             self._screen = _GDBScreen(cols, rows, self._push_to_scrollback)
@@ -122,99 +121,90 @@ class _GDBContent(ScrollMixin, Widget):
             self._stream = pyte.ByteStream(self._screen)
         else:
             if rows < self._pyte_rows:
-                # pyte.Screen.resize() calls delete_lines(old_rows - new_rows)
-                # with the cursor moved to row 0.  This always drops
-                # (old_rows - new_rows) rows from the top regardless of where
-                # the cursor actually is — which destroys content when the
-                # pane shrinks but the cursor is not near the bottom.
-                #
-                # The correct behaviour (matching cgdb/libvterm) is:
-                #   only push as many rows off the top as needed to keep the
-                #   cursor on screen: top_scroll = max(0, cursor.y+1 - new_rows)
-                #
-                # We implement this ourselves and then tell pyte the new line
-                # count directly so its resize() skips delete_lines entirely.
-                cy = self._screen.cursor.y
-                buf = self._screen.buffer
-                use_color = self._screen.use_color
-
-                top_scroll = max(0, cy + 1 - rows)
-
-                # Push displaced rows to both scrollback deques (text + raw ref).
-                # We save the StaticDefaultDict reference directly — no O(cols)
-                # dict() copy.  After buf.clear() below, pyte no longer holds
-                # these references, so _scrollback_raw is the sole owner and
-                # pyte cannot mutate them.
-                for r in range(top_scroll):
-                    row = buf.get(r)
-                    self._push_to_scrollback(
-                        _row_to_text(row, self._pyte_cols, use_color=use_color),
-                        row,  # save reference, not a copy
-                    )
-
-                # Shift the buffer up by top_scroll rows in-place.
-                new_entries: dict = {}
-                for old_r in list(buf.keys()):
-                    new_r = old_r - top_scroll
-                    if 0 <= new_r < rows:
-                        new_entries[new_r] = buf[old_r]
-                buf.clear()
-                buf.update(new_entries)
-
-                # Clamp cursor.
-                self._screen.cursor.y = max(0, cy - top_scroll)
-
-                # Tell pyte the screen is already at the new row count so
-                # its resize() sees lines == self.lines and skips delete_lines.
-                self._screen.lines = rows
-                self._screen.dirty.update(range(rows))
-
+                self._shrink_pyte(rows)
             elif rows > self._pyte_rows:
-                # Growing: pull rows back from scrollback to fill the newly
-                # visible space at the top — mirrors cgdb/libvterm grow behaviour.
-                grow = rows - self._pyte_rows
-                n_restore = min(grow, len(self._scrollback_raw))
-
-                if n_restore > 0:
-                    buf = self._screen.buffer
-
-                    # Pop from the RIGHT (most recently pushed = was topmost row
-                    # just before the last shrink).  Collect in push order so
-                    # the oldest of the restored set goes to row 0 and the
-                    # most-recent goes to row n_restore-1 (just above content).
-                    to_restore: list[Optional[dict]] = []
-                    for _ in range(n_restore):
-                        self._scrollback.pop()  # keep display deque in sync
-                        to_restore.append(self._scrollback_raw.pop())
-                    # to_restore[0] = most recently pushed → row n_restore-1
-                    # to_restore[-1] = oldest restored    → row 0
-                    # reversed() puts them in correct top-to-bottom order.
-                    ordered = list(reversed(to_restore))
-
-                    # Shift existing buffer content down by n_restore.
-                    new_entries = {}
-                    for old_r in list(buf.keys()):
-                        new_entries[old_r + n_restore] = buf[old_r]
-                    buf.clear()
-                    buf.update(new_entries)
-
-                    # Place restored rows at the top.
-                    for i, raw in enumerate(ordered):
-                        if raw is not None:
-                            buf[i] = raw
-                        # else: leave the slot blank (not in buffer)
-
-                    # Shift cursor down to match the shifted content.
-                    cy = self._screen.cursor.y
-                    self._screen.cursor.y = min(rows - 1, cy + n_restore)
-                    self._screen.dirty.update(range(rows))
-
+                self._grow_pyte(rows)
             self._pyte_rows = rows
             self._pyte_cols = cols
-            # Let pyte handle column changes (and the dirty/margin bookkeeping).
-            # For shrink: screen.lines was pre-set above, so pyte skips delete_lines.
-            # For grow:   pyte just extends self.lines and updates self.columns.
+            # Let pyte handle column changes and dirty/margin bookkeeping.
+            # For shrink: screen.lines was pre-set in _shrink_pyte so pyte
+            # sees lines == self.lines and skips its own delete_lines.
+            # For grow:   pyte just extends self.lines and updates columns.
             self._screen.resize(rows, cols)
+
+    def _shrink_pyte(self, new_rows: int) -> None:
+        """Shrink the pyte screen from self._pyte_rows to new_rows.
+
+        pyte.Screen.resize() would call delete_lines(old - new) from row 0,
+        always dropping content from the top regardless of cursor position.
+        Instead we push only the rows that would scroll off and shift the
+        buffer up manually so the cursor stays on screen.
+        """
+        cy = self._screen.cursor.y
+        buf = self._screen.buffer
+        use_color = self._screen.use_color
+
+        top_scroll = max(0, cy + 1 - new_rows)
+
+        # Push displaced rows to both scrollback deques.
+        # Save the StaticDefaultDict reference directly (no O(cols) copy);
+        # after buf.clear() below pyte no longer holds these refs.
+        for r in range(top_scroll):
+            row = buf.get(r)
+            self._push_to_scrollback(
+                _row_to_text(row, self._pyte_cols, use_color=use_color),
+                row,
+            )
+
+        # Shift the buffer up by top_scroll rows in-place.
+        new_entries: dict = {}
+        for old_r in list(buf.keys()):
+            new_r = old_r - top_scroll
+            if 0 <= new_r < new_rows:
+                new_entries[new_r] = buf[old_r]
+        buf.clear()
+        buf.update(new_entries)
+
+        self._screen.cursor.y = max(0, cy - top_scroll)
+        # Pre-set line count so pyte's resize() skips delete_lines.
+        self._screen.lines = new_rows
+        self._screen.dirty.update(range(new_rows))
+
+    def _grow_pyte(self, new_rows: int) -> None:
+        """Grow the pyte screen from self._pyte_rows to new_rows.
+
+        Pull rows back from scrollback to fill the newly visible space at
+        the top — mirrors cgdb/libvterm grow behaviour.
+        """
+        n_restore = min(new_rows - self._pyte_rows, len(self._scrollback_raw))
+        if not n_restore:
+            return
+
+        buf = self._screen.buffer
+
+        # Pop from the RIGHT (most recently pushed = topmost row just before
+        # the last shrink).  Reversed so the oldest restored row goes to row 0.
+        to_restore: list[Optional[dict]] = []
+        for _ in range(n_restore):
+            self._scrollback.pop()  # keep display deque in sync
+            to_restore.append(self._scrollback_raw.pop())
+        ordered = list(reversed(to_restore))
+
+        # Shift existing content down by n_restore.
+        new_entries: dict = {}
+        for old_r in list(buf.keys()):
+            new_entries[old_r + n_restore] = buf[old_r]
+        buf.clear()
+        buf.update(new_entries)
+
+        # Place restored rows at the top.
+        for i, raw in enumerate(ordered):
+            if raw is not None:
+                buf[i] = raw
+
+        cy = self._screen.cursor.y
+        self._screen.cursor.y = min(new_rows - 1, cy + n_restore)
+        self._screen.dirty.update(range(new_rows))
 
     # ------------------------------------------------------------------
     # Feed raw GDB console bytes into the pyte emulator
