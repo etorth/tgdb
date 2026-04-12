@@ -25,11 +25,35 @@ _HEREDOC_RE = re.compile(r"^(python|py)\s+<<\s+(\S+)\s*$", re.IGNORECASE)
 
 
 class CommandLineBar(HistoryMixin, RenderMixin, Widget):
-    """Command-line bar at the bottom of the screen.
+    """Bottom command/status bar used for command mode, search, and messages.
 
-    Normally 1 row.  Expands to multiple rows while:
-    - A heredoc :python << MARKER block is being typed
-    - A multi-line result/error from a command is being displayed
+    Public interface
+    ----------------
+    ``CommandLineBar(hl, completion_provider=None, history_file=None, **kwargs)``
+        Create the widget.
+
+    ``set_mode(mode)``
+        Update the externally visible mode label.
+
+    ``start_command()``, ``start_search(forward)``, ``update_search(pattern)``,
+    ``cancel_input()``
+        Drive the active prompt state from the app layer.
+
+    ``show_message(msg)``, ``show_multiline_message(msg)``,
+    ``dismiss_message()``
+        Display transient status/error output.
+
+    ``lock_for_task()``, ``append_output(chunk)``, ``get_collected_output()``,
+    ``finish_task()``
+        Drive the async command-task output path.
+
+    ``set_completion_provider(provider)`` and ``feed_key(key, char)``
+        Integrate completion and keystroke routing.
+
+    Callers should treat the widget as a black box. Once constructed, the app
+    only needs to publish state through the methods above and handle the
+    ``CommandSubmit``, ``CommandCancel``, and ``MessageDismissed`` messages that
+    the widget emits.
     """
 
     DEFAULT_CSS = """
@@ -103,6 +127,21 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
     def _set_height(self, n: int) -> None:
         self.styles.height = max(1, n)
 
+
+    def _clear_multiline_message_state(self) -> None:
+        self._msg_lines = []
+        self._msg_scroll = 0
+        self._msg_visible_rows = 0
+
+
+    def _clear_message_state(self) -> None:
+        self._message = ""
+        self._clear_multiline_message_state()
+
+
+    def _collapse_to_single_line(self) -> None:
+        self._set_height(1)
+
     # ------------------------------------------------------------------
     # State setters (called by app)
     # ------------------------------------------------------------------
@@ -114,10 +153,8 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
     def show_message(self, msg: str) -> None:
         """Show a single-line status message (collapses any multiline display)."""
         self._message = msg
-        self._msg_lines = []
-        self._msg_scroll = 0
-        self._msg_visible_rows = 0
-        self._set_height(1)
+        self._clear_multiline_message_state()
+        self._collapse_to_single_line()
         self.refresh()
 
     def show_multiline_message(self, msg: str) -> None:
@@ -146,19 +183,13 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
 
     def dismiss_message(self) -> None:
         """Collapse the multi-line message and restore the bar to 1 row."""
-        self._msg_lines = []
-        self._msg_scroll = 0
-        self._msg_visible_rows = 0
-        self._message = ""
-        self._set_height(1)
+        self._clear_message_state()
+        self._collapse_to_single_line()
         self.refresh()
 
     def start_command(self) -> None:
         # Clear any lingering message/async-print so the input line is unobstructed
-        self._message = ""
-        self._msg_lines = []
-        self._msg_scroll = 0
-        self._msg_visible_rows = 0
+        self._clear_message_state()
         self._streaming_buf = ""  # clear fire-and-forget async-print display
         self._input_active = True
         self._search_active = False
@@ -167,7 +198,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         # Reset history browsing
         self._history_idx = -1
         self._history_prefix = ""
-        self._set_height(1)
+        self._collapse_to_single_line()
         self.refresh()
 
     def start_search(self, forward: bool) -> None:
@@ -187,11 +218,8 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         self._search_active = False
         self._ml_active = False
         self._ml_buf = []
-        self._message = ""
-        self._msg_lines = []
-        self._msg_scroll = 0
-        self._msg_visible_rows = 0
-        self._set_height(1)
+        self._clear_message_state()
+        self._collapse_to_single_line()
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -208,11 +236,8 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         self._streaming_buf = ""
         self._collected_lines = []
         self._input_active = False
-        self._message = ""
-        self._msg_lines = []
-        self._msg_scroll = 0
-        self._msg_visible_rows = 0
-        self._set_height(1)
+        self._clear_message_state()
+        self._collapse_to_single_line()
         self.refresh()
         return self._task_gen
 
@@ -272,7 +297,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         """Called by the app when the task ends; resets running state."""
         self._task_running = False
         self._streaming_buf = ""
-        self._set_height(1)
+        self._collapse_to_single_line()
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -333,7 +358,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
                 self._cancel_history_multiline()
                 self._reset_history_browse()
                 self._input_active = False
-                self._set_height(1)
+                self._collapse_to_single_line()
                 self.refresh()
                 self.post_message(CommandCancel())
                 return True
@@ -497,7 +522,7 @@ class CommandLineBar(HistoryMixin, RenderMixin, Widget):
         self._ml_cmd = ""
         self._ml_header = ""
         self._input_buf = ""
-        self._set_height(1)
+        self._collapse_to_single_line()
         self.refresh()
 
     def _msg_scroll_down(self) -> None:

@@ -193,7 +193,7 @@ class CommandsMixin:
         return None
 
     def _send_gdb_cli(self: TGDBApp, cmd: str) -> None:
-        _log.info("gdb cli: %r", cmd)
+        _log.info(f"gdb cli: {cmd!r}")
         if self.cfg.showdebugcommands:
             # Mirror cgdb showdebugcommands: echo the command into the GDB window
             gdb_w = self._get_gdb_widget()

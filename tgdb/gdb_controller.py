@@ -46,22 +46,45 @@ _log = logging.getLogger("tgdb.gdb_controller")
 
 
 class GDBController(ParsingMixin, VarobjMixin):
-    """
-    Spawn GDB with two PTY connections (primary console + MI), mirroring cgdb.
+    """Drive GDB through a console PTY plus a structured MI PTY.
 
-    Callbacks:
-        on_console(data: bytes)              — raw PTY bytes from GDB console
-        on_stopped(frame: Frame)             — execution stopped
-        on_running()                         — execution resumed
-        on_breakpoints(bps: list[Breakpoint])
-        on_source_files(files: list[str])
-        on_source_file(path: str, line: int) — current source file + line
-        on_locals(vars: list[LocalVariable]) — locals in current frame
-        on_stack(frames: list[Frame])        — call stack in current thread
-        on_threads(threads: list[ThreadInfo]) — thread list
-        on_registers(registers: list[RegisterInfo]) — register list
-        on_exit()                            — GDB exited
-        on_error(msg: str)                   — user-visible ^error
+    Public interface
+    ----------------
+    ``GDBController(gdb_path='gdb', args=None, init_commands=None)``
+        Create the controller. Construction is side-effect free; no GDB process
+        is spawned yet.
+
+    ``start(rows=24, cols=80)``, ``terminate()``, ``run_async()``
+        Manage the lifecycle of the underlying GDB process and its PTYs.
+
+    ``send_input(data)``, ``resize(rows, cols)``, ``send_signal(sig)``
+        Imperative console-facing operations for normal debugger I/O.
+
+    ``mi_command(...)`` and the async helpers such as ``mi_command_async()``,
+    ``read_memory_bytes_async()``, ``request_disassembly_async()``, and
+    ``eval_expr()``
+        Structured debugger operations routed through the MI channel.
+
+    Callback contract
+    -----------------
+    The app injects callbacks by assigning these attributes:
+
+    - ``on_console(data: bytes)``
+    - ``on_stopped(frame: Frame)``
+    - ``on_running()``
+    - ``on_breakpoints(bps: list[Breakpoint])``
+    - ``on_source_files(files: list[str])``
+    - ``on_source_file(path: str, line: int)``
+    - ``on_locals(vars: list[LocalVariable])``
+    - ``on_stack(frames: list[Frame])``
+    - ``on_threads(threads: list[ThreadInfo])``
+    - ``on_registers(registers: list[RegisterInfo])``
+    - ``on_exit()``
+    - ``on_error(msg: str)``
+
+    Callers should treat everything else as controller internals. Once started,
+    the controller owns MI parsing, request bookkeeping, and publication of
+    debugger state through the callback surface above.
     """
 
     def __init__(
@@ -149,9 +172,9 @@ class GDBController(ParsingMixin, VarobjMixin):
                     os.close(fd)
                 except OSError:
                     pass
-            _log.error("GDB spawn failed, cmd=%r", cmd)
+            _log.error(f"GDB spawn failed, cmd={cmd!r}")
             raise
-        _log.info("GDB spawned, cmd=%r", cmd)
+        _log.info(f"GDB spawned, cmd={cmd!r}")
         self._mi_master_fd = mi_master_fd
         self._mi_slave_fd = mi_slave_fd
 
@@ -171,7 +194,7 @@ class GDBController(ParsingMixin, VarobjMixin):
         if self._proc and self._proc.isalive():
             if isinstance(data, str):
                 data = data.encode()
-            _log.debug("GDB input: %r", data)
+            _log.debug(f"GDB input: {data!r}")
             self._proc.write(data)
 
     def terminate(self) -> None:
@@ -262,7 +285,7 @@ class GDBController(ParsingMixin, VarobjMixin):
             line, self._mi_buf = self._mi_buf.split("\n", 1)
             line = line.rstrip("\r")
             if line:
-                _log.debug("MI raw: %s", line)
+                _log.debug(f"MI raw: {line}")
             self._dispatch(line)
 
     def _dispatch(self, line: str) -> None:
@@ -286,7 +309,7 @@ class GDBController(ParsingMixin, VarobjMixin):
             fut = self._pending.pop(token, None)
             if fut is not None and not fut.done():
                 fut.set_result(rec)
-        _log.debug("MI result token=%s cls=%s", token, cls)
+        _log.debug(f"MI result token={token} cls={cls}")
 
         if cls == "error":
             self._handle_error_result(meta, results)
@@ -322,68 +345,115 @@ class GDBController(ParsingMixin, VarobjMixin):
         else:
             msg = results.get("msg", "")
             if isinstance(msg, str) and report:
-                _log.error("MI error: %s", msg)
+                _log.error(f"MI error: {msg}")
                 self.on_error(msg)
 
     def _handle_done_result(self, meta: dict, results: dict) -> None:
         """Handle MI result records with ``message="done"`` or ``"running"``."""
+        self._handle_breakpoint_result(results)
+        self._handle_source_file_result(results)
+        self._handle_source_files_result(results)
+        self._handle_locals_result(results)
+        self._handle_stack_result(results)
+        self._handle_threads_result(results)
+        self._handle_register_result(results)
+        self._handle_frame_result(meta, results)
+
+
+    def _handle_breakpoint_result(self, results: dict) -> None:
         bkpt = results.get("bkpt")
         if bkpt:
             self._update_breakpoint_from_mi(bkpt)
+
         if "BreakpointTable" in results:
             self.handle_breaklist_result(results)
+
+
+    def _handle_source_file_result(self, results: dict) -> None:
         fullname = results.get("fullname")
-        if fullname and isinstance(fullname, str):
-            try:
-                line = int(results.get("line", 0) or 0)
-            except (TypeError, ValueError):
-                line = 0
-            self.on_source_file(fullname, line)
+        if not fullname or not isinstance(fullname, str):
+            return
+
+        try:
+            line = int(results.get("line", 0) or 0)
+        except (TypeError, ValueError):
+            line = 0
+        self.on_source_file(fullname, line)
+
+
+    def _handle_source_files_result(self, results: dict) -> None:
         files = results.get("files")
         if files:
             self._handle_source_files(files)
-        if "variables" in results:
-            self.locals = self._parse_local_variables(results.get("variables"))
-            self.on_locals(list(self.locals))
-        if "stack" in results:
-            self.stack = self._parse_stack_frames(results.get("stack"))
-            self.on_stack(list(self.stack))
-        if "threads" in results:
-            current_thread_id = results.get("current-thread-id")
-            if isinstance(current_thread_id, str):
-                self.current_thread_id = current_thread_id
-            self.threads = self._parse_threads(results.get("threads"))
-            self._emit_threads()
+
+
+    def _handle_locals_result(self, results: dict) -> None:
+        if "variables" not in results:
+            return
+
+        self.locals = self._parse_local_variables(results.get("variables"))
+        self.on_locals(list(self.locals))
+
+
+    def _handle_stack_result(self, results: dict) -> None:
+        if "stack" not in results:
+            return
+
+        self.stack = self._parse_stack_frames(results.get("stack"))
+        self.on_stack(list(self.stack))
+
+
+    def _handle_threads_result(self, results: dict) -> None:
+        if "threads" not in results:
+            return
+
+        current_thread_id = results.get("current-thread-id")
+        if isinstance(current_thread_id, str):
+            self.current_thread_id = current_thread_id
+        self.threads = self._parse_threads(results.get("threads"))
+        self._emit_threads()
+
+
+    def _handle_register_result(self, results: dict) -> None:
         register_names = results.get("register-names")
         if isinstance(register_names, list):
-            self.register_names = [
-                name if isinstance(name, str) else ""
-                for name in register_names
-            ]
+            self.register_names = []
+            for name in register_names:
+                if isinstance(name, str):
+                    self.register_names.append(name)
+                else:
+                    self.register_names.append("")
             self._emit_registers()
+
         register_values = results.get("register-values")
         if isinstance(register_values, list):
             self._register_values = self._parse_register_values(register_values)
             self._emit_registers()
+
+
+    def _handle_frame_result(self, meta: dict, results: dict) -> None:
         frame = results.get("frame")
         report = bool(meta.get("report_error", True))
-        if frame:
-            parsed = self._parse_frame(frame)
-            self.current_frame = parsed
-            path = parsed.fullname or parsed.file
-            if path:
-                self.on_source_file(path, parsed.line)
-            elif meta.get("kind") == "current-location":
-                self.request_source_file(report_error=report)
+        if not frame:
             if meta.get("kind") == "current-location":
-                self.request_current_frame_locals(report_error=False)
-                self.request_current_stack_frames(report_error=False)
-                self.request_current_threads(report_error=False)
-                self.request_current_registers(report_error=False)
+                # Mirror cgdb's startup query path: ask for the current frame
+                # first, then fall back to exec source-file if needed.
+                self.request_source_file(report_error=report)
+            return
+
+        parsed = self._parse_frame(frame)
+        self.current_frame = parsed
+        path = parsed.fullname or parsed.file
+        if path:
+            self.on_source_file(path, parsed.line)
         elif meta.get("kind") == "current-location":
-            # Mirror cgdb's startup query path: ask for the current frame
-            # first, then fall back to exec source-file if needed.
             self.request_source_file(report_error=report)
+
+        if meta.get("kind") == "current-location":
+            self.request_current_frame_locals(report_error=False)
+            self.request_current_stack_frames(report_error=False)
+            self.request_current_threads(report_error=False)
+            self.request_current_registers(report_error=False)
 
     def _send_mi_command(
         self,

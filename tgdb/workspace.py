@@ -134,7 +134,27 @@ class EmptyPane(PaneBase):
 
 
 class PaneContainer(Widget):
-    """A generic horizontal/vertical container with resizable child items."""
+    """Resizable workspace container for pane and sub-container children.
+
+    Public interface
+    ----------------
+    ``PaneContainer(hl, orientation='horizontal', min_item_width=4, min_item_height=2, **kwargs)``
+        Create the container.
+
+    ``items``, ``index_of(item)``
+        Read the current logical children.
+
+    ``set_orientation(orientation)``
+        Switch between horizontal and vertical layout while preserving children.
+
+    ``set_items(items)``, ``insert_item(index, item)``, ``replace_item(old, new)``,
+    ``take_item(item)``
+        Mutate the container contents.
+
+    Callers should treat the container as the black-box layout primitive for the
+    workspace tree. It owns splitter management, local resize weights, and
+    DOM/layout rebuilding for nested panes.
+    """
 
     DEFAULT_CSS = """
     PaneContainer {

@@ -27,7 +27,28 @@ from .highlight_groups import HighlightGroups
 
 
 class FileDialog(Widget):
-    """Full-screen file picker matching cgdb filedlg.cpp layout."""
+    """Full-screen file picker matching cgdb's file-dialog behavior.
+
+    Public interface
+    ----------------
+    ``FileDialog(hl, **kwargs)``
+        Create the widget.
+
+    ``files = [...]``
+        Publish a new source-file list. The setter deduplicates entries, drops
+        missing files unless they are special ``*`` items, and sorts the result
+        in cgdb-compatible order.
+
+    ``open()``, ``close()``, ``set_pending()``
+        Control visibility and the async-loading placeholder state.
+
+    ``is_open``
+        Query whether the dialog is currently visible.
+
+    Callers should treat the widget as a black box. Once the file list and
+    config flags are set, the widget owns selection, search, navigation, and
+    emits ``FileSelected`` / ``FileDialogClosed`` for user actions.
+    """
 
     DEFAULT_CSS = """
     FileDialog {

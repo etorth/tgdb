@@ -72,12 +72,12 @@ def init(log_file: str) -> None:
     start_time = datetime.now(timezone.utc).astimezone()
     _logger.info("=" * 60)
     _logger.info("tgdb session started")
-    _logger.info("  time    : %s", start_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
-    _logger.info("  pid     : %d", os.getpid())
-    _logger.info("  python  : %s", sys.version.replace("\n", " "))
-    _logger.info("  platform: %s", platform.platform())
-    _logger.info("  argv    : %s", " ".join(sys.argv))
-    _logger.info("  log file: %s", log_file)
+    _logger.info(f"  time    : {start_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    _logger.info(f"  pid     : {os.getpid()}")
+    _logger.info(f"  python  : {sys.version.replace('\n', ' ')}")
+    _logger.info(f"  platform: {platform.platform()}")
+    _logger.info(f"  argv    : {' '.join(sys.argv)}")
+    _logger.info(f"  log file: {log_file}")
     _logger.info("=" * 60)
 
 
@@ -90,7 +90,7 @@ def shutdown() -> None:
     end_time = datetime.now(timezone.utc).astimezone()
     _logger.info("=" * 60)
     _logger.info("tgdb session ended")
-    _logger.info("  time: %s", end_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+    _logger.info(f"  time: {end_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     _logger.info("=" * 60)
     for handler in _logger.handlers:
         handler.flush()

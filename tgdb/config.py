@@ -90,10 +90,31 @@ def _apply_clipboard_path(path: str) -> None:
 
 
 class ConfigParser(UserCommandMixin, PythonExecMixin):
-    """
-    Parses cgdbrc-style config commands and updates a Config object.
+    """Parse tgdb/cgdb-style config commands and update live runtime objects.
 
-    Pass in the live Config, HighlightGroups, and KeyMapper objects.
+    Public interface
+    ----------------
+    ``ConfigParser(config, highlight_groups, key_mapper)``
+        Create the parser around the live objects it mutates.
+
+    ``set_cmdline_bar(bar)``
+        Inject the command-line bar so history-oriented commands can delegate to
+        the UI object that owns the history buffer.
+
+    ``register_handler(name, fn)``
+        Register an app-side command handler for commands that the config layer
+        recognizes but the application ultimately executes.
+
+    ``set_py_globals(mapping)``
+        Extend the persistent ``:python`` / ``:pyfile`` namespace with live
+        objects such as the app instance.
+
+    ``default_rc_path()``, ``load_file_async(path)``, ``execute_async(line)``
+        Resolve, load, and execute config/status-bar commands.
+
+    Callers should treat ``ConfigParser`` as the black-box command dispatcher
+    for rc files and ``:`` commands. The parser owns tokenization, aliases,
+    built-in option handling, user-defined commands, and Python execution.
     """
 
     def __init__(
@@ -164,7 +185,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         except OSError as e:
             return f"source: cannot open '{path}': {e}"
 
-        _log.info("loading rc file: %s", path)
+        _log.info(f"loading rc file: {path}")
         i = 0
         while i < len(raw_lines):
             line = raw_lines[i].rstrip("\n")
@@ -309,7 +330,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         rhs = self._decode_keyseq_tokens(match.group(3))
         if not lhs:
             return "map: empty lhs"
-        _log.debug("map %r -> %r", lhs, rhs)
+        _log.debug(f"map {lhs!r} -> {rhs!r}")
         self.km.map(mode, lhs, rhs)
         return None
 
@@ -422,7 +443,7 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
         name = self._resolve_name(name)
         if name in _BOOL_OPTIONS:
             setattr(self.config, name, value.lower() not in ("0", "false", "off", "no"))
-            _log.debug("set %s = %r", name, getattr(self.config, name))
+            _log.debug(f"set {name} = {getattr(self.config, name)!r}")
             return None
         elif name in _INT_OPTIONS:
             try:
@@ -432,22 +453,22 @@ class ConfigParser(UserCommandMixin, PythonExecMixin):
                     self.km.timeout_ms = int(value)
                 elif name == "ttimeoutlen":
                     self.km.ttimeout_ms = int(value)
-                _log.debug("set %s = %r", name, getattr(self.config, name))
+                _log.debug(f"set {name} = {getattr(self.config, name)!r}")
             except ValueError:
-                _log.warning("set: invalid integer value for %s: %r", name, value)
+                _log.warning(f"set: invalid integer value for {name}: {value!r}")
                 return f"set: invalid integer '{value}'"
             return None
         elif name in _STR_OPTIONS:
             setattr(self.config, name, value.lower())
-            _log.debug("set %s = %r", name, getattr(self.config, name))
+            _log.debug(f"set {name} = {getattr(self.config, name)!r}")
             return None
         elif name in _PATH_OPTIONS:
             setattr(self.config, name, value)  # preserve case
-            _log.debug("set %s = %r", name, value)
+            _log.debug(f"set {name} = {value!r}")
             if value:
                 _apply_clipboard_path(value)
             return None
-        _log.warning("set: unknown option %r", name)
+        _log.warning(f"set: unknown option {name!r}")
         return f"set: unknown option '{name}'"
 
     def _resolve_name(self, name: str) -> str:

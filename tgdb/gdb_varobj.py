@@ -100,10 +100,10 @@ class VarobjMixin:
         except OSError as e:
             self._request_meta.pop(token, None)
             self._pending.pop(token, None)
-            _log.error("MI write failed: %s", e)
+            _log.error(f"MI write failed: {e}")
             raise RuntimeError(f"MI write failed: {e}") from e
 
-        _log.debug("MI >> %s", cmd)
+        _log.debug(f"MI >> {cmd}")
 
         if timeout is None:
             result = await fut
@@ -115,10 +115,10 @@ class VarobjMixin:
                 # pending entry so the eventual stale response is silently dropped.
                 self._pending.pop(token, None)
                 self._request_meta.pop(token, None)
-                _log.warning("MI command timed out: %s", cmd)
+                _log.warning(f"MI command timed out: {cmd}")
                 raise RuntimeError("MI command timed out — GDB may be busy")
 
-        _log.debug("MI << token=%d msg=%s", token, result.get("message"))
+        _log.debug(f"MI << token={token} msg={result.get('message')}")
 
         if result.get("message") == "error":
             payload = result.get("payload") or {}
@@ -134,7 +134,7 @@ class VarobjMixin:
         """
         result = await self.mi_command_async(f'-var-create - {frame} "{expr}"')
         payload = result.get("payload") or {}
-        _log.debug("var_create expr=%r -> name=%r", expr, payload.get("name"))
+        _log.debug(f"var_create expr={expr!r} -> name={payload.get('name')!r}")
         return payload
 
     async def var_list_children(
@@ -177,18 +177,14 @@ class VarobjMixin:
             if isinstance(child, dict):
                 children.append(child)
         _log.debug(
-            "var_list_children %s from=%d limit=%d -> %d children has_more=%s",
-            varobj_name,
-            from_idx,
-            limit,
-            len(children),
-            has_more,
+            f"var_list_children {varobj_name} from={from_idx} "
+            f"limit={limit} -> {len(children)} children has_more={has_more}"
         )
         return children, has_more
 
     async def var_delete(self, varobj_name: str) -> None:
         """Delete a varobj and its children."""
-        _log.debug("var_delete %s", varobj_name)
+        _log.debug(f"var_delete {varobj_name}")
         try:
             await self.mi_command_async(f"-var-delete {varobj_name}")
         except RuntimeError:
@@ -225,7 +221,7 @@ class VarobjMixin:
         try:
             await self.mi_command_async(f'-interpreter-exec console "python {py_cmd}"')
         except RuntimeError as exc:
-            _log.debug("get_decl_lines python step failed: %s", exc)
+            _log.debug(f"get_decl_lines python step failed: {exc}")
             return {}
 
         # Set both print limits to unlimited so the convenience variable value
@@ -242,7 +238,7 @@ class VarobjMixin:
         try:
             raw = await self.eval_expr("$tgdb_decls")
         except RuntimeError as exc:
-            _log.debug("get_decl_lines eval step failed: %s", exc)
+            _log.debug(f"get_decl_lines eval step failed: {exc}")
             return {}
         finally:
             # Restore GDB defaults.  "elements 200" is the factory default;
@@ -271,7 +267,7 @@ class VarobjMixin:
             except ValueError:
                 pass
 
-        _log.debug("get_decl_lines -> %s", result)
+        _log.debug(f"get_decl_lines -> {result}")
         return result
 
     async def eval_expr(self, expr: str) -> str:
@@ -292,7 +288,7 @@ class VarobjMixin:
         result = await self.mi_command_async(f"-var-evaluate-expression {varobj_name}")
         payload = result.get("payload") or {}
         value = payload.get("value", "")
-        _log.debug("var_evaluate_expression %s -> %r", varobj_name, value)
+        _log.debug(f"var_evaluate_expression {varobj_name} -> {value!r}")
         return value
 
     async def var_update(
@@ -311,5 +307,5 @@ class VarobjMixin:
         changelist = payload.get("changelist", [])
         if not isinstance(changelist, list):
             changelist = []
-        _log.debug("var_update %s -> %d changes", varobj_name, len(changelist))
+        _log.debug(f"var_update {varobj_name} -> {len(changelist)} changes")
         return changelist

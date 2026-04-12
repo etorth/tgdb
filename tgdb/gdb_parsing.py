@@ -44,12 +44,9 @@ class ParsingMixin:
             thread_id = results.get("thread-id")
             if isinstance(thread_id, str):
                 self.current_thread_id = thread_id
-            _log.info(
-                "stopped reason=%s frame=%s:%d",
-                results.get("reason", ""),
-                frame.file or frame.fullname,
-                frame.line,
-            )
+            reason = results.get("reason", "")
+            path = frame.file or frame.fullname
+            _log.info(f"stopped reason={reason} frame={path}:{frame.line}")
             self.on_stopped(frame)
             self.request_current_frame_locals(report_error=False)
             self.request_current_stack_frames(report_error=False)
@@ -92,7 +89,7 @@ class ParsingMixin:
         elif cls == "breakpoint-deleted":
             try:
                 num = int(results.get("id", ""))
-                _log.info("breakpoint-deleted id=%s", results.get("id", ""))
+                _log.info(f"breakpoint-deleted id={results.get('id', '')}")
                 kept = []
                 for b in self.breakpoints:
                     if b.number != num:
@@ -268,12 +265,8 @@ class ParsingMixin:
         if "enabled" in data:
             existing.enabled = data["enabled"] == "y"
         existing.temporary = data.get("disp", "") == "del"
-        _log.info(
-            "breakpoint updated: #%d %s:%d",
-            existing.number,
-            existing.file or existing.fullname,
-            existing.line,
-        )
+        path = existing.file or existing.fullname
+        _log.info(f"breakpoint updated: #{existing.number} {path}:{existing.line}")
         self.on_breakpoints(list(self.breakpoints))
 
     def handle_breaklist_result(self, results: dict) -> None:
@@ -302,7 +295,7 @@ class ParsingMixin:
                     )
                 )
         self.breakpoints = new_bps
-        _log.info("breaklist: %d breakpoints", len(new_bps))
+        _log.info(f"breaklist: {len(new_bps)} breakpoints")
         self.on_breakpoints(list(self.breakpoints))
 
     def _handle_source_files(self, files) -> None:

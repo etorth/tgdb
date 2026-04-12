@@ -62,7 +62,7 @@ class CallbacksMixin:
             if b.line == msg.line and b_basename == target_basename:
                 existing = b
                 break
-        _log.info("toggle breakpoint line=%d file=%s", msg.line, sf.path)
+        _log.info(f"toggle breakpoint line={msg.line} file={sf.path}")
         if existing:
             self.gdb.delete_breakpoint(existing.number)
         else:
@@ -180,7 +180,7 @@ class CallbacksMixin:
         self._set_mode("GDB_SCROLL")
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
-        _log.info("command: %r", msg.command)
+        _log.info(f"command: {msg.command!r}")
         # If a command task is already running, reject new submissions.
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
@@ -285,12 +285,8 @@ class CallbacksMixin:
 
     def _ui_on_stopped(self, frame: Frame) -> None:
         """GDB stopped — update source view to executing location."""
-        _log.info(
-            "stopped frame=%s:%d func=%s",
-            frame.file or frame.fullname,
-            frame.line,
-            frame.func,
-        )
+        path = frame.file or frame.fullname
+        _log.info(f"stopped frame={path}:{frame.line} func={frame.func}")
         path = frame.fullname or frame.file
         if path and os.path.isfile(path):
             src = self._get_source_view()
@@ -330,13 +326,13 @@ class CallbacksMixin:
         self._focus_widget(self._first_workspace_leaf())
 
     def _ui_set_breakpoints(self, bps: list[Breakpoint]) -> None:
-        _log.info("breakpoints: %d", len(bps))
+        _log.info(f"breakpoints: {len(bps)}")
         src = self._get_source_view()
         if src is not None:
             src.set_breakpoints(bps)
 
     def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
-        _log.debug("locals: %d vars", len(variables))
+        _log.debug(f"locals: {len(variables)} vars")
         self._current_locals = list(variables)
         if self._locals_pane is not None:
             self._locals_pane.set_variables(
@@ -385,7 +381,7 @@ class CallbacksMixin:
             return
         # Only load if no file is shown yet (don't override a user selection)
         if not src.source_file:
-            _log.info("load source %s line %d", path, line)
+            _log.info(f"load source {path} line {line}")
             src.load_file(path)
             if line > 0:
                 src.move_to(line)

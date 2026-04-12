@@ -214,14 +214,26 @@ class _PanelWidget(Widget):
 
 
 class ContextMenu(Widget):
-    """
-    Cascading popup context menu.
+    """Cascading popup context menu used by tgdb's workspace.
 
-    Manages menu state and keyboard navigation.  Each visible panel is
-    rendered by a _PanelWidget (a child of Screen) that is sized to exactly
-    cover that panel's rectangle.  The ContextMenu widget itself is 1×1 and
-    sits beneath the root panel widget on the dialog layer; it only exists to
-    hold focus for keyboard events.
+    Public interface
+    ----------------
+    ``ContextMenu(hl, items=None, **kwargs)``
+        Create the menu widget.
+
+    ``set_items(items)``
+        Replace the root menu items.
+
+    ``open_at(x, y)``, ``close()``
+        Show or hide the popup at screen coordinates.
+
+    ``is_open`` and ``contains_point(x, y)``
+        Query the visible state and geometry from the outside.
+
+    Callers should treat the widget as a black box. Once items are supplied, it
+    owns cascading-panel layout, focus, mouse/keyboard navigation, and emits
+    ``ContextMenuSelected`` / ``ContextMenuClosed`` when user interaction
+    completes.
     """
 
     DEFAULT_CSS = """
