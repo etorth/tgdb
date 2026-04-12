@@ -23,8 +23,8 @@ from typing import Callable, Coroutine, Optional
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from ..config_types import Config
-from ..gdb_types import Frame, LocalVariable
+from ..config import Config
+from ..gdb_controller import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
 from ..pane_chrome import PaneBase
 from .reconcile import LocalVariablePaneReconcileMixin

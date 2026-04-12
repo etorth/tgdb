@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import TypeAlias
 
-from ..gdb_types import LocalVariable
+from ..gdb_controller import LocalVariable
 
 _log = logging.getLogger("tgdb.locals")
 

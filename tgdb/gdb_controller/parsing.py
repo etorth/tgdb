@@ -1,16 +1,16 @@
 """
-GDB/MI parsing helpers — extracted from gdb_controller.py.
+GDB/MI parsing helpers used by the controller package.
 
 Provides ``ParsingMixin``, which handles async notification dispatch,
 MI result parsing (frames, locals, threads, registers, breakpoints,
-source files), and the ``_safe_int`` utility.  Mixed into GDBController.
+source files), and the ``_safe_int`` utility. Mixed into ``GDBController``.
 """
 
 from __future__ import annotations
 
 import logging
 
-from .gdb_types import (
+from .types import (
     Breakpoint,
     Frame,
     LocalVariable,

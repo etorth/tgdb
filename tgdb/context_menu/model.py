@@ -1,4 +1,4 @@
-"""Shared data model for the cascading context menu."""
+"""Shared data model for the cascading context-menu package."""
 
 from __future__ import annotations
 

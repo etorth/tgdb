@@ -1,8 +1,8 @@
 """
-User-defined command mixin for ConfigParser.
+User-defined command helpers for the configuration package.
 
-Provides :command registration, lookup, expansion, execution,
-and Tab-completion support.
+Provides ``:command`` registration, lookup, expansion, execution, and
+Tab-completion support.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import re
 import shlex
 from typing import Callable, Optional
 
-from .config_types import _CMD_NAME_RE, UserCommandDef
+from .types import _CMD_NAME_RE, UserCommandDef
 
 
 class UserCommandMixin:

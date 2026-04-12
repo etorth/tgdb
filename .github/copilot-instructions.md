@@ -36,16 +36,19 @@
 
 - `tgdb/__main__.py` is a thin cgdb-compatible CLI wrapper. It parses `-d`, `-w`, `-r`, `--args`, and `--cd`, then launches `TGDBApp`.
 - `tgdb/app.py` is the orchestration layer. It composes the Textual widgets, owns mode and split state, registers `:` commands, and translates widget messages into debugger actions.
-- `tgdb/gdb_controller.py` is the debugger bridge. It uses **two PTYs**:
+- `tgdb/gdb_controller/` is the debugger bridge package. `controller.py` exposes `GDBController`, while `types.py`, `requests.py`, `results.py`, `parsing.py`, `varobj.py`, and `miparser.py` split the controller internals by responsibility. It uses **two PTYs**:
   - the primary PTY is the normal GDB console stream, forwarded as raw bytes to the bottom pane;
   - the secondary PTY is a `new-ui mi ...` channel used for structured MI records such as stopped frames, source files, and breakpoints.
-- `tgdb/gdb_widget/` is the GDB console package. `pane.py` exposes `GDBWidget`, while the package preserves the historical `tgdb.gdb_widget` import surface for scroll-mode messages and the public widget entry point.
+- `tgdb/gdb_widget/` is the GDB console package. `pane.py` exposes `GDBWidget`, while `content.py`, `screen.py`, and `scroll.py` keep the terminal-emulation and scroll-mode internals behind the historical `tgdb.gdb_widget` import surface.
 - `tgdb/source_widget/` is the source-pane package. `pane.py` exposes `SourceView`, while `source_data.py`, `source_messages.py`, and `source_rendering.py` continue to hold the supporting data structures, messages, and rendering logic used by the pane.
 - `tgdb/local_variable_pane/` is a small package, not a single file. `pane.py` exposes `LocalVariablePane`, while `shared.py`, `support.py`, `tree.py`, `update.py`, and `reconcile.py` split the locals-pane internals by responsibility.
 - The other auxiliary panes now follow the same package-per-pane layout too: `tgdb/stack_pane/`, `tgdb/thread_pane/`, `tgdb/register_pane/`, `tgdb/evaluate_pane/`, `tgdb/memory_pane/`, and `tgdb/disasm_pane/` each expose a single public pane type from `pane.py`.
 - `tgdb/status_bar.py` is not just display chrome; it owns `:` command entry, `/` and `?` prompts, focus markers, and drag-resize interaction for horizontal splits.
-- `tgdb/file_dialog.py` is a full-screen source-file picker with its own search/navigation model. It is meant to mirror cgdb’s dialog behavior rather than act like a generic list widget.
-- `tgdb/config.py`, `tgdb/highlight_groups.py`, and `tgdb/key_mapper.py` together implement cgdb-style config parsing:
+- `tgdb/command_line_bar/` is the bottom command/status package. `bar.py` exposes `CommandLineBar`, while `history.py`, `keys.py`, `messages.py`, `render.py`, `state.py`, and `task.py` keep the prompt, history, rendering, and task internals private behind the package entry point.
+- `tgdb/context_menu/` is the cascading workspace context-menu package. `menu.py` exposes `ContextMenu`, `model.py` holds the public `ContextMenuItem` tree plus internal layout records, and `panel.py` renders the popup panels as private implementation detail widgets.
+- `tgdb/file_dialog/` is the full-screen source-file picker package. `dialog.py` exposes `FileDialog`, while `messages.py`, `keys.py`, `search.py`, and `view.py` keep its search/navigation internals self-contained.
+- `tgdb/config/`, `tgdb/highlight_groups.py`, and `tgdb/key_mapper.py` together implement cgdb-style config parsing:
+  - `ConfigParser` lives in `config/parser.py`, while `types.py`, `shared.py`, `execution.py`, `keys.py`, `options.py`, `commands.py`, and `python_exec.py` keep the config internals self-contained behind the `tgdb.config` package entry point;
   - `ConfigParser` reads `~/.cgdb/cgdbrc` or `$CGDB_DIR/cgdbrc`;
   - `HighlightGroups` keeps cgdb-compatible group names and color semantics;
   - `KeyMapper` resolves `:map` / `:imap` expansions using a trie with timeout behavior.

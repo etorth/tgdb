@@ -8,7 +8,7 @@ import asyncio
 
 from textual.widgets import Tree
 
-from ..gdb_types import Frame, LocalVariable
+from ..gdb_controller import Frame, LocalVariable
 from .shared import BindingEntry, BindingKey, ExpansionPath, _SHADOW_SUFFIX, _log, _suppress_children
 
 

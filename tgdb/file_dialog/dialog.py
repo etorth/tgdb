@@ -18,11 +18,11 @@ from typing import Optional
 
 from textual.widget import Widget
 
-from .file_dialog_keys import FileDialogKeyMixin
-from .file_dialog_messages import FileDialogClosed, FileSelected
-from .file_dialog_search import FileDialogSearchMixin
-from .file_dialog_view import FileDialogViewMixin
-from .highlight_groups import HighlightGroups
+from .keys import FileDialogKeyMixin
+from .messages import FileDialogClosed, FileSelected
+from .search import FileDialogSearchMixin
+from .view import FileDialogViewMixin
+from ..highlight_groups import HighlightGroups
 
 
 class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin, Widget):
@@ -38,7 +38,7 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
         missing files unless they are special ``*`` items, and sorts the result
         in cgdb-compatible order.
 
-    ``open()``, ``close()``, ``set_pending()``
+    ``open()``, ``open_pending()``, ``close()``
         Control visibility and the async-loading placeholder state.
 
     ``is_open``

@@ -1,4 +1,4 @@
-"""Panel renderer used by the cascading context menu."""
+"""Panel renderer used by the cascading context-menu package."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from textual import events
 from textual.strip import Strip
 from textual.widget import Widget
 
-from .context_menu_model import _PanelLayout, _item_row_text
-from .highlight_groups import HighlightGroups
+from .model import _PanelLayout, _item_row_text
+from ..highlight_groups import HighlightGroups
 
 if TYPE_CHECKING:
-    from .context_menu import ContextMenu
+    from .menu import ContextMenu
 
 
 class _PanelWidget(Widget):

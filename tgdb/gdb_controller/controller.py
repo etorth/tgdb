@@ -23,21 +23,21 @@ from typing import Callable, Optional
 
 import ptyprocess
 
-from .gdb_controller_requests import GDBRequestMixin
-from .gdb_controller_results import GDBResultMixin
-from .gdb_types import (  # noqa: F401 — re-exported
+from .requests import GDBRequestMixin
+from .results import GDBResultMixin
+from .types import (  # noqa: F401 — re-exported
     Breakpoint,
     Frame,
     LocalVariable,
     ThreadInfo,
     RegisterInfo,
 )
-from .gdb_varobj import VarobjMixin
-from .gdb_parsing import ParsingMixin
+from .varobj import VarobjMixin
+from .parsing import ParsingMixin
 # GDB/MI output parser — uses GDBMIParser extracted from pygdbmi
 # ---------------------------------------------------------------------------
 
-from .gdb_miparser import GDBMIParser
+from .miparser import GDBMIParser
 
 _log = logging.getLogger("tgdb.gdb_controller")
 

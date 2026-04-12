@@ -263,12 +263,14 @@ map <F10> :step<Enter>
 tgdb/
 ├── __main__.py          CLI entry point (argparse, launches app)
 ├── app.py               Main Textual App — layout, focus, event routing
-├── gdb_controller.py    GDB subprocess (PTY), GDB/MI parser, callbacks
+├── gdb_controller/      GDB bridge package — controller, MI parser, callbacks
 ├── source_widget/       Source code viewer package (SourceView + reexports)
-├── gdb_widget/          GDB console package — scrollback, ANSI, scroll mode
+├── gdb_widget/          GDB console package — pane, screen, scroll mode
+├── command_line_bar/    Command/status bar package
+├── context_menu/        Cascading workspace context-menu package
 ├── status_bar.py        Status bar widget
-├── file_dialog.py       File picker dialog widget
-├── config.py            Configuration parser (cgdbrc format)
+├── file_dialog/         File picker dialog package
+├── config/             Configuration package (cgdbrc parser + helpers)
 ├── highlight_groups.py  Highlight group table and colour management
 └── key_mapper.py        Key mapping with trie + timeout (KUI)
 ```

@@ -1,9 +1,8 @@
 """
 Configuration types and constants for tgdb.
 
-This module defines the Config dataclass, UserCommandDef, and all
-option-set / alias constants used by ConfigParser and the rest of
-the application.
+This module defines the public ``Config`` state object, ``UserCommandDef``, and
+the option/alias constants used internally by the configuration package.
 """
 
 from __future__ import annotations
@@ -24,6 +23,8 @@ _TGDB_RESERVED_PREFIX = "_tgdb_RSVD"
 
 @dataclass
 class Config:
+    """Mutable runtime configuration shared between tgdb subsystems."""
+
     # Boolean options
     autosourcereload: bool = True
     color: bool = True

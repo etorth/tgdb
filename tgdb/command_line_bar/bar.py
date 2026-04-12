@@ -13,13 +13,14 @@ from typing import Callable, Optional
 
 from textual.widget import Widget
 
-from .cmdline_history import HistoryMixin
-from .cmdline_keys import CommandLineKeyMixin
-from .cmdline_messages import CommandCancel, CommandSubmit, MessageDismissed
-from .cmdline_render import RenderMixin
-from .cmdline_state import CommandLineStateMixin
-from .cmdline_task import CommandLineTaskMixin
-from .highlight_groups import HighlightGroups
+from .history import HistoryMixin
+from .keys import CommandLineKeyMixin
+from .messages import CommandCancel, CommandSubmit, MessageDismissed
+from .render import RenderMixin
+from .state import CommandLineStateMixin
+from .task import CommandLineTaskMixin
+from ..highlight_groups import HighlightGroups
+
 
 class CommandLineBar(
     CommandLineKeyMixin,
@@ -53,6 +54,10 @@ class CommandLineBar(
 
     ``set_completion_provider(provider)`` and ``feed_key(key, char)``
         Integrate completion and keystroke routing.
+
+    ``load_history()``, ``save_history(...)``, ``list_history()``
+        Manage persistent command history using tgdb's heredoc-aware history
+        format.
 
     Callers should treat the widget as a black box. Once constructed, the app
     only needs to publish state through the methods above and handle the

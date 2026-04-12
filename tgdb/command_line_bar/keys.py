@@ -6,7 +6,7 @@ import re
 
 from textual import events
 
-from .cmdline_messages import CommandCancel, CommandSubmit, MessageDismissed
+from .messages import CommandCancel, CommandSubmit, MessageDismissed
 
 _HEREDOC_RE = re.compile(r"^(python|py)\s+<<\s+(\S+)\s*$", re.IGNORECASE)
 

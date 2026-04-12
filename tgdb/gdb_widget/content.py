@@ -18,8 +18,8 @@ from textual import events
 from rich.text import Text
 
 from ..highlight_groups import HighlightGroups
-from ..gdb_screen import _GDBScreen, _row_to_text
-from ..gdb_scroll import ScrollMixin
+from .screen import _GDBScreen, _row_to_text
+from .scroll import ScrollMixin
 
 
 class _GDBContent(ScrollMixin, Widget):

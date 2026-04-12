@@ -2,15 +2,14 @@
 VarobjMixin — varobj-related async MI commands.
 
 Provides var_create, var_list_children, var_delete, var_update, and the
-underlying mi_command_async helper.  Mixed into GDBController.
+declaration-line helpers used by ``LocalVariablePane``. Mixed into
+``GDBController``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
-import os
 
 _log = logging.getLogger("tgdb.gdb_varobj")
 
@@ -59,80 +58,33 @@ _DECL_LINES_B64 = base64.b64encode(_DECL_LINES_SCRIPT.encode()).decode()
 
 
 class VarobjMixin:
-    """Mixin providing varobj commands and the async MI command helper.
+    """Mixin providing varobj commands built on the controller MI helper.
 
-    Expects the host class to have:
-        _mi_master_fd : int
-        _token        : int
-        _pending      : dict[int, asyncio.Future]
-        _request_meta : dict[int, dict[str, object]]
+    Expects the host class to provide ``mi_command_async(...)`` with the
+    ``timeout`` and ``raise_on_error`` parameters exposed by
+    ``GDBRequestMixin.mi_command_async``.
     """
 
-    # -- async MI command helper -------------------------------------------
-
-    async def mi_command_async(self, cmd: str, timeout: float | None = 10.0) -> dict:
-        """Send an MI command and await its result.
-
-        Returns ``{"message": str, "payload": dict|None}``.
-        Raises ``RuntimeError`` on send failure, ``^error`` response, or timeout.
-
-        *timeout* is the number of seconds to wait for a GDB response.
-        Pass ``None`` to wait forever (e.g. for slow operations like
-        ``-file-list-exec-source-files`` on large binaries).
-
-        The default 10-second timeout guards against GDB hanging inside a
-        pretty-printer — for example when a variable is uninitialized and its
-        garbage memory makes GDB think it has billions of children.
-        """
-        if self._mi_master_fd < 0:
-            raise RuntimeError("MI channel not open")
-
-        token = self._token
-        self._token += 1
-        self._request_meta[token] = {"report_error": False, "kind": None}
-
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future = loop.create_future()
-        self._pending[token] = fut
-
-        try:
-            os.write(self._mi_master_fd, f"{token}{cmd}\n".encode())
-        except OSError as e:
-            self._request_meta.pop(token, None)
-            self._pending.pop(token, None)
-            _log.error(f"MI write failed: {e}")
-            raise RuntimeError(f"MI write failed: {e}") from e
-
-        _log.debug(f"MI >> {cmd}")
-
-        if timeout is None:
-            result = await fut
-        else:
-            try:
-                result = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
-            except asyncio.TimeoutError:
-                # GDB is stuck (e.g. iterating garbage children).  Remove the
-                # pending entry so the eventual stale response is silently dropped.
-                self._pending.pop(token, None)
-                self._request_meta.pop(token, None)
-                _log.warning(f"MI command timed out: {cmd}")
-                raise RuntimeError("MI command timed out — GDB may be busy")
-
-        _log.debug(f"MI << token={token} msg={result.get('message')}")
-
-        if result.get("message") == "error":
-            payload = result.get("payload") or {}
-            raise RuntimeError(payload.get("msg", "unknown MI error"))
-        return result
-
     # -- varobj commands ---------------------------------------------------
+
+    async def _eval_expr_raw(self, expr: str) -> str:
+        """Evaluate a GDB expression and return its raw value string."""
+        result = await self.mi_command_async(
+            f"-data-evaluate-expression {expr}",
+            raise_on_error=True,
+        )
+        payload = result.get("payload") or {}
+        return payload.get("value", "")
 
     async def var_create(self, expr: str, *, frame: str = "*") -> dict:
         """Create a varobj for *expr*.  Returns the MI result payload.
 
         Keys include ``name``, ``numchild``, ``value``, ``type``, etc.
         """
-        result = await self.mi_command_async(f'-var-create - {frame} "{expr}"')
+        result = await self.mi_command_async(
+            f'-var-create - {frame} "{expr}"',
+            raise_on_error=True,
+        )
         payload = result.get("payload") or {}
         _log.debug(f"var_create expr={expr!r} -> name={payload.get('name')!r}")
         return payload
@@ -160,7 +112,7 @@ class VarobjMixin:
             )
         else:
             cmd = f"-var-list-children --all-values {varobj_name}"
-        result = await self.mi_command_async(cmd)
+        result = await self.mi_command_async(cmd, raise_on_error=True)
         payload = result.get("payload") or {}
         has_more = payload.get("has_more", "0") == "1"
         children_raw = payload.get("children", [])
@@ -186,7 +138,7 @@ class VarobjMixin:
         """Delete a varobj and its children."""
         _log.debug(f"var_delete {varobj_name}")
         try:
-            await self.mi_command_async(f"-var-delete {varobj_name}")
+            await self.mi_command_async(f"-var-delete {varobj_name}", raise_on_error=True)
         except RuntimeError:
             pass
 
@@ -220,7 +172,10 @@ class VarobjMixin:
         """
         py_cmd = f"import base64; exec(base64.b64decode('{_DECL_LINES_B64}').decode())"
         try:
-            await self.mi_command_async(f'-interpreter-exec console "python {py_cmd}"')
+            await self.mi_command_async(
+                f'-interpreter-exec console "python {py_cmd}"',
+                raise_on_error=True,
+            )
         except RuntimeError as exc:
             _log.debug(f"get_decl_lines python step failed: {exc}")
             return {}
@@ -232,12 +187,12 @@ class VarobjMixin:
         # We cannot read the current values via $-gdb_setting() in an MI
         # data-evaluate-expression (the embedded quotes confuse the MI parser),
         # so we simply restore to the GDB defaults (200 / elements) afterwards.
-        await self.mi_command_async("-gdb-set print elements unlimited")
-        await self.mi_command_async("-gdb-set print characters unlimited")
+        await self.mi_command_async("-gdb-set print elements unlimited", raise_on_error=True)
+        await self.mi_command_async("-gdb-set print characters unlimited", raise_on_error=True)
 
         # Read back the convenience variable.
         try:
-            raw = await self.eval_expr("$tgdb_decls")
+            raw = await self._eval_expr_raw("$tgdb_decls")
         except RuntimeError as exc:
             _log.debug(f"get_decl_lines eval step failed: {exc}")
             return {}
@@ -245,12 +200,18 @@ class VarobjMixin:
             # Restore GDB defaults.  "elements 200" is the factory default;
             # "characters elements" (GDB 14+) means "follow print elements".
             try:
-                await self.mi_command_async("-gdb-set print elements 200")
-            except Exception:
+                await self.mi_command_async(
+                    "-gdb-set print elements 200",
+                    raise_on_error=True,
+                )
+            except RuntimeError:
                 pass
             try:
-                await self.mi_command_async("-gdb-set print characters elements")
-            except Exception:
+                await self.mi_command_async(
+                    "-gdb-set print characters elements",
+                    raise_on_error=True,
+                )
+            except RuntimeError:
                 pass  # older GDB without print characters — ignore
 
         # raw looks like: '"v:5,x:3"' (GDB wraps strings in double quotes)
@@ -272,13 +233,6 @@ class VarobjMixin:
         return result
 
 
-    async def eval_expr(self, expr: str) -> str:
-        """Evaluate a GDB expression and return its value string."""
-        result = await self.mi_command_async(f"-data-evaluate-expression {expr}")
-        payload = result.get("payload") or {}
-        return payload.get("value", "")
-
-
     async def var_evaluate_expression(self, varobj_name: str) -> str:
         """Return the current value string of a varobj without touching children.
 
@@ -288,7 +242,10 @@ class VarobjMixin:
         summary (e.g. "std::vector of length 2, capacity 2") is refreshed
         quickly even when the container has many (or garbage-sized) children.
         """
-        result = await self.mi_command_async(f"-var-evaluate-expression {varobj_name}")
+        result = await self.mi_command_async(
+            f"-var-evaluate-expression {varobj_name}",
+            raise_on_error=True,
+        )
         payload = result.get("payload") or {}
         value = payload.get("value", "")
         _log.debug(f"var_evaluate_expression {varobj_name} -> {value!r}")
@@ -303,7 +260,9 @@ class VarobjMixin:
         iterate a huge (possibly garbage) number of elements.
         """
         result = await self.mi_command_async(
-            f"-var-update --all-values {varobj_name}", timeout=timeout
+            f"-var-update --all-values {varobj_name}",
+            timeout=timeout,
+            raise_on_error=True,
         )
         payload = result.get("payload") or {}
         changelist = payload.get("changelist", [])

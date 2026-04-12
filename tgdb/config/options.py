@@ -1,4 +1,4 @@
-"""Option-oriented command handlers for ``ConfigParser``."""
+"""Option-oriented command handlers for the configuration package."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import logging
 import os
 from pathlib import Path
 
-from .config_shared import _ALIASES, _apply_clipboard_path
-from .config_types import _BOOL_OPTIONS, _INT_OPTIONS, _PATH_OPTIONS, _STR_OPTIONS
+from .shared import _ALIASES, _apply_clipboard_path
+from .types import _BOOL_OPTIONS, _INT_OPTIONS, _PATH_OPTIONS, _STR_OPTIONS
 
 _log = logging.getLogger("tgdb.config")
 

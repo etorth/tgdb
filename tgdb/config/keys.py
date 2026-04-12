@@ -1,4 +1,4 @@
-"""Key-sequence decoding helpers for ``ConfigParser``."""
+"""Key-sequence decoding helpers for the configuration package."""
 
 from __future__ import annotations
 

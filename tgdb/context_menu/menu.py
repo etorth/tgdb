@@ -1,10 +1,9 @@
 """
-Simple cascading context menu overlay for tgdb.
+Public implementation of the cascading context-menu package.
 
-Each visible panel is rendered by its own _PanelWidget, sized to exactly
-match that panel's rectangle.  This means there are no "empty" cells
-between panels, so underlying content (e.g. the status bar) is visible
-through the gaps — no transparency hacks needed.
+Each visible panel is rendered by its own ``_PanelWidget``, sized to exactly
+match that panel's rectangle. This means there are no empty cells between
+panels, so underlying content remains visible through the gaps.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from textual import events
 from textual.message import Message
 from textual.widget import Widget
 
-from .context_menu_model import (
+from .model import (
     ContextMenuItem,
     _PADDING_LEFT,
     _PADDING_RIGHT,
@@ -25,8 +24,8 @@ from .context_menu_model import (
     _PanelRow,
     _SUBMENU_GLYPH,
 )
-from .context_menu_panel import _PanelWidget
-from .highlight_groups import HighlightGroups
+from .panel import _PanelWidget
+from ..highlight_groups import HighlightGroups
 
 class ContextMenu(Widget):
     """Cascading popup context menu used by tgdb's workspace.

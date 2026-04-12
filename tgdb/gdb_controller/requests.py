@@ -44,18 +44,48 @@ class GDBRequestMixin:
         return self._send_mi_command(cmd, report_error=report_error, kind=kind)
 
 
-    async def mi_command_async(self, cmd: str) -> dict:
+    async def mi_command_async(
+        self,
+        cmd: str,
+        timeout: float | None = 5.0,
+        *,
+        raise_on_error: bool = False,
+    ) -> dict:
+        """Send an MI command and await the decoded response.
+
+        When ``raise_on_error`` is false, transport failures and timeouts return
+        ``{}``, while ``^error`` responses are returned to the caller for
+        explicit inspection. When ``raise_on_error`` is true, send failures,
+        timeouts, and ``^error`` responses raise ``RuntimeError``.
+        """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         token = self._send_mi_command(cmd, report_error=False)
         if token is None:
+            if raise_on_error:
+                raise RuntimeError("MI channel not open")
             return {}
         self._pending[token] = future
         try:
-            return await asyncio.wait_for(asyncio.shield(future), timeout=5.0)
-        except (asyncio.TimeoutError, Exception):
+            if timeout is None:
+                result = await asyncio.shield(future)
+            else:
+                result = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+        except asyncio.TimeoutError as exc:
             self._pending.pop(token, None)
+            self._request_meta.pop(token, None)
+            if raise_on_error:
+                raise RuntimeError("MI command timed out — GDB may be busy") from exc
             return {}
+        message = result.get("message", "")
+        if message == "error" and raise_on_error:
+            payload = result.get("payload") or {}
+            if isinstance(payload, dict):
+                msg = payload.get("msg", "unknown MI error")
+            else:
+                msg = "unknown MI error"
+            raise RuntimeError(str(msg))
+        return result
 
 
     def request_source_files(self) -> None:
@@ -169,9 +199,7 @@ class GDBRequestMixin:
 
     async def eval_expr(self, expr: str) -> str:
         escaped = expr.replace("\\", "\\\\").replace('"', '\\"')
-        result = await self.mi_command_async(
-            f'-data-evaluate-expression "{escaped}"'
-        )
+        result = await self.mi_command_async(f'-data-evaluate-expression "{escaped}"')
         payload = result.get("payload") or {}
         message = result.get("message", "")
         if message == "error":

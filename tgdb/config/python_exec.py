@@ -1,5 +1,5 @@
 """
-Python / pyfile execution mixin for ConfigParser.
+Python / pyfile execution helpers for the configuration package.
 
 Provides the async helpers that compile and run user-supplied Python
 code inside the persistent ``_py_namespace``.
@@ -17,7 +17,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .config_types import _TGDB_RESERVED_PREFIX
+from .types import _TGDB_RESERVED_PREFIX
 
 
 class PythonExecMixin:

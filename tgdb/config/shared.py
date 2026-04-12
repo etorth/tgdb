@@ -1,4 +1,4 @@
-"""Shared helpers and constants for tgdb configuration parsing."""
+"""Shared helpers and constants for the configuration package."""
 
 from __future__ import annotations
 

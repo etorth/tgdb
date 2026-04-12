@@ -1,4 +1,4 @@
-"""Command-dispatch helpers for ``ConfigParser``."""
+"""Command-dispatch helpers for the configuration package."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import shlex
 from pathlib import Path
 from typing import Callable, Optional
 
-from .xdg_path import XDGPath
+from ..xdg_path import XDGPath
 
 _log = logging.getLogger("tgdb.config")
 

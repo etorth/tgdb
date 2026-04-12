@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual import events
 
-from .file_dialog_messages import FileDialogClosed, FileSelected
+from .messages import FileDialogClosed, FileSelected
 
 
 class FileDialogKeyMixin:

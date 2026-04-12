@@ -4,7 +4,7 @@ State-computation helpers for the local-variable pane.
 
 from __future__ import annotations
 
-from ..gdb_types import Frame, LocalVariable
+from ..gdb_controller import Frame, LocalVariable
 from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log
 
 

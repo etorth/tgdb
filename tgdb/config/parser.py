@@ -1,9 +1,9 @@
 """
-Configuration parser for tgdb.
+Public implementation of the configuration package.
 
 Supports $XDG_CONFIG_HOME/tgdb/tgdbrc (default: ~/.config/tgdb/tgdbrc)
-as the initialization file.
-Supports all :set options, :highlight, :map, :imap, :unmap, :iunmap.
+as the initialization file, along with tgdb/cgdb-style ``:set``,
+``:highlight``, ``:map``, ``:imap``, ``:unmap``, and ``:iunmap`` commands.
 """
 
 from __future__ import annotations
@@ -12,18 +12,18 @@ import builtins
 from typing import Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .highlight_groups import HighlightGroups
-    from .key_mapper import KeyMapper
+    from ..highlight_groups import HighlightGroups
+    from ..key_mapper import KeyMapper
 
-from .config_execution import ConfigExecutionMixin
-from .config_keys import ConfigKeyMixin
-from .config_options import ConfigOptionMixin
-from .config_types import (  # noqa: F401 — re-exported
+from .commands import UserCommandMixin
+from .execution import ConfigExecutionMixin
+from .keys import ConfigKeyMixin
+from .options import ConfigOptionMixin
+from .python_exec import PythonExecMixin
+from .types import (  # noqa: F401 — re-exported
     Config,
     UserCommandDef,
 )
-from .config_commands import UserCommandMixin
-from .config_python import PythonExecMixin
 
 class ConfigParser(
     ConfigExecutionMixin,
