@@ -65,7 +65,7 @@ class WorkspaceMixin:
                 var_eval_expr=self.gdb.var_evaluate_expression,
                 get_decl_lines=self.gdb.get_decl_lines,
             )
-        self._locals_pane.set_variables(self._current_locals)
+        self._locals_pane.set_variables(self._current_locals, self.gdb.current_frame)
         return self._locals_pane
 
     def _make_register_pane(self: TGDBApp) -> RegisterPane:

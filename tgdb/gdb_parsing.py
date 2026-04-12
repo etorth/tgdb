@@ -58,6 +58,7 @@ class ParsingMixin:
             self.mi_command("-break-list")
         elif cls == "running":
             self._inferior_running = True
+            self.current_frame = None
             self.locals = []
             self.on_locals([])
             self.stack = []

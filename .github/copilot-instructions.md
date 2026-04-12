@@ -51,6 +51,7 @@
 ## Key conventions
 
 - This repo optimizes for **cgdb compatibility**, not Textual defaults. When framework behavior and cgdb behavior differ, preserve or restore the cgdb-compatible behavior.
+- After changing Python code, apply the repository-local style guidance in `.github/instructions/python-style-format.instructions.md` and `.github/skills/python-style-format/README.md`.
 - Prefer the widget-message pattern already used across the codebase:
   - widgets post semantic `Message` objects;
   - `TGDBApp` performs focus changes, GDB I/O, file loads, split updates, and mode transitions.
