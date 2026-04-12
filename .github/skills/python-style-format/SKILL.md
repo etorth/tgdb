@@ -1,3 +1,12 @@
+---
+name: python-style-format
+description: >-
+    Skill for enforcing Python code style and formatting rules in the tgdb
+    repository. Apply after any Python code change to keep code readable,
+    explicit, and split by responsibility.
+user-invocable: true
+---
+
 # python-style-format
 
 Apply this skill after Python code changes in this repository.
