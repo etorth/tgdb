@@ -13,7 +13,7 @@ from textual.widget import Widget
 
 from ..gdb_controller import RegisterInfo
 from ..highlight_groups import HighlightGroups
-from ..pane_chrome import PaneBase
+from ..pane_base import PaneBase
 from ..pane_utils import fit_cells
 
 

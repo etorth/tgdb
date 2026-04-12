@@ -15,7 +15,7 @@ from rich.text import Text
 from textual.widget import Widget
 
 from ..highlight_groups import HighlightGroups
-from ..pane_chrome import PaneBase
+from ..pane_base import PaneBase
 from ..pane_utils import fit_cells
 
 

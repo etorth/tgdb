@@ -17,7 +17,7 @@ from typing import Optional
 from textual import events
 
 from ..highlight_groups import HighlightGroups
-from ..pane_chrome import PaneBase
+from ..pane_base import PaneBase
 from .content import _SourceContent
 
 
