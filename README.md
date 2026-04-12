@@ -262,9 +262,9 @@ map <F10> :step<Enter>
 ```
 tgdb/
 ├── __main__.py          CLI entry point (argparse, launches app)
-├── app.py               Main Textual App — layout, focus, event routing
+├── app/                 Main application package — TGDBApp + workspace tree
 ├── gdb_controller/      GDB bridge package — controller, MI parser, callbacks
-├── source_widget/       Source code viewer package (SourceView + reexports)
+├── source_widget/       Source code viewer package (SourceView + internal helpers)
 ├── gdb_widget/          GDB console package — pane, screen, scroll mode
 ├── command_line_bar/    Command/status bar package
 ├── context_menu/        Cascading workspace context-menu package

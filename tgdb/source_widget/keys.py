@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual import events
 
-from ..source_messages import (
+from .messages import (
     AwaitMarkJump,
     AwaitMarkSet,
     GDBCommand,

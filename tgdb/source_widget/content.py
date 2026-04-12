@@ -14,11 +14,11 @@ from typing import Optional, TYPE_CHECKING
 from textual.widget import Widget
 
 from ..highlight_groups import HighlightGroups
-from ..source_rendering import SourceViewRendering
-from ..source_data import SourceFile
+from .data import SourceFile
 from .file_ops import SourceFileMixin
 from .keys import SourceKeyMixin
 from .navigation import SourceNavigationMixin
+from .rendering import SourceViewRendering
 from .search import SourceSearchMixin
 
 if TYPE_CHECKING:

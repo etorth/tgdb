@@ -9,9 +9,9 @@ from rich.cells import cell_len, split_graphemes
 from rich.text import Text
 
 if TYPE_CHECKING:
-    from .source_data import SourceFile
+    from .data import SourceFile
 
-from .source_data import BP_NONE, BP_ENABLED, BP_DISABLED, _LOGO_LINES
+from .data import BP_NONE, BP_ENABLED, BP_DISABLED, _LOGO_LINES
 
 
 class SourceViewRendering:

@@ -11,11 +11,12 @@ Keep Python code readable, explicit, and easy to maintain in this repository.
 1. Follow PEP 8, but do **not** enforce a hard line-length limit.
 2. Break lines only when the broken form is easier to read.
 3. For function and method signatures, avoid half-inline multiline forms. Either keep the full signature on one line, or if you wrap it, put each parameter on its own line.
-4. Prefer **f-strings** for string formatting.
-5. Avoid dense comprehensions and other “too pythonic” constructs when an explicit loop is clearer.
-6. Leave **two blank lines** between member functions in classes in this repository.
-7. Keep Python files around **500 lines** when practical by splitting large modules by responsibility.
-8. When a module exposes a reusable public type, document its interface clearly at the module/class level: construction, injected dependencies, state-mutation methods, public API surface, and the behavior callers may treat as a black-box contract.
+4. For type annotations, do not split a single generic argument across multiple lines. Keep forms like `list[str]`, `tuple[int]`, and `Optional[Widget]` on one line unless the whole annotation is being wrapped in a clearly better multiline form.
+5. Prefer **f-strings** for string formatting.
+6. Avoid dense comprehensions and other “too pythonic” constructs when an explicit loop is clearer.
+7. Leave **two blank lines** between member functions in classes in this repository.
+8. Keep Python files around **500 lines** when practical by splitting large modules by responsibility.
+9. When a module exposes a reusable public type, document its interface clearly at the module/class level: construction, injected dependencies, state-mutation methods, public API surface, and the behavior callers may treat as a black-box contract.
 
 ## Refactoring checklist
 

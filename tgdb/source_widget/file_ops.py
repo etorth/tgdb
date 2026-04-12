@@ -6,7 +6,7 @@ import logging
 import os
 
 from ..gdb_controller import Breakpoint
-from ..source_data import BP_DISABLED, BP_ENABLED, BP_NONE, SourceFile
+from .data import BP_DISABLED, BP_ENABLED, BP_NONE, SourceFile
 
 _log = logging.getLogger("tgdb.source")
 

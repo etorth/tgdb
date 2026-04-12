@@ -1,9 +1,8 @@
 """
 Workspace/layout helper widgets for tgdb.
 
-These classes were split out of ``app.py`` so the main application module can
-focus on orchestration while the reusable workspace layout widgets live in
-their own module.
+These classes now live inside the ``tgdb.app`` package so the main application
+layer and its workspace tree stay self-contained under one package boundary.
 """
 
 from __future__ import annotations
@@ -16,8 +15,8 @@ from textual import events
 from textual.message import Message
 from textual.widget import Widget
 
-from .highlight_groups import HighlightGroups
-from .pane_chrome import PaneBase
+from ..highlight_groups import HighlightGroups
+from ..pane_chrome import PaneBase
 
 
 class DragResize(Message):

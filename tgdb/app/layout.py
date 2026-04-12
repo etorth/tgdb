@@ -1,4 +1,4 @@
-"""LayoutMixin — split / resize management extracted from TGDBApp."""
+"""Layout helpers for the application package."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 from textual import events
 from textual.css.query import NoMatches
 
-from .source_widget import ResizeSource, ToggleOrientation
+from ..source_widget import ResizeSource, ToggleOrientation
 from .workspace import DragResize, PaneContainer, TitleBarResized
 
 if TYPE_CHECKING:
-    from .app import TGDBApp
+    from .main import TGDBApp
 
 
 class LayoutMixin:

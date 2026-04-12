@@ -35,12 +35,12 @@
 ## High-level architecture
 
 - `tgdb/__main__.py` is a thin cgdb-compatible CLI wrapper. It parses `-d`, `-w`, `-r`, `--args`, and `--cd`, then launches `TGDBApp`.
-- `tgdb/app.py` is the orchestration layer. It composes the Textual widgets, owns mode and split state, registers `:` commands, and translates widget messages into debugger actions.
+- `tgdb/app/` is the orchestration package. `main.py` exposes `TGDBApp`, while `core.py`, `commands.py`, `callbacks.py`, `keys.py`, `layout.py`, `workspace_actions.py`, and `workspace.py` keep the app lifecycle, command routing, callbacks, key dispatch, split logic, and workspace-tree widgets self-contained under one package boundary.
 - `tgdb/gdb_controller/` is the debugger bridge package. `controller.py` exposes `GDBController`, while `types.py`, `requests.py`, `results.py`, `parsing.py`, `varobj.py`, and `miparser.py` split the controller internals by responsibility. It uses **two PTYs**:
   - the primary PTY is the normal GDB console stream, forwarded as raw bytes to the bottom pane;
   - the secondary PTY is a `new-ui mi ...` channel used for structured MI records such as stopped frames, source files, and breakpoints.
 - `tgdb/gdb_widget/` is the GDB console package. `pane.py` exposes `GDBWidget`, while `content.py`, `screen.py`, and `scroll.py` keep the terminal-emulation and scroll-mode internals behind the historical `tgdb.gdb_widget` import surface.
-- `tgdb/source_widget/` is the source-pane package. `pane.py` exposes `SourceView`, while `source_data.py`, `source_messages.py`, and `source_rendering.py` continue to hold the supporting data structures, messages, and rendering logic used by the pane.
+- `tgdb/source_widget/` is the source-pane package. `pane.py` exposes `SourceView`, while `data.py`, `messages.py`, and `rendering.py` hold the supporting source data structures, source-pane messages, and rendering logic used by the pane inside the package boundary.
 - `tgdb/local_variable_pane/` is a small package, not a single file. `pane.py` exposes `LocalVariablePane`, while `shared.py`, `support.py`, `tree.py`, `update.py`, and `reconcile.py` split the locals-pane internals by responsibility.
 - The other auxiliary panes now follow the same package-per-pane layout too: `tgdb/stack_pane/`, `tgdb/thread_pane/`, `tgdb/register_pane/`, `tgdb/evaluate_pane/`, `tgdb/memory_pane/`, and `tgdb/disasm_pane/` each expose a single public pane type from `pane.py`.
 - `tgdb/status_bar.py` is not just display chrome; it owns `:` command entry, `/` and `?` prompts, focus markers, and drag-resize interaction for horizontal splits.

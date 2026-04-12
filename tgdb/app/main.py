@@ -1,5 +1,7 @@
 """
-Main Textual application — mirrors cgdb's interface.cpp + cgdb.cpp.
+Public implementation of the tgdb application package.
+
+``TGDBApp`` mirrors cgdb's interface.cpp + cgdb.cpp.
 
 Global layout:
   ┌──────────────────────────┐
@@ -21,39 +23,35 @@ from typing import Optional
 from textual.app import App
 from textual.widget import Widget
 
-from .app_core import AppCoreMixin
-from .highlight_groups import HighlightGroups
-from .key_mapper import KeyMapper
-from .config import Config, ConfigParser
-from .gdb_controller import (
+from ..command_line_bar import CommandLineBar
+from ..config import Config, ConfigParser
+from ..context_menu import ContextMenu
+from ..disasm_pane import DisasmPane
+from ..evaluate_pane import EvaluatePane
+from ..file_dialog import FileDialog
+from ..gdb_controller import (
     GDBController,
     Frame,
     LocalVariable,
     RegisterInfo,
     ThreadInfo,
 )
-from .source_widget import (
-    SourceView,
-)
-from .gdb_widget import (
-    GDBWidget,
-)
-from .command_line_bar import CommandLineBar
-from .file_dialog import FileDialog
-from .context_menu import ContextMenu
-from .local_variable_pane import LocalVariablePane
-from .register_pane import RegisterPane
-from .stack_pane import StackPane
-from .thread_pane import ThreadPane
-from .evaluate_pane import EvaluatePane
-from .memory_pane import MemoryPane
-from .disasm_pane import DisasmPane
+from ..gdb_widget import GDBWidget
+from ..highlight_groups import HighlightGroups
+from ..key_mapper import KeyMapper
+from ..local_variable_pane import LocalVariablePane
+from ..memory_pane import MemoryPane
+from ..register_pane import RegisterPane
+from ..source_widget import SourceView
+from ..stack_pane import StackPane
+from ..thread_pane import ThreadPane
+from .callbacks import CallbacksMixin
+from .commands import CommandsMixin
+from .core import AppCoreMixin
+from .keys import KeyRoutingMixin
+from .layout import LayoutMixin
 from .workspace import PaneContainer, PaneDescriptor
-from .app_commands import CommandsMixin
-from .app_workspace import WorkspaceMixin
-from .app_layout import LayoutMixin
-from .app_keys import KeyRoutingMixin
-from .app_callbacks import CallbacksMixin
+from .workspace_actions import WorkspaceMixin
 
 
 class TGDBApp(
@@ -146,9 +144,7 @@ class TGDBApp(
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: Optional[asyncio.Task] = None
         self._cmd_task: Optional[asyncio.Task] = None  # running CommandLineBar command
-        self._pending_replay_tokens: list[
-            str
-        ] = []  # map tokens queued after async <CR>
+        self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
 
         self._mode: str = "GDB_PROMPT"
         self._await_mark_jump: bool = False

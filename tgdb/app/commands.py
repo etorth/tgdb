@@ -1,4 +1,4 @@
-"""CommandsMixin — :command handlers extracted from TGDBApp."""
+"""Command handlers for the application package."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
-from .source_widget import SourceFile
+from ..source_widget import SourceFile
 
 if TYPE_CHECKING:
-    from .app import TGDBApp
+    from .main import TGDBApp
 
 _log = logging.getLogger("tgdb.app")
 

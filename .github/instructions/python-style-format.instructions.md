@@ -9,6 +9,7 @@ Apply these rules after every Python code change in this repository.
 - Keep Python modules around **500 lines** when practical. If a file grows much beyond that, split it by responsibility instead of extending the monolith.
 - Follow **PEP 8** for naming, spacing, and structure, but **do not** treat line length as a hard rule. Break a line only when the broken form is genuinely easier to read.
 - For function and method signatures, avoid half-inline multiline forms. Either keep the full signature on one line, or if you wrap it, put each parameter on its own line.
+- For type annotations, do not split a single generic argument across multiple lines. Keep forms like `list[str]`, `tuple[int]`, and `Optional[Widget]` on one line unless the entire annotation is being wrapped in a genuinely clearer multiline layout.
 - Prefer **f-strings** over `%` formatting or logger argument tuples when writing or updating string formatting.
 - Avoid dense or overly clever Python constructs when the logic is non-trivial. In particular, prefer explicit `for` loops over multi-condition comprehensions when the loop is easier to read.
 - Leave **two blank lines between member functions** in classes in this codebase.

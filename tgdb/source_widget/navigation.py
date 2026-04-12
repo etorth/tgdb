@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..source_data import _LOGO_LINES
-from ..source_messages import JumpGlobalMark
+from .data import _LOGO_LINES
+from .messages import JumpGlobalMark
 
 
 class SourceNavigationMixin:

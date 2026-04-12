@@ -3,14 +3,16 @@ Public entry point for the source-widget package.
 
 This package intentionally preserves the old ``tgdb.source_widget`` import
 surface. External code should keep importing ``SourceView``, ``SourceFile``,
-source-pane message types, and the source-data constants from here.
+source-pane message types, and the source-data constants from here while the
+package keeps its data, message, and rendering helpers private to
+``source_widget/``.
 
 ``SourceView`` itself is the black-box widget entry point: construct it with the
 shared highlight palette, then drive it by assigning source/selection state and
 handling the semantic messages it emits.
 """
 
-from ..source_data import (
+from .data import (
     BP_DISABLED,
     BP_ENABLED,
     BP_NONE,
@@ -19,7 +21,7 @@ from ..source_data import (
     _TOKEN_GROUPS,
     _token_group,
 )
-from ..source_messages import (
+from .messages import (
     AwaitMarkJump,
     AwaitMarkSet,
     GDBCommand,

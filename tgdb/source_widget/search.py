@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from ..source_data import _LOGO_LINES
-from ..source_messages import SearchCancel, SearchCommit, SearchStart, SearchUpdate
+from .data import _LOGO_LINES
+from .messages import SearchCancel, SearchCommit, SearchStart, SearchUpdate
 
 
 class SourceSearchMixin:

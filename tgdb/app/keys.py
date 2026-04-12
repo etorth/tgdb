@@ -1,4 +1,4 @@
-"""KeyRoutingMixin — key dispatch extracted from TGDBApp."""
+"""Key dispatch helpers for the application package."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 from textual import events
 from textual.css.query import NoMatches
 
-from .command_line_bar import CommandLineBar, CommandSubmit
-from .local_variable_pane import LocalVariablePane
+from ..command_line_bar import CommandLineBar, CommandSubmit
+from ..local_variable_pane import LocalVariablePane
 
 if TYPE_CHECKING:
-    from .app import TGDBApp
+    from .main import TGDBApp
 
 
 def _copy_clipboard(app: "TGDBApp", text: str) -> None:
