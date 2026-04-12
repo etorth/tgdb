@@ -8,8 +8,8 @@ import asyncio
 
 from textual.widgets import Tree
 
-from .gdb_types import Frame, LocalVariable
-from .local_variable_pane_shared import BindingEntry, BindingKey, ExpansionPath, _SHADOW_SUFFIX, _log, _suppress_children
+from ..gdb_types import Frame, LocalVariable
+from .shared import BindingEntry, BindingKey, ExpansionPath, _SHADOW_SUFFIX, _log, _suppress_children
 
 
 class LocalVariablePaneReconcileMixin:

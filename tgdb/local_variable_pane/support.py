@@ -7,7 +7,7 @@ from __future__ import annotations
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from .local_variable_pane_shared import BindingKey, ExpansionPath, _SHADOW_SUFFIX
+from .shared import BindingKey, ExpansionPath, _SHADOW_SUFFIX
 
 
 class LocalVariablePaneSupportMixin:

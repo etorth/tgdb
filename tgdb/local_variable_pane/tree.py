@@ -10,7 +10,7 @@ from typing import Optional
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from .local_variable_pane_shared import _ACCESS_SPECIFIERS, _is_collection_displayhint, _log, _suppress_children
+from .shared import _ACCESS_SPECIFIERS, _is_collection_displayhint, _log, _suppress_children
 
 
 class LocalVariablePaneTreeMixin:
@@ -209,7 +209,18 @@ class LocalVariablePaneTreeMixin:
 
 
     async def do_expand_some(self, node: TreeNode, _depth: int = 0) -> None:
-        """Recursively expand a subtree, limiting array/map nodes."""
+        """Recursively expand a subtree using the pane's "expand some" policy.
+
+        This is a public helper used by the locals-pane context menu.
+
+        Behavior:
+        - array/map-like nodes honor ``cfg.expandchildlimit``
+        - other compound nodes load all of their children
+        - recursion continues into every expandable descendant
+
+        The method is safe to call repeatedly. If the pane is not fully wired
+        yet (for example callbacks are missing), it becomes a no-op.
+        """
         if _depth > 20:
             return
 
@@ -235,7 +246,11 @@ class LocalVariablePaneTreeMixin:
 
 
     async def do_expand_all(self, node: TreeNode, _depth: int = 0) -> None:
-        """Recursively expand a subtree without child limits."""
+        """Recursively expand a subtree without any child-limit paging.
+
+        This is the "load everything" companion to ``do_expand_some`` and is
+        intended for UI actions such as an "Expand All" context-menu command.
+        """
         if _depth > 20:
             return
 
@@ -256,7 +271,12 @@ class LocalVariablePaneTreeMixin:
 
 
     def do_fold(self, node: TreeNode) -> None:
-        """Recursively collapse a subtree."""
+        """Recursively collapse a subtree rooted at *node*.
+
+        This only affects the current visible tree state. Frame-to-frame
+        expansion persistence is still handled by the pane's reconciliation
+        logic the next time ``set_variables`` is called.
+        """
         for child_node in list(node.children):
             child_data = child_node.data
             if isinstance(child_data, dict) and child_data.get("has_children"):

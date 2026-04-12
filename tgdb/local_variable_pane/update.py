@@ -4,8 +4,8 @@ State-computation helpers for the local-variable pane.
 
 from __future__ import annotations
 
-from .gdb_types import Frame, LocalVariable
-from .local_variable_pane_shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log
+from ..gdb_types import Frame, LocalVariable
+from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log
 
 
 class LocalVariablePaneUpdateMixin:
@@ -334,4 +334,3 @@ class LocalVariablePaneUpdateMixin:
             remaining_reanchors.append((binding_name, binding_addr, variable))
 
         return remaining_reanchors
-

@@ -13,7 +13,7 @@
   ```
 - Syntax-check the whole package:
   ```bash
-  python -m py_compile tgdb/*.py
+  python -m py_compile tgdb/*.py tgdb/local_variable_pane/*.py
   ```
 - Syntax-check one module while iterating on a focused change:
   ```bash
@@ -41,6 +41,7 @@
   - the secondary PTY is a `new-ui mi ...` channel used for structured MI records such as stopped frames, source files, and breakpoints.
 - `tgdb/gdb_widget.py` is a terminal emulator wrapper around `pyte`. It renders the raw console PTY, keeps scrollback, and implements cgdb-style GDB scroll mode and search.
 - `tgdb/source_widget.py` is the source pane. It uses Pygments for tokenization, but its rendering rules are compatibility-driven: executing/selected line styles, marks, file positions, horizontal scrolling, wide-character clipping, and long-line truncation are all custom.
+- `tgdb/local_variable_pane/` is a small package, not a single file. `pane.py` exposes `LocalVariablePane`, while `shared.py`, `support.py`, `tree.py`, `update.py`, and `reconcile.py` split the locals-pane internals by responsibility.
 - `tgdb/status_bar.py` is not just display chrome; it owns `:` command entry, `/` and `?` prompts, focus markers, and drag-resize interaction for horizontal splits.
 - `tgdb/file_dialog.py` is a full-screen source-file picker with its own search/navigation model. It is meant to mirror cgdb’s dialog behavior rather than act like a generic list widget.
 - `tgdb/config.py`, `tgdb/highlight_groups.py`, and `tgdb/key_mapper.py` together implement cgdb-style config parsing:

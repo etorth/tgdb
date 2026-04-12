@@ -13,3 +13,4 @@ Apply these rules after every Python code change in this repository.
 - Leave **two blank lines between member functions** in classes in this codebase.
 - Prefer direct, readable control flow over compact “pythonic” one-liners when there is any meaningful branching or filtering.
 - When splitting a large Python file, preserve behavior first, then improve names and local structure without changing unrelated logic.
+- When a Python module exposes a reusable public type, document its clean interface. Add module/class docstrings that explain how to construct it, which dependencies or callbacks must be injected, which public methods mutate its state, which methods are intended as the public API, and what black-box behavior callers can rely on.
