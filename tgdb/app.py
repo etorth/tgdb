@@ -18,10 +18,10 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from textual.app import App, ComposeResult
+from textual.app import App
 from textual.widget import Widget
-from textual.css.query import NoMatches
 
+from .app_core import AppCoreMixin
 from .highlight_groups import HighlightGroups
 from .key_mapper import KeyMapper
 from .config import Config, ConfigParser
@@ -49,7 +49,6 @@ from .evaluate_pane import EvaluatePane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
 from .workspace import PaneContainer, PaneDescriptor
-from .xdg_path import XDGPath
 from .app_commands import CommandsMixin
 from .app_workspace import WorkspaceMixin
 from .app_layout import LayoutMixin
@@ -58,7 +57,13 @@ from .app_callbacks import CallbacksMixin
 
 
 class TGDBApp(
-    CommandsMixin, WorkspaceMixin, LayoutMixin, KeyRoutingMixin, CallbacksMixin, App
+    AppCoreMixin,
+    CommandsMixin,
+    WorkspaceMixin,
+    LayoutMixin,
+    KeyRoutingMixin,
+    CallbacksMixin,
+    App,
 ):
     """tgdb — Python front-end for GDB, compatible with cgdb."""
 
@@ -234,280 +239,3 @@ class TGDBApp(
             "disasm",
             "memory",
         )
-
-    # ------------------------------------------------------------------
-    # Compose
-    # ------------------------------------------------------------------
-
-    def compose(self) -> ComposeResult:
-        if self._source_view is None:
-            self._source_view = SourceView(self.hl, id="src-pane")
-        if self._gdb_widget is None:
-            self._gdb_widget = GDBWidget(
-                self.hl,
-                max_scrollback=self.cfg.scrollbackbuffersize,
-                id="gdb-pane",
-            )
-        with Widget(id="global-container"):
-            yield PaneContainer(
-                self.hl,
-                orientation=self.cfg.winsplitorientation,
-                id="split-container",
-            )
-            yield CommandLineBar(
-                self.hl, completion_provider=self.cp.get_completions, id="cmdline"
-            )
-        yield FileDialog(self.hl, id="file-dlg")
-        yield ContextMenu(self.hl, id="context-menu")
-
-    # ------------------------------------------------------------------
-    # on_mount — async so asyncio.create_task works
-    # ------------------------------------------------------------------
-
-    async def on_mount(self) -> None:
-        # Configure source widget
-        src = self._get_source_view()
-        gdb_w = self._get_gdb_widget()
-        if src is None or gdb_w is None:
-            self._show_status("Failed to initialize core panes")
-            return
-        src.executing_line_display = self.cfg.executinglinedisplay
-        src.selected_line_display = self.cfg.selectedlinedisplay
-        src.tabstop = self.cfg.tabstop
-        src.hlsearch = self.cfg.hlsearch
-        src.ignorecase = self.cfg.ignorecase
-        src.wrapscan = self.cfg.wrapscan
-        src.showmarks = self.cfg.showmarks
-
-        # Configure GDB widget
-        gdb_w.ignorecase = self.cfg.ignorecase
-        gdb_w.wrapscan = self.cfg.wrapscan
-        gdb_w.send_to_gdb = self.gdb.send_input  # bytes → primary PTY
-        gdb_w.resize_gdb = self.gdb.resize  # keep pyte in sync
-        gdb_w.on_switch_to_tgdb = self._switch_to_tgdb
-        gdb_w.imap_feed = self._imap_feed
-        gdb_w.imap_replay = self._replay_gdb_key_sequence
-
-        # Mount src and gdb into the root PaneContainer (always present).
-        try:
-            container = self.query_one("#split-container", PaneContainer)
-            await container.set_items([src, gdb_w])
-        except Exception as exc:
-            self._show_status(f"Failed to initialize workspace: {exc}")
-            return
-
-        # Configure file dialog
-        fd = self.query_one("#file-dlg", FileDialog)
-        fd.ignorecase = self.cfg.ignorecase
-        fd.wrapscan = self.cfg.wrapscan
-
-        # Configure command-line bar — history
-        try:
-            cmdline = self.query_one("#cmdline", CommandLineBar)
-            cmdline._history_file = XDGPath.state_home() / "tgdb" / "history"
-            self.cp.set_cmdline_bar(cmdline)
-            cmdline.load_history()
-            # Session delimiter — recorded in history so sessions are visible when browsing
-            from datetime import datetime
-
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cmdline._add_to_history(
-                f"# tgdb begins {ts}", max_size=self.cfg.historysize
-            )
-        except NoMatches:
-            pass
-
-        # GDB callbacks — on_console now delivers raw bytes from GDB's PTY,
-        # fed directly into the pyte VT100 emulator (matching cgdb's libvterm).
-        self.gdb.on_console = lambda data: self.call_later(gdb_w.feed_bytes, data)
-        self.gdb.on_stopped = lambda f: self.call_later(self._ui_on_stopped, f)
-        self.gdb.on_running = lambda: self.call_later(self._ui_on_running)
-        self.gdb.on_breakpoints = lambda b: self.call_later(self._ui_set_breakpoints, b)
-        self.gdb.on_source_files = lambda f: self.call_later(
-            self._ui_set_source_files, f
-        )
-        self.gdb.on_source_file = lambda f, ln: self.call_later(
-            self._ui_load_source_file, f, ln
-        )
-        self.gdb.on_locals = lambda v: self.call_later(self._ui_set_locals, v)
-        self.gdb.on_registers = lambda v: self.call_later(self._ui_set_registers, v)
-        self.gdb.on_stack = lambda v: self.call_later(self._ui_set_stack, v)
-        self.gdb.on_threads = lambda v: self.call_later(self._ui_set_threads, v)
-        self.gdb.on_exit = lambda: self.call_later(self._ui_gdb_exit)
-        self.gdb.on_error = lambda m: self.call_later(self._show_status, f"Error: {m}")
-
-        # Start GDB process
-        try:
-            self.gdb.start(rows=40, cols=200)
-        except Exception as e:
-            self._show_status(f"Failed to start GDB: {e}")
-            return
-
-        # Start async read loop
-        self._gdb_task = asyncio.create_task(self.gdb.run_async())
-        asyncio.create_task(self._request_initial_location())
-
-        # Initial mode: GDB focused.
-        self._set_mode("GDB_PROMPT")
-        gdb_w.focus()
-
-        # Source the rc file before handing control to the user.
-        # This keeps startup semantics "as if" the user sourced the file
-        # immediately before the interactive session begins, instead of letting
-        # a background task race with real user input.
-        await self._load_rc_async()
-
-    # ------------------------------------------------------------------
-    # Mode management
-    # ------------------------------------------------------------------
-
-    def _save_history_to_disk(self) -> None:
-        """Persist command history to the history file (best-effort)."""
-        try:
-            bar = self.query_one("#cmdline", CommandLineBar)
-            bar.save_history(max_size=self.cfg.historysize)
-        except Exception:
-            pass
-
-    async def on_unmount(self) -> None:
-        """Save command history and cancel background tasks when tgdb exits."""
-        self._save_history_to_disk()
-        if self._gdb_task and not self._gdb_task.done():
-            self._gdb_task.cancel()
-            try:
-                await self._gdb_task
-            except asyncio.CancelledError:
-                pass
-
-    async def _load_rc_async(self) -> None:
-        """Source the rc file as if the user had typed each command interactively.
-
-        ``--rcfile NONE`` skips loading entirely.  Otherwise the default rc is
-        ``~/.config/tgdb/tgdbrc`` (or the path given with ``--rcfile``).
-        """
-        if self._rc_file == "NONE":
-            return
-        if self._rc_file:
-            path: Optional[str] = self._rc_file
-        else:
-            p = self.cp.default_rc_path()
-            if p is None:
-                return
-            path = str(p)
-        err = await self.cp.load_file_async(path)
-        if err:
-            self._show_status(err)
-        self._sync_config()
-
-    def _set_mode(self, mode: str) -> None:
-        self._mode = mode
-        try:
-            status = self.query_one("#cmdline", CommandLineBar)
-            status.set_mode(mode)
-            self._update_status_file_info()
-        except NoMatches:
-            pass
-        # cgdb: scr_refresh(gdb_scroller, focus==GDB, ...) — hide GDB cursor when not focused
-        gdb_w = self._get_gdb_widget()
-        if gdb_w is not None:
-            gdb_w.gdb_focused = mode in ("GDB_PROMPT", "GDB_SCROLL")
-            gdb_w.refresh()
-
-    def action_help_quit(self) -> None:
-        """Suppress Textual's default Ctrl+C 'press Ctrl+Q to quit' notification.
-
-        Textual 8.x binds Ctrl+C to this action (priority=False) and calls it
-        via App._on_key after forwarding the key to the focused widget.
-        In tgdb Ctrl+C is always an interrupt signal for GDB — never a quit
-        prompt — so we override this to a no-op.
-        """
-
-    def _switch_to_tgdb(self) -> None:
-        self._set_mode("TGDB")
-        if self._focus_widget(self._get_source_view(mounted_only=True)):
-            return
-        self._focus_widget(self._first_workspace_leaf())
-
-    def _switch_to_gdb(self) -> None:
-        self._set_mode("GDB_PROMPT")
-        if self._focus_widget(self._get_gdb_widget(mounted_only=True)):
-            return
-        self._focus_widget(self._first_workspace_leaf())
-
-    def _enter_cmd_mode(self) -> bool:
-        """Activate the command-line bar (CMD mode).  Returns True on success."""
-        try:
-            bar = self.query_one("#cmdline", CommandLineBar)
-            bar.start_command()
-            self._set_mode("CMD")
-            bar.focus()
-            return True
-        except NoMatches:
-            return False
-
-    def _show_status(self, msg: str) -> bool:
-        """Show *msg* in the status bar.
-
-        If the message spans multiple lines the bar expands and the app enters
-        ML_MESSAGE mode (waiting for user to dismiss).  Returns True in that case
-        so the caller knows not to switch focus away.
-        """
-        try:
-            status = self.query_one("#cmdline", CommandLineBar)
-            if "\n" in msg:
-                status.show_multiline_message(msg)
-                self._set_mode("ML_MESSAGE")
-                status.focus()
-                return True
-            else:
-                status.show_message(msg)
-                return False
-        except NoMatches:
-            return False
-
-    @staticmethod
-    def _widget_attached(widget: Optional[Widget]) -> bool:
-        return widget is not None and widget.parent is not None
-
-    def _get_source_view(self, *, mounted_only: bool = False) -> Optional[SourceView]:
-        if self._source_view is None:
-            return None
-        if mounted_only and not self._widget_attached(self._source_view):
-            return None
-        return self._source_view
-
-    def _get_gdb_widget(self, *, mounted_only: bool = False) -> Optional[GDBWidget]:
-        if self._gdb_widget is None:
-            return None
-        if mounted_only and not self._widget_attached(self._gdb_widget):
-            return None
-        return self._gdb_widget
-
-    def _focus_widget(self, widget: Optional[Widget]) -> bool:
-        if not self._widget_attached(widget):
-            return False
-        try:
-            widget.focus()
-        except Exception:
-            return False
-        return True
-
-    def _first_workspace_leaf(
-        self, widget: Optional[Widget] = None
-    ) -> Optional[Widget]:
-        if widget is None:
-            try:
-                widget = self.query_one("#split-container", PaneContainer)
-            except NoMatches:
-                return None
-
-        if isinstance(widget, PaneContainer):
-            for item in widget.items:
-                leaf = self._first_workspace_leaf(item)
-                if leaf is not None:
-                    return leaf
-            return None
-
-        if getattr(widget, "can_focus", False) and self._widget_attached(widget):
-            return widget
-        return None

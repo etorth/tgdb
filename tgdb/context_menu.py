@@ -9,209 +9,24 @@ through the gaps — no transparency hacks needed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from rich.cells import cell_len
-from rich.segment import Segment
-from rich.style import Style as RichStyle
 from rich.text import Text
 from textual import events
 from textual.message import Message
-from textual.strip import Strip
 from textual.widget import Widget
 
+from .context_menu_model import (
+    ContextMenuItem,
+    _PADDING_LEFT,
+    _PADDING_RIGHT,
+    _PanelLayout,
+    _PanelRow,
+    _SUBMENU_GLYPH,
+)
+from .context_menu_panel import _PanelWidget
 from .highlight_groups import HighlightGroups
-
-
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ContextMenuItem:
-    label: str
-    action: Optional[str] = None
-    children: tuple["ContextMenuItem", ...] = ()
-    separator_before: bool = False
-
-    @property
-    def has_children(self) -> bool:
-        return bool(self.children)
-
-
-@dataclass(frozen=True)
-class _PanelRow:
-    kind: str
-    item_index: Optional[int] = None
-
-
-@dataclass(frozen=True)
-class _PanelLayout:
-    items: tuple[ContextMenuItem, ...]
-    selected_index: int
-    x: int
-    y: int
-    inner_width: int
-    rows: tuple[_PanelRow, ...]
-
-    @property
-    def width(self) -> int:
-        return self.inner_width + 2
-
-    @property
-    def height(self) -> int:
-        return len(self.rows) + 2
-
-    def row_for_item(self, item_index: int) -> Optional[int]:
-        for row_index, row in enumerate(self.rows):
-            if row.kind == "item" and row.item_index == item_index:
-                return row_index
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Module-level constants / helpers
-# ---------------------------------------------------------------------------
-
-_PADDING_LEFT = 2
-_PADDING_RIGHT = 2
-_SUBMENU_GLYPH = "▸"
-
-
-def _item_row_text(panel: _PanelLayout, item: ContextMenuItem) -> str:
-    left = " " * _PADDING_LEFT
-    right = " " * _PADDING_RIGHT
-    if item.has_children:
-        tail = f" {_SUBMENU_GLYPH} "
-        filler = max(
-            1,
-            panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(tail),
-        )
-        return f"{left}{item.label}{' ' * filler}{tail}"
-    filler = max(
-        0, panel.inner_width - cell_len(left) - cell_len(item.label) - cell_len(right)
-    )
-    return f"{left}{item.label}{' ' * filler}{right}"
-
-
-# ---------------------------------------------------------------------------
-# _PanelWidget — one widget per panel, sized to exactly cover the panel box
-# ---------------------------------------------------------------------------
-
-
-class _PanelWidget(Widget):
-    """
-    Renders a single panel box of the cascade menu.
-
-    The widget is positioned and sized to exactly cover the panel rectangle.
-    Every cell it renders is part of the panel (borders or content), so there
-    are no "wasted" transparent cells and no need to fake transparency.
-    """
-
-    DEFAULT_CSS = """
-    _PanelWidget {
-        layer: dialog;
-        position: absolute;
-    }
-    """
-
-    def __init__(
-        self,
-        hl: HighlightGroups,
-        panel: _PanelLayout,
-        menu: "ContextMenu",
-        depth: int,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        self._hl = hl
-        self._panel = panel
-        self._menu = menu
-        self._depth = depth
-        self.can_focus = False
-
-    def update(self, panel: _PanelLayout, depth: int, abs_x: int, abs_y: int) -> None:
-        """Update in-place (no remount → no flicker)."""
-        self._panel = panel
-        self._depth = depth
-        self.styles.offset = (abs_x, abs_y)
-        self.styles.width = panel.width
-        self.styles.height = panel.height
-        self.refresh()
-
-    def render_line(self, y: int) -> Strip:
-        panel = self._panel
-        width = panel.width
-        inner_width = panel.inner_width
-        border_rich = RichStyle.parse(self._hl.style("StatusLine"))
-        sel_rich = RichStyle.parse(self._hl.style("SelectedLineHighlight"))
-
-        if y == 0:
-            line = "┌" + "─" * inner_width + "┐"
-            return Strip([Segment(ch, border_rich) for ch in line], width)
-
-        if y == panel.height - 1:
-            line = "└" + "─" * inner_width + "┘"
-            return Strip([Segment(ch, border_rich) for ch in line], width)
-
-        row_idx = y - 1
-        if row_idx >= len(panel.rows):
-            return Strip([Segment(" ", border_rich)] * width, width)
-
-        row = panel.rows[row_idx]
-        if row.kind == "separator":
-            line = "├" + "─" * inner_width + "┤"
-            return Strip([Segment(ch, border_rich) for ch in line], width)
-
-        assert row.item_index is not None
-        item = panel.items[row.item_index]
-        if row.item_index == panel.selected_index:
-            row_rich = sel_rich
-        else:
-            row_rich = border_rich
-        inner = _item_row_text(panel, item)
-        segs = (
-            [Segment("│", border_rich)]
-            + [Segment(ch, row_rich) for ch in inner]
-            + [Segment("│", border_rich)]
-        )
-        return Strip(segs, width)
-
-    def _item_at(self, lx: int, ly: int) -> Optional[tuple[int, int]]:
-        """Return (depth, item_index) if (lx, ly) is over an item, else None."""
-        panel = self._panel
-        if not (1 <= lx < panel.width - 1 and 1 <= ly < panel.height - 1):
-            return None
-        row_idx = ly - 1
-        if row_idx >= len(panel.rows):
-            return None
-        row = panel.rows[row_idx]
-        if row.kind != "item" or row.item_index is None:
-            return None
-        return self._depth, row.item_index
-
-    def on_mouse_move(self, event: events.MouseMove) -> None:
-        hit = self._item_at(int(event.x), int(event.y))
-        if hit is not None:
-            self._menu._handle_panel_hover(hit[0], hit[1])
-        event.stop()
-
-    def on_mouse_down(self, event: events.MouseDown) -> None:
-        if event.button != 1:
-            return
-        hit = self._item_at(int(event.x), int(event.y))
-        if hit is not None:
-            self._menu._handle_panel_click(hit[0], hit[1])
-        # Border click: swallow event (don't close the menu)
-        event.stop()
-
-
-# ---------------------------------------------------------------------------
-# ContextMenu — state manager, keyboard handler, public API
-# ---------------------------------------------------------------------------
-
 
 class ContextMenu(Widget):
     """Cascading popup context menu used by tgdb's workspace.
@@ -575,10 +390,14 @@ class ContextMenu(Widget):
 
 
 class ContextMenuSelected(Message):
+    """Publish the action chosen from the context menu."""
+
     def __init__(self, action: str) -> None:
         super().__init__()
         self.action = action
 
 
 class ContextMenuClosed(Message):
+    """Request that the context menu close without taking an action."""
+
     pass

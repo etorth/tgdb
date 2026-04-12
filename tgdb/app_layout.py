@@ -64,9 +64,7 @@ class LayoutMixin:
         self._window_shift = int(half_axis * (self._cur_win_split / 2.0))
         self._validate_window_shift(is_horizontal)
 
-    def _set_window_shift_from_ratio(
-        self: TGDBApp, is_horizontal: bool, ratio: float
-    ) -> None:
+    def _set_window_shift_from_ratio(self: TGDBApp, is_horizontal: bool, ratio: float) -> None:
         axis = self._pane_axis(is_horizontal)
         if axis <= 0:
             self._window_shift = 0
@@ -96,9 +94,7 @@ class LayoutMixin:
         elif self._window_shift < min_shift:
             self._window_shift = min_shift
 
-    def _compute_split_sizes(
-        self: TGDBApp, is_horizontal: bool, axis: int | None = None
-    ) -> tuple[int, int]:
+    def _compute_split_sizes(self: TGDBApp, is_horizontal: bool, axis: int | None = None) -> tuple[int, int]:
         if axis is None:
             axis = self._pane_axis(is_horizontal)
         else:

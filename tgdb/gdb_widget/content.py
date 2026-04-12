@@ -36,9 +36,7 @@ class _GDBContent(ScrollMixin, Widget):
     }
     """
 
-    def __init__(
-        self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs
-    ) -> None:
+    def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
         self.max_scrollback = max_scrollback

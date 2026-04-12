@@ -336,9 +336,7 @@ class PaneContainer(Widget):
             else:
                 self._weights.append(max(1, item.size.height))
 
-    def _resize_from_drag(
-        self, splitter: "Splitter", screen_x: int, screen_y: int
-    ) -> bool:
+    def _resize_from_drag(self, splitter: "Splitter", screen_x: int, screen_y: int) -> bool:
         adjacent = self._adjacent_items(splitter)
         if adjacent is None:
             return False
@@ -430,9 +428,7 @@ class PaneContainer(Widget):
         # the app for top-level _window_shift bookkeeping.
         self._resize_from_drag(splitter, msg.screen_x, msg.screen_y)
 
-    def _resize_from_title_drag(
-        self, before: Widget, after: Widget, screen_y: int
-    ) -> None:
+    def _resize_from_title_drag(self, before: Widget, after: Widget, screen_y: int) -> None:
         """Resize *before* and *after* panes in a vertical container when the
         user drags the title bar of *after* (which is the visual boundary)."""
         self._capture_layout_weights()

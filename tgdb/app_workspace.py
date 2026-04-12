@@ -266,9 +266,7 @@ class WorkspaceMixin:
         except NoMatches:
             return None
 
-    async def _replace_workspace_item(
-        self: TGDBApp, target: Widget, new_item: Widget
-    ) -> bool:
+    async def _replace_workspace_item(self: TGDBApp, target: Widget, new_item: Widget) -> bool:
         if isinstance(target.parent, PaneContainer):
             parent = target.parent
         else:
@@ -303,9 +301,7 @@ class WorkspaceMixin:
                 await parent.replace_item(current, EmptyPane(self.hl))
             current = parent
 
-    async def _add_pane_to_workspace(
-        self: TGDBApp, target: Widget, pane_kind: str
-    ) -> Optional[Widget]:
+    async def _add_pane_to_workspace(self: TGDBApp, target: Widget, pane_kind: str) -> Optional[Widget]:
         pane = self._create_pane(pane_kind)
         if pane is None:
             return None
@@ -345,9 +341,7 @@ class WorkspaceMixin:
         await parent.take_item(target)
         return await self._normalize_container_after_delete(parent)
 
-    async def _apply_context_menu_action(
-        self: TGDBApp, target: Widget, direction: str
-    ) -> bool:
+    async def _apply_context_menu_action(self: TGDBApp, target: Widget, direction: str) -> bool:
         if direction in ("left", "right"):
             axis = "horizontal"
         else:
@@ -386,9 +380,7 @@ class WorkspaceMixin:
         parent = widget.parent
         return parent if isinstance(parent, PaneContainer) else None
 
-    async def _handle_locals_context_action(
-        self: TGDBApp, target: Widget, sub: str
-    ) -> None:
+    async def _handle_locals_context_action(self: TGDBApp, target: Widget, sub: str) -> None:
         """Dispatch a 'locals:*' context-menu action on an expandable tree node."""
         node = getattr(self, "_locals_context_node", None)
         self._locals_context_node = None
@@ -400,9 +392,7 @@ class WorkspaceMixin:
             elif sub == "fold":
                 target.do_fold(node)
 
-    async def _handle_add_context_action(
-        self: TGDBApp, target: Widget, pane_kind: str
-    ) -> None:
+    async def _handle_add_context_action(self: TGDBApp, target: Widget, pane_kind: str) -> None:
         """Add a pane of *pane_kind* next to *target*."""
         if self._pane_is_attached(pane_kind):
             self._show_status(f"{self._pane_label(pane_kind)} is already shown")
@@ -431,9 +421,7 @@ class WorkspaceMixin:
             return
         self._show_status("Deleted cell")
 
-    async def _handle_split_context_action(
-        self: TGDBApp, target: Widget, direction: str
-    ) -> None:
+    async def _handle_split_context_action(self: TGDBApp, target: Widget, direction: str) -> None:
         """Insert a new empty cell adjacent to *target* in *direction*."""
         if await self._apply_context_menu_action(target, direction):
             self._show_status(f"Added window {direction}")

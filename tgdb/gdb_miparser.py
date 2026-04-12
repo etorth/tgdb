@@ -106,9 +106,7 @@ def _split_n_chars(s: str, n: int) -> Iterator[str]:
         yield s[i : i + n]
 
 
-def _unescape_internal(
-    escaped_str: str, *, expect_closing_quote: bool, start: int = 0
-) -> Tuple[str, int]:
+def _unescape_internal(escaped_str: str, *, expect_closing_quote: bool, start: int = 0) -> Tuple[str, int]:
     """Core unescape logic for GDB MI strings.
 
     MI-mode escapes are similar to standard Python escapes but:
@@ -176,9 +174,7 @@ def _unescape(escaped_str: str) -> str:
     return unescaped
 
 
-def _advance_past_string_with_gdb_escapes(
-    escaped_str: str, *, start: int = 0
-) -> Tuple[str, int]:
+def _advance_past_string_with_gdb_escapes(escaped_str: str, *, start: int = 0) -> Tuple[str, int]:
     """Unescape a GDB MI string and find the closing double quote.
 
     Returns ``(unescaped_string, index_after_closing_quote)``.

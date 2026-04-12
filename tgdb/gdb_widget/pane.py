@@ -63,9 +63,7 @@ class GDBWidget(PaneBase):
     internal ``_GDBContent`` implementation widget.
     """
 
-    def __init__(
-        self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs
-    ) -> None:
+    def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
         """Create an empty GDB console pane."""
         super().__init__(hl, **kwargs)
         self._content = _GDBContent(hl, max_scrollback)

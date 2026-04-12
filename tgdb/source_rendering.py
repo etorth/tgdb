@@ -117,9 +117,7 @@ class SourceViewRendering:
                 return mk, self.hl.style("Mark")
         return None, ""
 
-    def _get_arrow_info(
-        self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str
-    ) -> tuple[str, str]:
+    def _get_arrow_info(self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str) -> tuple[str, str]:
         """Return ``(arrow_style, display_mode)`` for the current line.
 
         *display_mode* is ``"shortarrow"`` / ``"longarrow"`` / ``""``.
@@ -130,9 +128,7 @@ class SourceViewRendering:
             return self.hl.style("SelectedLineArrow"), sel_disp
         return "", ""
 
-    def _get_line_background_style(
-        self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str
-    ) -> str:
+    def _get_line_background_style(self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str) -> str:
         """Return the background style for a highlighted source line, or ``""``."""
         if is_exe:
             if exe_disp == "highlight":
@@ -262,9 +258,7 @@ class SourceViewRendering:
         return out
 
 
-    def _clip_spans_to_cells(
-        self, spans: list[tuple[str, str]], start_cell: int, max_cells: int
-    ) -> Text:
+    def _clip_spans_to_cells(self, spans: list[tuple[str, str]], start_cell: int, max_cells: int) -> Text:
         """Clip styled text by display cells.
 
         If clipping starts or ends in the middle of a wide character, render the

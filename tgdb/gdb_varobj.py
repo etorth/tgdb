@@ -137,9 +137,7 @@ class VarobjMixin:
         _log.debug(f"var_create expr={expr!r} -> name={payload.get('name')!r}")
         return payload
 
-    async def var_list_children(
-        self, varobj_name: str, from_idx: int = 0, limit: int = 0
-    ) -> tuple[list[dict], bool]:
+    async def var_list_children(self, varobj_name: str, from_idx: int = 0, limit: int = 0) -> tuple[list[dict], bool]:
         """List children of *varobj_name*.
 
         Returns ``(children, has_more)`` where *has_more* is True when GDB
@@ -291,9 +289,7 @@ class VarobjMixin:
         _log.debug(f"var_evaluate_expression {varobj_name} -> {value!r}")
         return value
 
-    async def var_update(
-        self, varobj_name: str = "*", timeout: float | None = 10.0
-    ) -> list[dict]:
+    async def var_update(self, varobj_name: str = "*", timeout: float | None = 10.0) -> list[dict]:
         """Update varobjs and return changed ones.
 
         *timeout* is forwarded to mi_command_async.  Pass a short value (e.g.

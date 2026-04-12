@@ -119,9 +119,7 @@ class UserCommandMixin:
             f"Ambiguous command: '{name}' (matches: {', '.join(sorted(matches))})",
         )
 
-    async def _exec_user_command_async(
-        self, ucmd: UserCommandDef, raw_args: str, print_fn: Optional[Callable] = None
-    ) -> Optional[str]:
+    async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str, print_fn: Optional[Callable] = None) -> Optional[str]:
         if self._exec_depth >= 20:
             return f"{ucmd.name}: maximum command recursion depth exceeded"
         try:
@@ -141,9 +139,7 @@ class UserCommandMixin:
         finally:
             self._exec_depth -= 1
 
-    def _validate_nargs(
-        self, nargs: str, shlex_args: list[str], raw_args: str
-    ) -> Optional[str]:
+    def _validate_nargs(self, nargs: str, shlex_args: list[str], raw_args: str) -> Optional[str]:
         stripped = raw_args.strip()
         if nargs == "0":
             if stripped:
@@ -159,9 +155,7 @@ class UserCommandMixin:
                 return "at least one argument required"
         return None
 
-    def _expand_replacement(
-        self, template: str, shlex_args: list[str], raw_args: str
-    ) -> str:
+    def _expand_replacement(self, template: str, shlex_args: list[str], raw_args: str) -> str:
         args_str = raw_args.strip()
         if args_str:
             q_args_str = json.dumps(args_str)
@@ -230,9 +224,7 @@ class UserCommandMixin:
             args.append("".join(current))
         return args
 
-    def get_completions(
-        self, arg_lead: str, cmd_line: str, cursor_pos: int
-    ) -> list[str]:
+    def get_completions(self, arg_lead: str, cmd_line: str, cursor_pos: int) -> list[str]:
         """Return completion candidates for Tab completion in the status bar."""
         line = cmd_line.lstrip(":")
         m = re.match(r"([A-Z][A-Za-z0-9]*)", line)

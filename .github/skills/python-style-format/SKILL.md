@@ -10,11 +10,12 @@ Keep Python code explicit, readable, and split by responsibility.
 
 1. Follow PEP 8, but do not enforce a hard line-length limit.
 2. Break lines only when the broken form is easier to understand.
-3. Prefer f-strings over older string-formatting styles.
-4. Prefer explicit loops over dense comprehensions when the loop is clearer.
-5. Leave two blank lines between member functions in classes in this repository.
-6. Keep Python files around 500 lines when practical by splitting large modules.
-7. When a module exposes a reusable public type, document the clean interface at the module/class level: construction, injected dependencies, state-mutation methods, public API surface, and the black-box behavior callers can rely on.
+3. For function and method signatures, avoid half-inline multiline forms. Either keep the full signature on one line, or if you wrap it, put each parameter on its own line.
+4. Prefer f-strings over older string-formatting styles.
+5. Prefer explicit loops over dense comprehensions when the loop is clearer.
+6. Leave two blank lines between member functions in classes in this repository.
+7. Keep Python files around 500 lines when practical by splitting large modules.
+8. When a module exposes a reusable public type, document the clean interface at the module/class level: construction, injected dependencies, state-mutation methods, public API surface, and the black-box behavior callers can rely on.
 
 ## Checklist
 

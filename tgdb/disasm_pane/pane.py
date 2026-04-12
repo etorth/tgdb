@@ -170,9 +170,7 @@ class DisasmPane(PaneBase):
         """Install the async callback used to request disassembly from GDB."""
         self._disasm_fn = fn
 
-    async def refresh_disasm(
-        self, filename: str, line: int, current_addr: str = ""
-    ) -> None:
+    async def refresh_disasm(self, filename: str, line: int, current_addr: str = "") -> None:
         """Fetch and display disassembly near a source location."""
         if not self._disasm_fn:
             return
