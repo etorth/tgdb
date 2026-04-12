@@ -47,14 +47,10 @@ import re
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterator,
-    List,
     Match,
     Optional,
     Pattern,
-    Tuple,
-    Union,
 )
 
 
@@ -210,7 +206,7 @@ class _StringStream:
         self.index = self.index + offset
 
 
-    def advance_past_chars(self, chars: List[str]) -> str:
+    def advance_past_chars(self, chars: list[str]) -> str:
         start_index = self.index
         while True:
             current_char = self.raw_text[self.index]
@@ -282,7 +278,7 @@ def _parse_dict(stream: _StringStream) -> Dict:
     return obj
 
 
-def _parse_key_val(stream: _StringStream) -> Tuple[str, Union[str, List, Dict]]:
+def _parse_key_val(stream: _StringStream) -> tuple[str, str | list | dict]:
     key = _parse_key(stream)
     val = _parse_val(stream)
     return key, val
@@ -292,7 +288,7 @@ def _parse_key(stream: _StringStream) -> str:
     return stream.advance_past_chars(["="])
 
 
-def _parse_val(stream: _StringStream) -> Union[str, List, Dict]:
+def _parse_val(stream: _StringStream) -> str | list | dict:
     val: Any
     while True:
         c = stream.read(1)
@@ -387,7 +383,7 @@ def _parse_mi_finished(match: Match, stream: _StringStream) -> Dict:
     }
 
 
-_GDB_MI_PATTERNS_AND_PARSERS: List[Tuple[Pattern, _PARSER_FUNCTION]] = [
+_GDB_MI_PATTERNS_AND_PARSERS: list[tuple[Pattern, _PARSER_FUNCTION]] = [
     # Result records: ^done, ^running, ^connected, ^error, ^exit
     (
         re.compile(

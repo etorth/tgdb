@@ -151,7 +151,9 @@ class ParsingMixin:
         if isinstance(data, dict):
             raw = data.get("frame")
             if isinstance(raw, list):
-                frames_raw.extend(item for item in raw if isinstance(item, dict))
+                for item in raw:
+                    if isinstance(item, dict):
+                        frames_raw.append(item)
             elif isinstance(raw, dict):
                 frames_raw.append(raw)
         elif isinstance(data, list):
@@ -160,7 +162,9 @@ class ParsingMixin:
                     continue
                 raw = item.get("frame", item)
                 if isinstance(raw, list):
-                    frames_raw.extend(entry for entry in raw if isinstance(entry, dict))
+                    for entry in raw:
+                        if isinstance(entry, dict):
+                            frames_raw.append(entry)
                 elif isinstance(raw, dict):
                     frames_raw.append(raw)
         frames = []
@@ -174,7 +178,9 @@ class ParsingMixin:
         if isinstance(data, dict):
             raw = data.get("thread", data)
             if isinstance(raw, list):
-                threads_raw.extend(item for item in raw if isinstance(item, dict))
+                for item in raw:
+                    if isinstance(item, dict):
+                        threads_raw.append(item)
             elif isinstance(raw, dict):
                 threads_raw.append(raw)
         elif isinstance(data, list):
@@ -183,9 +189,9 @@ class ParsingMixin:
                     continue
                 raw = item.get("thread", item)
                 if isinstance(raw, list):
-                    threads_raw.extend(
-                        entry for entry in raw if isinstance(entry, dict)
-                    )
+                    for entry in raw:
+                        if isinstance(entry, dict):
+                            threads_raw.append(entry)
                 elif isinstance(raw, dict):
                     threads_raw.append(raw)
 

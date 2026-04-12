@@ -239,9 +239,10 @@ class SourceViewRendering:
                 # :set color off — preserve bold/reverse/underline attrs only
                 # (matches cgdb: uses A_BOLD/A_REVERSE only when color disabled)
                 hs = self.hl.get(group)
-                attrs = [a for a, on in
-                         [("bold", hs.bold), ("reverse", hs.reverse),
-                          ("underline", hs.underline)] if on]
+                attrs = []
+                for attr, on in [("bold", hs.bold), ("reverse", hs.reverse), ("underline", hs.underline)]:
+                    if on:
+                        attrs.append(attr)
                 st = " ".join(attrs)
             styled_spans.append((tok_text, st))
 

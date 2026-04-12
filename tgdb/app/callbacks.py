@@ -293,7 +293,10 @@ class CallbacksMixin:
 
     def on_file_selected(self, msg: FileSelected) -> None:
         self._file_dialog_pending = False
-        self.query_one("#file-dlg", FileDialog).close()
+        try:
+            self.query_one("#file-dlg", FileDialog).close()
+        except NoMatches:
+            pass
         src = self._get_source_view()
         if src is not None:
             src.load_file(msg.path)
@@ -303,7 +306,6 @@ class CallbacksMixin:
 
     def on_file_dialog_closed(self, _: FileDialogClosed) -> None:
         self._file_dialog_pending = False
-        self.query_one("#file-dlg", FileDialog).close()
         self._switch_to_tgdb()
 
 

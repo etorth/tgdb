@@ -139,7 +139,7 @@ class CommandsMixin:
         if args[0].lower() == "tgdb":
             self._switch_to_tgdb()
             return None
-        return "focus: requires cgdb or gdb"
+        return "focus: requires tgdb or gdb"
 
 
     def _cmd_noh(self: TGDBApp, _: list) -> None:

@@ -101,7 +101,7 @@ class ThreadPane(PaneBase):
 
 
     def title(self) -> str:
-        return "Threads"
+        return "THREADS"
 
 
     def compose(self):

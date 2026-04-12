@@ -335,7 +335,7 @@ class LocalVariablePaneReconcileMixin:
             node.set_label(label_plain.removesuffix(_SHADOW_SUFFIX))
 
 
-    def _apply_changelist(self, changelist: list[dict], skip_varobjs: set[str] = frozenset()) -> None:
+    def _apply_changelist(self, changelist: list[dict], skip_varobjs: frozenset[str] = frozenset()) -> None:
         """Apply ``-var-update`` results to the live tree."""
         _log.debug(f"changelist: {len(changelist)} changes")
 

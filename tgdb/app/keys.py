@@ -363,10 +363,13 @@ class KeyRoutingMixin:
             return
 
         if self._mode == "CMD":
-            status = self.query_one("#cmdline", CommandLineBar)
-            if status.feed_key(key, char):
-                event.stop()
-                return
+            try:
+                status = self.query_one("#cmdline", CommandLineBar)
+                if status.feed_key(key, char):
+                    event.stop()
+                    return
+            except NoMatches:
+                pass
 
         if self._handle_tgdb_mode_key(key, char):
             event.stop()

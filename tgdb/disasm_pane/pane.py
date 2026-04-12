@@ -219,7 +219,7 @@ def _parse_disasm(raw: list[dict], current_addr: str = "") -> list[DisasmLine]:
     if not raw:
         return result
 
-    first = raw[0] if raw else {}
+    first = raw[0]
     # mode=1: each element has line_asm_insn key
     if "line_asm_insn" in first:
         for src_block in raw:
