@@ -83,6 +83,7 @@ class _SourceContent(
         self._pending_search: Optional[tuple[str, bool]] = None
         self.can_focus = False
 
+
     def post_message(self, message) -> bool:
         """Forward through the SourceView wrapper so messages bubble correctly.
 

@@ -69,22 +69,28 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
             def __init__(self, fn: Callable) -> None:
                 self._fn = fn
 
+
             def write(self, s: str) -> int:
                 if s:
                     self._fn(s)
                 return len(s)
 
+
             def flush(self) -> None:
                 pass
+
 
             def isatty(self) -> bool:
                 return False
 
+
             def readable(self) -> bool:
                 return False
 
+
             def writable(self) -> bool:
                 return True
+
 
             def seekable(self) -> bool:
                 return False
@@ -135,6 +141,7 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
             out = writer.getvalue().rstrip("\n")
             return out or None
         return None
+
 
     async def _exec_pyfile_async(self, path: str, print_fn: Optional[Callable] = None) -> Optional[str]:
         """Execute a Python file as an async coroutine."""

@@ -159,9 +159,11 @@ class HighlightGroups:
     def _resolve_name(self, name: str) -> str:
         return self._ALIASES.get(name.lower(), name)
 
+
     def get(self, name: str) -> HighlightStyle:
         name = self._resolve_name(name)
         return self._groups.get(name, HighlightStyle())
+
 
     def set(self, name: str, *, fg: str = "", bg: str = "", attrs: str = "") -> None:
         """Apply :highlight command values to a group."""
@@ -193,6 +195,7 @@ class HighlightGroups:
             elif attr in _ATTR_MAP:
                 field, val = _ATTR_MAP[attr]
                 setattr(grp, field, val)
+
 
     def style(self, name: str) -> str:
         """Return a Rich style string for *name*."""

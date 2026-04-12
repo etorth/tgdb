@@ -83,12 +83,14 @@ class SourceViewRendering:
         return result
 
     # Width of the line-number field (minimum 1, grows with file size)
+
     def _nr_width(self) -> int:
         if self.source_file:
             n = len(self.source_file.lines)
         else:
             n = 0
         return max(1, len(str(max(n, 1))))
+
 
     def _get_line_number_style(self, bp_flag: int, is_exe: bool, is_sel: bool) -> str:
         """Return the style for a line number cell.
@@ -105,6 +107,7 @@ class SourceViewRendering:
             return self.hl.style("SelectedLineNr")
         return self.hl.style("LineNumber")
 
+
     def _find_mark_for_line(self, sf, line_no: int) -> tuple[str | None, str]:
         """Return ``(mark_char, mark_style)`` for *line_no*, or ``(None, "")``."""
         if not self.showmarks:
@@ -117,6 +120,7 @@ class SourceViewRendering:
                 return mk, self.hl.style("Mark")
         return None, ""
 
+
     def _get_arrow_info(self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str) -> tuple[str, str]:
         """Return ``(arrow_style, display_mode)`` for the current line.
 
@@ -127,6 +131,7 @@ class SourceViewRendering:
         if is_sel and sel_disp in ("shortarrow", "longarrow"):
             return self.hl.style("SelectedLineArrow"), sel_disp
         return "", ""
+
 
     def _get_line_background_style(self, is_exe: bool, is_sel: bool, exe_disp: str, sel_disp: str) -> str:
         """Return the background style for a highlighted source line, or ``""``."""
@@ -142,6 +147,7 @@ class SourceViewRendering:
                 return self.hl.style("SelectedLineBlock")
         return ""
 
+
     def _compile_search_pattern(self) -> "re.Pattern | None":
         """Compile the current search pattern, respecting *ignorecase*.
 
@@ -154,6 +160,7 @@ class SourceViewRendering:
             return re.compile(self._search_pattern, flags)
         except re.error:
             return None
+
 
     def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
         """Build one visible line as Rich Text, matching cgdb's layout.

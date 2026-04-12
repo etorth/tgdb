@@ -36,9 +36,11 @@ class _EvaluateContent(Widget):
         self.can_focus = False
         self._entries: list[tuple[str, str]] = []
 
+
     def set_entries(self, entries: list[tuple[str, str]]) -> None:
         self._entries = list(entries)
         self.refresh()
+
 
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
@@ -87,19 +89,24 @@ class EvaluatePane(PaneBase):
         self._values: list[str] = []
         self._eval_fn: Optional[Callable] = None
 
+
     def title(self) -> str:
         return "EVALUATIONS"
+
 
     def compose(self):
         yield from super().compose()
         yield self._content
 
+
     def set_eval_fn(self, fn: Callable) -> None:
         """Install the async expression-evaluation callback."""
         self._eval_fn = fn
 
+
     def _update_content(self) -> None:
         self._content.set_entries(list(zip(self._expressions, self._values)))
+
 
     def add_expression(self, expr: str) -> None:
         """Append a watch expression and start evaluating it."""
@@ -108,6 +115,7 @@ class EvaluatePane(PaneBase):
         self._values.append("<pending>")
         self._update_content()
         asyncio.create_task(self._eval_one(idx, expr))
+
 
     def remove_expression(self, index: int) -> Optional[str]:
         """Remove one watch expression by index and return it."""
@@ -118,6 +126,7 @@ class EvaluatePane(PaneBase):
             return removed
         return None
 
+
     async def _eval_one(self, idx: int, expr: str) -> None:
         if self._eval_fn:
             try:
@@ -127,6 +136,7 @@ class EvaluatePane(PaneBase):
             if idx < len(self._values):
                 self._values[idx] = val
                 self._update_content()
+
 
     async def refresh_all(self, current_frame: Optional[object] = None) -> None:
         """Re-evaluate every stored watch expression."""

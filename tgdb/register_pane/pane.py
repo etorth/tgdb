@@ -34,12 +34,15 @@ class _RegisterContent(Widget):
         self.can_focus = False
         self._registers: list[RegisterInfo] = []
 
+
     def set_registers(self, registers: list[RegisterInfo]) -> None:
         self._registers = list(registers)
         self.refresh()
 
+
     def _register_text(self, register: RegisterInfo) -> str:
         return f"{register.name} = {register.value}"
+
 
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
@@ -76,12 +79,15 @@ class RegisterPane(PaneBase):
         super().__init__(hl, **kwargs)
         self._content = _RegisterContent(hl)
 
+
     def title(self) -> str:
         return "REGISTERS"
+
 
     def compose(self):
         yield from super().compose()
         yield self._content
+
 
     def set_registers(self, registers: list[RegisterInfo]) -> None:
         """Publish the latest named-register snapshot."""

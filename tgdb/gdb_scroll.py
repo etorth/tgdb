@@ -65,6 +65,7 @@ class ScrollMixin:
         self.post_message(ScrollModeChange(True))
         self.refresh()
 
+
     def exit_scroll_mode(self) -> None:
         self._scroll_mode = False
         self._scroll_offset = 0
@@ -72,14 +73,17 @@ class ScrollMixin:
         self.post_message(ScrollModeChange(False))
         self.refresh()
 
+
     def _scroll_up(self, n: int = 1) -> None:
         max_off = len(self._scrollback)
         self._scroll_offset = min(max_off, self._scroll_offset + n)
         self.refresh()
 
+
     def _scroll_down(self, n: int = 1) -> None:
         self._scroll_offset = max(0, self._scroll_offset - n)
         self.refresh()
+
 
     def _scroll_left(self) -> None:
         """Horizontal scroll left (cgdb scr_left)."""
@@ -87,15 +91,18 @@ class ScrollMixin:
             self._h_offset -= 1
             self.refresh()
 
+
     def _scroll_right(self) -> None:
         """Horizontal scroll right (cgdb scr_right)."""
         self._h_offset += 1
         self.refresh()
 
+
     def _beginning_of_row(self) -> None:
         """Jump to start of row (cgdb scr_beginning_of_row, key '0')."""
         self._h_offset = 0
         self.refresh()
+
 
     def _end_of_row(self) -> None:
         """Jump to end of row (cgdb scr_end_of_row, key '$')."""

@@ -63,6 +63,7 @@ class RenderMixin:
 
         return Text(" " * w, style=style, no_wrap=True, overflow="crop")
 
+
     def _render_input(self, w: int, style: str) -> Text:
         """Render the active command-input line with a blinking block cursor."""
         prefix = ":"
@@ -121,6 +122,7 @@ class RenderMixin:
             t.append(visible[after_col:], style)
         return t
 
+
     def _render_streaming(self, w: int, style: str) -> Text:
         """Render async-print-op: show latest print output with ▶ prefix.
 
@@ -142,6 +144,7 @@ class RenderMixin:
         text = _pad_crop("\u25b6 Running\u2026", w)
         return Text(text, style=style, no_wrap=True, overflow="crop")
 
+
     def _render_ml_input(self, w: int, style: str) -> Text:
         """Render the heredoc continuation prompt (multi-row)."""
         lines = []
@@ -161,6 +164,7 @@ class RenderMixin:
         t = Text("\n".join(lines))
         t.stylize(style)
         return t
+
 
     def _render_msg(self, w: int, style: str) -> Text:
         """Render the visible window of the scrollable message display."""

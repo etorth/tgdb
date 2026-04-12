@@ -87,13 +87,16 @@ class PaneHandle:
         self._screen = screen
         self._address = address
 
+
     async def attach(self, pane_type: Pane) -> None:
         """Replace the cell's current content with a named pane widget."""
         await self._screen._do_attach(self._address, pane_type)
 
+
     async def detach(self) -> None:
         """Replace the cell's content with an EmptyPane."""
         await self._screen._do_detach(self._address)
+
 
     def __repr__(self) -> str:
         return f"PaneHandle({self._address})"
@@ -120,6 +123,7 @@ class TGDBScreen:
     def __init__(self) -> None:
         self._app: Optional["TGDBApp"] = None
 
+
     def _set_app(self, app: "TGDBApp") -> None:
         self._app = app
 
@@ -134,13 +138,16 @@ class TGDBScreen:
         s = self._app.size
         return (s.width, s.height)
 
+
     def width(self) -> int:
         """Return terminal width in cells."""
         return self.size()[0]
 
+
     def height(self) -> int:
         """Return terminal height in cells."""
         return self.size()[1]
+
 
     def get_pane(self, address: list[int]) -> PaneHandle:
         """Return a lazy handle for the workspace cell at *address*."""
@@ -153,6 +160,7 @@ class TGDBScreen:
     async def close_all_panes(self) -> None:
         """Remove all workspace panes and reset to a single empty cell."""
         await self._do_close_all()
+
 
     async def split(self, pane: list[int] | None = None, mode: SplitMode = SplitMode.HORIZONTAL) -> None:
         """Add a new empty cell relative to the cell at *pane*.
@@ -171,6 +179,7 @@ class TGDBScreen:
             await self._do_split(list(pane), mode)
         else:
             await self._do_split([], mode)
+
 
     async def close(self, address: list[int]) -> None:
         """Delete the workspace cell at *address* (equivalent to context-menu Delete)."""
@@ -203,6 +212,7 @@ class TGDBScreen:
             current = items[i]
         return current
 
+
     async def _do_close_all(self) -> None:
         from .workspace import EmptyPane
 
@@ -213,6 +223,7 @@ class TGDBScreen:
         if root is None:
             return
         await root.set_items([EmptyPane(app.hl)])
+
 
     async def _do_split(self, pane: list[int], mode: SplitMode) -> None:
         from .workspace import EmptyPane, PaneContainer
@@ -246,12 +257,14 @@ class TGDBScreen:
             else:
                 await app._apply_context_menu_action(widget, direction)
 
+
     async def _do_close(self, address: list[int]) -> None:
         app = self._app
         if app is None:
             return
         widget = self._get_widget_at(address)
         await app._delete_workspace_item(widget)
+
 
     async def _do_attach(self, address: list[int], pane_type: Pane) -> None:
         from .workspace import PaneContainer
@@ -273,6 +286,7 @@ class TGDBScreen:
         descriptor = app._pane_descriptors.get(pane_kind)
         if descriptor is not None and descriptor.requester is not None:
             descriptor.requester()
+
 
     async def _do_detach(self, address: list[int]) -> None:
         app = self._app

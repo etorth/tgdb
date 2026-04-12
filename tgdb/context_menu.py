@@ -88,6 +88,7 @@ class ContextMenu(Widget):
         self._panel_widgets: list[_PanelWidget] = []
         self.can_focus = False
 
+
     def render(self) -> Text:
         # The ContextMenu widget itself is 1×1 and hidden under the root panel.
         return Text()
@@ -100,6 +101,7 @@ class ContextMenu(Widget):
     def is_open(self) -> bool:
         return self.has_class("visible")
 
+
     def set_items(self, items: Sequence[ContextMenuItem]) -> None:
         self._items = tuple(items)
         if self._items:
@@ -109,6 +111,7 @@ class ContextMenu(Widget):
         if self.is_open:
             self._relayout()
 
+
     def open_at(self, screen_x: int, screen_y: int) -> None:
         self._requested_x = screen_x
         self._requested_y = screen_y
@@ -117,11 +120,13 @@ class ContextMenu(Widget):
         self._relayout()
         self.add_class("visible")
 
+
     def close(self) -> None:
         self.remove_class("visible")
         for pw in self._panel_widgets:
             pw.remove()
         self._panel_widgets = []
+
 
     def contains_point(self, screen_x: int, screen_y: int) -> bool:
         if not self.is_open:
@@ -144,6 +149,7 @@ class ContextMenu(Widget):
         ):
             return  # selection unchanged
         self._set_selection(depth, item_index, open_child=True)
+
 
     def _handle_panel_click(self, depth: int, item_index: int) -> None:
         items = self._entries_at_depth(depth)
@@ -169,6 +175,7 @@ class ContextMenu(Widget):
             items = items[index].children
         return items
 
+
     def _selected_item(self, depth: Optional[int] = None) -> Optional[ContextMenuItem]:
         if not self._selection_path:
             return None
@@ -182,6 +189,7 @@ class ContextMenu(Widget):
             return items[index]
         return None
 
+
     def _row_layout(self, items: tuple[ContextMenuItem, ...]) -> tuple[_PanelRow, ...]:
         rows: list[_PanelRow] = []
         for index, item in enumerate(items):
@@ -189,6 +197,7 @@ class ContextMenu(Widget):
                 rows.append(_PanelRow("separator"))
             rows.append(_PanelRow("item", item_index=index))
         return tuple(rows)
+
 
     def _inner_width(self, items: tuple[ContextMenuItem, ...]) -> int:
         base_padding = _PADDING_LEFT + _PADDING_RIGHT
@@ -201,6 +210,7 @@ class ContextMenu(Widget):
                 extra = 0
             widths.append(cell_len(item.label) + base_padding + extra)
         return max(widths, default=1)
+
 
     def _normalize_selection_path(self) -> None:
         if not self._items:
@@ -220,6 +230,7 @@ class ContextMenu(Widget):
                 break
             items = item.children
         self._selection_path = normalized or [0]
+
 
     def _set_selection(
         self,
@@ -249,6 +260,7 @@ class ContextMenu(Widget):
         self._normalize_selection_path()
         self._relayout()
 
+
     def _open_child_panel(self, depth: int) -> bool:
         item = self._selected_item(depth)
         if item is None or not item.has_children:
@@ -261,6 +273,7 @@ class ContextMenu(Widget):
         )
         return True
 
+
     def _close_child_panel(self) -> bool:
         if len(self._selection_path) <= 1:
             return False
@@ -268,6 +281,7 @@ class ContextMenu(Widget):
         self._normalize_selection_path()
         self._relayout()
         return True
+
 
     def _relayout(self) -> None:
         self._normalize_selection_path()
@@ -330,6 +344,7 @@ class ContextMenu(Widget):
         # Remove excess widgets (submenus that are now closed)
         while len(self._panel_widgets) > len(panels):
             self._panel_widgets.pop().remove()
+
 
     def _submit_selection(self) -> None:
         item = self._selected_item()

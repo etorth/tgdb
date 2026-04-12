@@ -137,6 +137,7 @@ class _GDBScreen(pyte.Screen):
         self._push_scrollback = push_fn
         self.use_color: bool = True  # set by GDBWidget to honour debugwincolor
 
+
     def index(self) -> None:
         if self.cursor.y == self.lines - 1:
             # Row 0 is about to be lost — capture both the rendered text and

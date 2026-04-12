@@ -72,6 +72,7 @@ class SourceView(PaneBase):
         self._content = _SourceContent(hl)
         self._content._pane = self  # so _content.post_message bubbles through us
 
+
     def title(self) -> Optional[str]:
         content = self.__dict__.get("_content")
         if content is not None:
@@ -82,8 +83,10 @@ class SourceView(PaneBase):
             return sf.path
         return None
 
+
     def align(self) -> str:
         return "left"
+
 
     def compose(self):
         yield from super().compose()
@@ -95,6 +98,7 @@ class SourceView(PaneBase):
 
     def on_key(self, event: events.Key) -> None:
         self._content.on_key(event)
+
 
     def refresh(self, *args, **kwargs):
         # Refresh title bar in case source_file path changed.
@@ -113,6 +117,7 @@ class SourceView(PaneBase):
             setattr(self._content, name, value)
         else:
             super().__setattr__(name, value)
+
 
     def __getattr__(self, name: str):
         content = self.__dict__.get("_content")

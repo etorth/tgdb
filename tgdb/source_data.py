@@ -54,6 +54,7 @@ class SourceFile:
         self.marks_local: dict[str, int] = {}  # 'a'-'z' → 1-based line
         self._tokens: Optional[list[list[tuple]]] = None
 
+
     def tokenize(self, tabstop: int = 8) -> list[list[tuple]]:
         """Return per-line list of (text, group) spans, cached."""
         if self._tokens is not None:

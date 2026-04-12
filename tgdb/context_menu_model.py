@@ -41,9 +41,11 @@ class _PanelLayout:
     def width(self) -> int:
         return self.inner_width + 2
 
+
     @property
     def height(self) -> int:
         return len(self.rows) + 2
+
 
     def row_for_item(self, item_index: int) -> Optional[int]:
         for row_index, row in enumerate(self.rows):

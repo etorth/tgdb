@@ -137,6 +137,7 @@ class VarobjMixin:
         _log.debug(f"var_create expr={expr!r} -> name={payload.get('name')!r}")
         return payload
 
+
     async def var_list_children(self, varobj_name: str, from_idx: int = 0, limit: int = 0) -> tuple[list[dict], bool]:
         """List children of *varobj_name*.
 
@@ -180,6 +181,7 @@ class VarobjMixin:
         )
         return children, has_more
 
+
     async def var_delete(self, varobj_name: str) -> None:
         """Delete a varobj and its children."""
         _log.debug(f"var_delete {varobj_name}")
@@ -187,6 +189,7 @@ class VarobjMixin:
             await self.mi_command_async(f"-var-delete {varobj_name}")
         except RuntimeError:
             pass
+
 
     async def get_decl_lines(self) -> dict[str, int]:
         """Return DWARF declaration lines for all local variables in the frame.
@@ -268,11 +271,13 @@ class VarobjMixin:
         _log.debug(f"get_decl_lines -> {result}")
         return result
 
+
     async def eval_expr(self, expr: str) -> str:
         """Evaluate a GDB expression and return its value string."""
         result = await self.mi_command_async(f"-data-evaluate-expression {expr}")
         payload = result.get("payload") or {}
         return payload.get("value", "")
+
 
     async def var_evaluate_expression(self, varobj_name: str) -> str:
         """Return the current value string of a varobj without touching children.
@@ -288,6 +293,7 @@ class VarobjMixin:
         value = payload.get("value", "")
         _log.debug(f"var_evaluate_expression {varobj_name} -> {value!r}")
         return value
+
 
     async def var_update(self, varobj_name: str = "*", timeout: float | None = 10.0) -> list[dict]:
         """Update varobjs and return changed ones.

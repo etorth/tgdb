@@ -81,6 +81,7 @@ class UserCommandMixin:
         )
         return None
 
+
     def _list_user_commands(self, prefix: str) -> Optional[str]:
         matches = {}
         for n, c in self._user_commands.items():
@@ -101,6 +102,7 @@ class UserCommandMixin:
             )
         return "\n".join(lines)
 
+
     def _lookup_user_command(
         self, name: str
     ) -> tuple[Optional[UserCommandDef], Optional[str]]:
@@ -118,6 +120,7 @@ class UserCommandMixin:
             None,
             f"Ambiguous command: '{name}' (matches: {', '.join(sorted(matches))})",
         )
+
 
     async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str, print_fn: Optional[Callable] = None) -> Optional[str]:
         if self._exec_depth >= 20:
@@ -139,6 +142,7 @@ class UserCommandMixin:
         finally:
             self._exec_depth -= 1
 
+
     def _validate_nargs(self, nargs: str, shlex_args: list[str], raw_args: str) -> Optional[str]:
         stripped = raw_args.strip()
         if nargs == "0":
@@ -154,6 +158,7 @@ class UserCommandMixin:
             if not shlex_args:
                 return "at least one argument required"
         return None
+
 
     def _expand_replacement(self, template: str, shlex_args: list[str], raw_args: str) -> str:
         args_str = raw_args.strip()
@@ -183,6 +188,7 @@ class UserCommandMixin:
             return m.group(0)
 
         return re.sub(r"<([^>]+)>", replacer, template)
+
 
     @staticmethod
     def _f_args_split(text: str) -> list[str]:
@@ -223,6 +229,7 @@ class UserCommandMixin:
         if current:
             args.append("".join(current))
         return args
+
 
     def get_completions(self, arg_lead: str, cmd_line: str, cursor_pos: int) -> list[str]:
         """Return completion candidates for Tab completion in the status bar."""

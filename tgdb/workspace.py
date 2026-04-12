@@ -72,6 +72,7 @@ class Splitter(Widget):
         self._dragging = False
         self._is_horizontal_split = True
 
+
     def set_orientation(self, is_horizontal_split: bool) -> None:
         self._is_horizontal_split = is_horizontal_split
         if is_horizontal_split:
@@ -81,6 +82,7 @@ class Splitter(Widget):
             self.styles.width = "1fr"
             self.styles.height = 1
         self.refresh()
+
 
     def render(self) -> Text:
         style = self.hl.style("StatusLine")
@@ -95,11 +97,13 @@ class Splitter(Widget):
         width = max(1, self.size.width or 1)
         return Text(" " * width, style=style, no_wrap=True, overflow="crop")
 
+
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if self._draggable and event.button == 1:
             self._dragging = True
             self.capture_mouse()
             event.stop()
+
 
     def on_mouse_move(self, event: events.MouseMove) -> None:
         if self._dragging:
@@ -111,6 +115,7 @@ class Splitter(Widget):
                 )
             )
             event.stop()
+
 
     def on_mouse_up(self, event: events.MouseUp) -> None:
         if self._dragging and event.button == 1:
@@ -179,12 +184,15 @@ class PaneContainer(Widget):
         self.min_item_width = min_item_width
         self.min_item_height = min_item_height
 
+
     @property
     def items(self) -> tuple[Widget, ...]:
         return tuple(self._items)
 
+
     def index_of(self, item: Widget) -> int:
         return self._items.index(item)
+
 
     def set_orientation(self, orientation: str) -> None:
         if self.orientation == orientation:
@@ -194,10 +202,12 @@ class PaneContainer(Widget):
         # Schedule it for the next frame; callers can proceed synchronously.
         self.call_later(self._rebuild)
 
+
     async def set_items(self, items: list[Widget]) -> None:
         self._items = list(items)
         self._weights = [1] * len(self._items)
         await self._rebuild()
+
 
     async def insert_item(self, index: int, item: Widget) -> None:
         self._items.insert(index, item)
@@ -239,6 +249,7 @@ class PaneContainer(Widget):
 
         self.refresh(layout=True)
 
+
     async def replace_item(self, old_item: Widget, new_item: Widget) -> None:
         index = self.index_of(old_item)
         self._items[index] = new_item
@@ -258,6 +269,7 @@ class PaneContainer(Widget):
         # old_item was removed (e.g. during _normalize_container_after_delete).
         await self._restore_nested_containers()
         self.refresh(layout=True)
+
 
     async def take_item(self, item: Widget) -> Widget:
         index = self.index_of(item)
@@ -287,6 +299,7 @@ class PaneContainer(Widget):
         self.refresh(layout=True)
         return removed
 
+
     def _apply_item_style(self, item: Widget, weight: int) -> None:
         item.styles.display = "block"
         weight_fr = f"{max(1, int(weight))}fr"
@@ -296,6 +309,7 @@ class PaneContainer(Widget):
         else:
             item.styles.width = "1fr"
             item.styles.height = weight_fr
+
 
     def _apply_orientation(self) -> None:
         self.styles.layout = self.orientation
@@ -309,6 +323,7 @@ class PaneContainer(Widget):
             else:
                 item, weight = next(item_iter, (child, 1))
                 self._apply_item_style(item, weight)
+
 
     def _adjacent_items(self, splitter: "Splitter") -> Optional[tuple[Widget, Widget]]:
         children = list(self.children)
@@ -324,6 +339,7 @@ class PaneContainer(Widget):
             return None
         return before, after
 
+
     def _capture_layout_weights(self) -> None:
         is_horizontal = self.orientation == "horizontal"
         if not self._items:
@@ -335,6 +351,7 @@ class PaneContainer(Widget):
                 self._weights.append(max(1, item.size.width))
             else:
                 self._weights.append(max(1, item.size.height))
+
 
     def _resize_from_drag(self, splitter: "Splitter", screen_x: int, screen_y: int) -> bool:
         adjacent = self._adjacent_items(splitter)
@@ -378,6 +395,7 @@ class PaneContainer(Widget):
         self.refresh(layout=True)
         return True
 
+
     async def _restore_nested_containers(self) -> None:
         """
         Rebuild nested PaneContainer children after this container is remounted.
@@ -395,6 +413,7 @@ class PaneContainer(Widget):
                 await item._rebuild()
             else:
                 await item._restore_nested_containers()
+
 
     async def _rebuild(self) -> None:
         is_horizontal = self.orientation == "horizontal"
@@ -420,6 +439,7 @@ class PaneContainer(Widget):
         await self._restore_nested_containers()
         self.refresh(layout=True)
 
+
     def on_drag_resize(self, msg: DragResize) -> None:
         splitter = msg.splitter
         if splitter is None or splitter.parent is not self:
@@ -427,6 +447,7 @@ class PaneContainer(Widget):
         # Always handle the drag; do NOT stop the message so it can bubble to
         # the app for top-level _window_shift bookkeeping.
         self._resize_from_drag(splitter, msg.screen_x, msg.screen_y)
+
 
     def _resize_from_title_drag(self, before: Widget, after: Widget, screen_y: int) -> None:
         """Resize *before* and *after* panes in a vertical container when the

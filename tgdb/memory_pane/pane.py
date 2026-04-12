@@ -76,9 +76,11 @@ class _MemoryContent(Widget):
         self._byte_count: int = 64
         self._read_fn: Optional[Callable] = None
 
+
     def set_rows(self, rows: list[tuple[str, list[int], str]]) -> None:
         self._rows = list(rows)
         self.refresh()
+
 
     def _format_row(self, addr_str: str, byte_list: list[int], ascii_str: str) -> str:
         groups = []
@@ -90,6 +92,7 @@ class _MemoryContent(Widget):
             groups.append(hex_part)
         hex_section = "  ".join(groups)
         return f"{addr_str}  {hex_section}  |{ascii_str}|"
+
 
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
@@ -140,23 +143,28 @@ class MemoryPane(PaneBase):
         self._current_size: int = 64
         self._read_fn: Optional[Callable] = None
 
+
     def title(self) -> str:
         return "MEMORY"
+
 
     def compose(self):
         yield from super().compose()
         yield self._content
+
 
     def set_read_fn(self, fn: Callable) -> None:
         """Install the async callback used to fetch raw memory bytes."""
         self._read_fn = fn
         self._content._read_fn = fn
 
+
     def set_address(self, addr: str, size: int = 64) -> None:
         """Request a new memory dump starting at *addr*."""
         self._current_address = addr
         self._current_size = size
         asyncio.create_task(self._fetch(addr, size))
+
 
     async def _fetch(self, addr: str, size: int) -> None:
         if self._read_fn:

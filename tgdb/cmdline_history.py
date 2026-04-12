@@ -58,6 +58,7 @@ class HistoryMixin:
                 entries.append(stripped)
         self._history = entries
 
+
     def save_history(self, path: Optional[Path] = None, *, max_size: int = 1024) -> Optional[str]:
         """Save the current session history to *path* (default: history file).
 
@@ -92,6 +93,7 @@ class HistoryMixin:
             return f"history: cannot write '{target}': {exc}"
         return None
 
+
     def list_history(self) -> Optional[str]:
         """Return a numbered listing of all history entries for :history command."""
         if not self._history:
@@ -111,6 +113,7 @@ class HistoryMixin:
             else:
                 lines.append(f"{prefix}{entry}")
         return "\n".join(lines)
+
 
     def _add_to_history(self, cmd: str, *, max_size: int = 1024) -> None:
         """Add *cmd* to in-memory history.
@@ -158,6 +161,7 @@ class HistoryMixin:
                 self.refresh()
                 return
 
+
     def _history_down(self) -> None:
         """Move to the next history entry that matches the current prefix."""
         if self._history_idx == -1:
@@ -179,6 +183,7 @@ class HistoryMixin:
         self._reset_history_browse()
         self.refresh()
 
+
     def _show_history_multiline(self, entry: str) -> None:
         """Switch into multiline display mode for a recalled heredoc history entry."""
         all_lines = entry.splitlines()
@@ -193,6 +198,7 @@ class HistoryMixin:
         # all lines of the entry
         self._set_height(len(all_lines))
 
+
     def _cancel_history_multiline(self) -> None:
         """Exit history-recall multiline display mode."""
         if self._ml_history_recall:
@@ -206,6 +212,7 @@ class HistoryMixin:
             self._input_active = True
             self._set_height(1)
 
+
     def _reset_history_browse(self) -> None:
         """Abort browsing: revert _input_buf to the original prefix."""
         if self._history_idx != -1:
@@ -213,6 +220,7 @@ class HistoryMixin:
             self._cursor_pos = len(self._input_buf)
             self._history_idx = -1
             self._history_prefix = ""
+
 
     def _commit_history_browse(self) -> None:
         """Stop browsing but KEEP the current retrieved entry as _input_buf."""
@@ -229,6 +237,7 @@ class HistoryMixin:
             self._apply_completion()
         else:
             self._trigger_completion()
+
 
     def _trigger_completion(self) -> None:
         if not self._completion_provider:
@@ -256,6 +265,7 @@ class HistoryMixin:
         self._completion_idx = 0
         self._completion_arg_start = arg_lead_start
         self._apply_completion()
+
 
     def _apply_completion(self) -> None:
         if not self._completions:

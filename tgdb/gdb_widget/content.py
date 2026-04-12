@@ -103,6 +103,7 @@ class _GDBContent(ScrollMixin, Widget):
             # For grow:   pyte just extends self.lines and updates columns.
             self._screen.resize(rows, cols)
 
+
     def _shrink_pyte(self, new_rows: int) -> None:
         """Shrink the pyte screen from self._pyte_rows to new_rows.
 
@@ -140,6 +141,7 @@ class _GDBContent(ScrollMixin, Widget):
         # Pre-set line count so pyte's resize() skips delete_lines.
         self._screen.lines = new_rows
         self._screen.dirty.update(range(new_rows))
+
 
     def _grow_pyte(self, new_rows: int) -> None:
         """Grow the pyte screen from self._pyte_rows to new_rows.
@@ -191,11 +193,13 @@ class _GDBContent(ScrollMixin, Widget):
         if not self._scroll_mode:
             self.refresh()
 
+
     def inject_text(self, text: str) -> None:
         """Inject plain text directly into the scrollback (showdebugcommands)."""
         self._push_to_scrollback(Text(text.rstrip("\n")), None)
         if not self._scroll_mode:
             self.refresh()
+
 
     def _at_empty_gdb_prompt(self) -> bool:
         if not self._screen:
@@ -207,6 +211,7 @@ class _GDBContent(ScrollMixin, Widget):
         ).plain
         before_cursor = row[: self._screen.cursor.x]
         return before_cursor.endswith("(gdb) ")
+
 
     def _maybe_escape_burst_key(self, key: str, char: str) -> Optional[tuple[str, str]]:
         if key.startswith("alt+") and char and char.isprintable():
@@ -223,6 +228,7 @@ class _GDBContent(ScrollMixin, Widget):
 
     def _visible_height(self) -> int:
         return max(1, self.size.height)
+
 
     def _all_lines(self) -> list[Text]:
         """scrollback + current pyte screen rows as Text list."""
@@ -247,6 +253,7 @@ class _GDBContent(ScrollMixin, Widget):
                 )
         return lines
 
+
     def render(self) -> Text:
         # cgdb calls if_layout() → scr_move() (resize libvterm) → if_draw()
         # in one synchronous step, so the draw always sees the correct size.
@@ -262,6 +269,7 @@ class _GDBContent(ScrollMixin, Widget):
         if self._scroll_mode:
             return self._render_scroll(h)
         return self._render_live(h)
+
 
     def _render_live(self, h: int) -> Text:
         """Render the live pyte screen (normal mode)."""

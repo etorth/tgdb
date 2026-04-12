@@ -50,6 +50,7 @@ class KeyMapper:
             node = node.children.setdefault(token, TrieNode())
         node.value = list(rhs)
 
+
     def unmap(self, mode: str, lhs: list[str]) -> bool:
         """Remove a mapping.  Returns True if the mapping existed."""
         root = self._roots.get(mode)
@@ -128,12 +129,14 @@ class KeyMapper:
         # Internal node — still building prefix
         return []
 
+
     def flush(self, mode: str) -> list[str]:
         """Force-flush any buffered tokens (called on timeout)."""
         buf = self._buf.get(mode, [])
         flushed = list(buf)
         buf.clear()
         return flushed
+
 
     def _resolve(self, root: TrieNode, tokens: list[str]) -> list[str]:
         node = root

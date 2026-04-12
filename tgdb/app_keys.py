@@ -72,6 +72,7 @@ class KeyRoutingMixin:
 
         return False
 
+
     def _handle_tgdb_mode_key(self: TGDBApp, key: str, char: str) -> bool:
         if self._mode != "TGDB":
             return False
@@ -110,6 +111,7 @@ class KeyRoutingMixin:
 
         return False
 
+
     def _replay_key_sequence(self: TGDBApp, tokens: list[str]) -> None:
         """Dispatch a list of key-name tokens as if the user typed them."""
         self._in_map_replay = True
@@ -122,6 +124,7 @@ class KeyRoutingMixin:
                     break
         finally:
             self._in_map_replay = False
+
 
     def _resume_pending_replay(self: TGDBApp) -> None:
         if not self._pending_replay_tokens:
@@ -148,6 +151,7 @@ class KeyRoutingMixin:
         if result == []:
             return None  # still buffering
         return result
+
 
     def _replay_gdb_key_sequence(self: TGDBApp, tokens: list[str]) -> None:
         """Replay an imap expansion directly into the GDB PTY."""
@@ -180,6 +184,7 @@ class KeyRoutingMixin:
                     char = ""
                 if char:
                     self.gdb.send_input(char.encode())
+
 
     def _dispatch_key_internal(self: TGDBApp, key: str) -> bool:
         """Route a key-name token through the mode-aware dispatch stack.
@@ -219,6 +224,7 @@ class KeyRoutingMixin:
             self.gdb.send_input(b"\n")
         return False
 
+
     def _dispatch_ml_message_key(self: TGDBApp, key: str, char: str) -> bool:
         """Forward a key to the CommandLineBar while in ML_MESSAGE mode."""
         try:
@@ -231,6 +237,7 @@ class KeyRoutingMixin:
         except NoMatches:
             pass
         return False
+
 
     def _dispatch_cmd_mode_key(self: TGDBApp, key: str, char: str) -> bool:
         """Route a key while in CMD mode.  Returns True if replay should pause."""
@@ -255,6 +262,7 @@ class KeyRoutingMixin:
         else:
             bar.feed_key(key, char)
         return False
+
 
     def _dispatch_tgdb_replay_key(self: TGDBApp, key: str, char: str) -> bool:
         """Route a key while in TGDB mode (replay path)."""
@@ -363,6 +371,7 @@ class KeyRoutingMixin:
         if self._handle_tgdb_mode_key(key, char):
             event.stop()
             return
+
 
     def on_mouse_down(self: TGDBApp, event: events.MouseDown) -> None:
         menu = self._get_context_menu()

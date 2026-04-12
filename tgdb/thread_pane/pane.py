@@ -34,9 +34,11 @@ class _ThreadContent(Widget):
         self.can_focus = False
         self._threads: list[ThreadInfo] = []
 
+
     def set_threads(self, threads: list[ThreadInfo]) -> None:
         self._threads = list(threads)
         self.refresh()
+
 
     def _thread_text(self, thread: ThreadInfo) -> str:
         if thread.is_current:
@@ -58,6 +60,7 @@ class _ThreadContent(Widget):
         if thread.core:
             text += f" [core {thread.core}]"
         return text
+
 
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
@@ -96,12 +99,15 @@ class ThreadPane(PaneBase):
         super().__init__(hl, **kwargs)
         self._content = _ThreadContent(hl)
 
+
     def title(self) -> str:
         return "Threads"
+
 
     def compose(self):
         yield from super().compose()
         yield self._content
+
 
     def set_threads(self, threads: list[ThreadInfo]) -> None:
         """Publish the latest debugger thread snapshot."""

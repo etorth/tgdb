@@ -54,6 +54,7 @@ class _DisasmContent(Widget):
         self._selected: int = 0
         self._await_g: bool = False
 
+
     def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
         self._lines = list(lines)
         self._current_addr = current_addr
@@ -65,12 +66,14 @@ class _DisasmContent(Widget):
         self._ensure_visible()
         self.refresh()
 
+
     def _ensure_visible(self) -> None:
         height = max(1, self.size.height or 1)
         if self._selected < self._scroll_top:
             self._scroll_top = self._selected
         elif self._selected >= self._scroll_top + height:
             self._scroll_top = self._selected - height + 1
+
 
     def _format_line(self, line: DisasmLine) -> str:
         func_part = f"<{line.func_name}+{line.offset}>" if line.func_name else ""
@@ -79,6 +82,7 @@ class _DisasmContent(Widget):
             parts.append(func_part)
         parts.append(line.inst)
         return "  ".join(p for p in parts if p)
+
 
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
@@ -96,6 +100,7 @@ class _DisasmContent(Widget):
             result.append("\n")
             result.append(" " * width, style=self.hl.style("Normal"))
         return result
+
 
     def on_key(self, event: events.Key) -> None:
         key = event.key
@@ -155,20 +160,25 @@ class DisasmPane(PaneBase):
         self._content = _DisasmContent(hl)
         self._disasm_fn: Optional[Callable] = None
 
+
     def title(self) -> str:
         return "DISASM"
+
 
     def compose(self):
         yield from super().compose()
         yield self._content
 
+
     def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
         """Publish a parsed disassembly snapshot."""
         self._content.set_disasm(lines, current_addr)
 
+
     def set_disasm_fn(self, fn: Callable) -> None:
         """Install the async callback used to request disassembly from GDB."""
         self._disasm_fn = fn
+
 
     async def refresh_disasm(self, filename: str, line: int, current_addr: str = "") -> None:
         """Fetch and display disassembly near a source location."""

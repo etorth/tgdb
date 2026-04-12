@@ -68,6 +68,7 @@ class CallbacksMixin:
         else:
             self.gdb.set_breakpoint(f"{sf.path}:{msg.line}", temporary=msg.temporary)
 
+
     def on_open_file_dialog(self, msg: OpenFileDialog) -> None:
         # Open immediately and show a pending state while GDB enumerates files.
         # Large binaries can make -file-list-exec-source-files noticeably slow.
@@ -80,6 +81,7 @@ class CallbacksMixin:
         fd.open_pending()
         self._set_mode("FILEDLG")
         self.gdb.request_source_files()
+
 
     def on_open_tty(self, _: OpenTTY) -> None:
         """Ctrl-T: allocate a new PTY for the inferior's stdio.
@@ -100,16 +102,20 @@ class CallbacksMixin:
         except OSError as e:
             self._show_status(f"TTY error: {e}")
 
+
     def on_await_mark_jump(self, msg: AwaitMarkJump) -> None:
         self._await_mark_jump = True
 
+
     def on_await_mark_set(self, msg: AwaitMarkSet) -> None:
         self._await_mark_set = True
+
 
     def on_jump_global_mark(self, msg: JumpGlobalMark) -> None:
         src = self._get_source_view()
         if src is not None and src.load_file(msg.path):
             src.move_to(msg.line)
+
 
     def on_search_start(self, msg: SearchStart) -> None:
         try:
@@ -117,11 +123,13 @@ class CallbacksMixin:
         except NoMatches:
             pass
 
+
     def on_search_update(self, msg: SearchUpdate) -> None:
         try:
             self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
         except NoMatches:
             pass
+
 
     def on_search_commit(self, msg: SearchCommit) -> None:
         try:
@@ -130,6 +138,7 @@ class CallbacksMixin:
             pass
         self._set_mode("TGDB")
 
+
     def on_search_cancel(self, msg: SearchCancel) -> None:
         try:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
@@ -137,14 +146,18 @@ class CallbacksMixin:
             pass
         self._set_mode("TGDB")
 
+
     def on_status_message(self, msg: StatusMessage) -> None:
         self._show_status(msg.text)
+
 
     def on_gdb_command(self, msg: GDBCommand) -> None:
         self._send_gdb_cli(msg.cmd)
 
+
     def on_show_help(self, _: ShowHelp) -> None:
         self._show_help_in_source()
+
 
     def on_scroll_mode_change(self, msg: ScrollModeChange) -> None:
         if msg.active:
@@ -153,17 +166,20 @@ class CallbacksMixin:
             mode = "GDB_PROMPT"
         self._set_mode(mode)
 
+
     def on_scroll_search_start(self, msg: ScrollSearchStart) -> None:
         try:
             self.query_one("#cmdline", CommandLineBar).start_search(msg.forward)
         except NoMatches:
             pass
 
+
     def on_scroll_search_update(self, msg: ScrollSearchUpdate) -> None:
         try:
             self.query_one("#cmdline", CommandLineBar).update_search(msg.pattern)
         except NoMatches:
             pass
+
 
     def on_scroll_search_commit(self, msg: ScrollSearchCommit) -> None:
         try:
@@ -172,12 +188,14 @@ class CallbacksMixin:
             pass
         self._set_mode("GDB_SCROLL")
 
+
     def on_scroll_search_cancel(self, msg: ScrollSearchCancel) -> None:
         try:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
         self._set_mode("GDB_SCROLL")
+
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
         _log.info(f"command: {msg.command!r}")
@@ -188,6 +206,7 @@ class CallbacksMixin:
         self._cmd_task = asyncio.create_task(
             self._run_cmd_task(msg.command, history_text=msg.history_text)
         )
+
 
     async def _run_cmd_task(self, cmd: str, *, history_text: str = "") -> None:
         """Run one CommandLineBar command as an async task (one-at-a-time)."""
@@ -259,8 +278,10 @@ class CallbacksMixin:
             self._switch_to_tgdb()
         self._resume_pending_replay()
 
+
     def on_command_cancel(self, msg: CommandCancel) -> None:
         self._switch_to_tgdb()
+
 
     def on_message_dismissed(self, msg: MessageDismissed) -> None:
         # Only act if still in ML_MESSAGE mode.  During map replay the synchronous
@@ -268,6 +289,7 @@ class CallbacksMixin:
         # this handler becomes a no-op so it can't kill a subsequent CMD entry.
         if self._mode == "ML_MESSAGE":
             self._switch_to_tgdb()
+
 
     def on_file_selected(self, msg: FileSelected) -> None:
         self._file_dialog_pending = False
@@ -278,10 +300,12 @@ class CallbacksMixin:
             self._update_status_file_info()
         self._switch_to_tgdb()
 
+
     def on_file_dialog_closed(self, _: FileDialogClosed) -> None:
         self._file_dialog_pending = False
         self.query_one("#file-dlg", FileDialog).close()
         self._switch_to_tgdb()
+
 
     def _ui_on_stopped(self, frame: Frame) -> None:
         """GDB stopped — update source view to executing location."""
@@ -314,9 +338,11 @@ class CallbacksMixin:
                 )
             )
 
+
     async def _refresh_breakpoints_async(self) -> None:
         await asyncio.sleep(0.15)
         self.gdb.mi_command("-break-list")
+
 
     def _ui_on_running(self) -> None:
         _log.info("running")
@@ -325,11 +351,13 @@ class CallbacksMixin:
             return
         self._focus_widget(self._first_workspace_leaf())
 
+
     def _ui_set_breakpoints(self, bps: list[Breakpoint]) -> None:
         _log.info(f"breakpoints: {len(bps)}")
         src = self._get_source_view()
         if src is not None:
             src.set_breakpoints(bps)
+
 
     def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
         _log.debug(f"locals: {len(variables)} vars")
@@ -339,10 +367,12 @@ class CallbacksMixin:
                 self._current_locals, self.gdb.current_frame
             )
 
+
     def _ui_set_registers(self, registers: list[RegisterInfo]) -> None:
         self._current_registers = list(registers)
         if self._register_pane is not None:
             self._register_pane.set_registers(self._current_registers)
+
 
     def _ui_set_stack(self, frames: list[Frame]) -> None:
         self._current_stack = list(frames)
@@ -355,10 +385,12 @@ class CallbacksMixin:
                 self._current_stack, current_level=current_level
             )
 
+
     def _ui_set_threads(self, threads: list[ThreadInfo]) -> None:
         self._current_threads = list(threads)
         if self._thread_pane is not None:
             self._thread_pane.set_threads(self._current_threads)
+
 
     def _ui_set_source_files(self, files: list[str]) -> None:
         try:
@@ -371,6 +403,7 @@ class CallbacksMixin:
         if not pending or not fd.is_open:
             return
         fd.files = files
+
 
     def _ui_load_source_file(self, path: str, line: int = 0) -> None:
         """Load a specific source file (from -file-list-exec-source-file)."""
@@ -389,10 +422,12 @@ class CallbacksMixin:
             src.run_pending_search()
             self._update_status_file_info()
 
+
     async def _request_initial_location(self) -> None:
         """Mirror cgdb startup: query current location without surfacing noise."""
         await asyncio.sleep(0.5)
         self.gdb.request_current_location(report_error=False)
+
 
     def _ui_gdb_exit(self) -> None:
         # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
@@ -401,10 +436,12 @@ class CallbacksMixin:
         self._save_history_to_disk()
         self.exit(0)
 
+
     def _update_status_file_info(self) -> None:
         src = self._get_source_view()
         if src is not None:
             src.refresh()
+
 
     def _sync_config(self) -> None:
         cfg = self.cfg

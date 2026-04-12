@@ -44,6 +44,7 @@ class _TitleBar(Widget):
         self._dragging = False
         self.can_focus = False
 
+
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
         hl = getattr(self._pane, "hl", None)
@@ -72,16 +73,19 @@ class _TitleBar(Widget):
             self.capture_mouse()
             event.stop()
 
+
     def on_mouse_move(self, event: events.MouseMove) -> None:
         if self._dragging:
             self._do_drag(int(event.screen_x), int(event.screen_y))
             event.stop()
+
 
     def on_mouse_up(self, event: events.MouseUp) -> None:
         if self._dragging and event.button == 1:
             self._dragging = False
             self.release_mouse()
             event.stop()
+
 
     def _do_drag(self, screen_x: int, screen_y: int) -> None:
         """Walk up the widget tree to find the first vertical container
@@ -141,21 +145,26 @@ class PaneBase(Widget):
         self.can_focus = False
         self._title_bar: Optional[_TitleBar] = None
 
+
     def title(self) -> Optional[str]:
         """Text shown in the title bar.  None renders a blank bar."""
         return None
+
 
     def color(self) -> str:
         """Highlight-group name used to style the title bar background."""
         return "StatusLine"
 
+
     def align(self) -> str:
         """Alignment of the title text: ``"left"``, ``"center"``, or ``"right"``."""
         return "center"
 
+
     def compose(self):
         self._title_bar = _TitleBar(self)
         yield self._title_bar
+
 
     def refresh_title(self) -> None:
         """Refresh the title bar (call when title() output may have changed)."""

@@ -115,6 +115,7 @@ class ParsingMixin:
             addr=data.get("addr", ""),
         )
 
+
     def _parse_local_variables(self, data) -> list[LocalVariable]:
         if not isinstance(data, list):
             return []
@@ -144,6 +145,7 @@ class ParsingMixin:
             )
         return locals_list
 
+
     def _parse_stack_frames(self, data) -> list[Frame]:
         frames_raw: list[dict] = []
         if isinstance(data, dict):
@@ -165,6 +167,7 @@ class ParsingMixin:
         for item in frames_raw:
             frames.append(self._parse_frame(item))
         return frames
+
 
     def _parse_threads(self, data) -> list[ThreadInfo]:
         threads_raw: list[dict] = []
@@ -206,10 +209,12 @@ class ParsingMixin:
             )
         return threads
 
+
     def _emit_threads(self) -> None:
         for thread in self.threads:
             thread.is_current = thread.id == self.current_thread_id
         self.on_threads(list(self.threads))
+
 
     def _parse_register_values(self, data) -> dict[int, str]:
         values: dict[int, str] = {}
@@ -228,6 +233,7 @@ class ParsingMixin:
                 values[number] = ""
         return values
 
+
     def _emit_registers(self) -> None:
         if not self.register_names or not self._register_values:
             return
@@ -243,6 +249,7 @@ class ParsingMixin:
             registers.append(RegisterInfo(number=number, name=name, value=value))
         self.registers = registers
         self.on_registers(list(self.registers))
+
 
     def _update_breakpoint_from_mi(self, data: dict) -> None:
         if not isinstance(data, dict):
@@ -268,6 +275,7 @@ class ParsingMixin:
         path = existing.file or existing.fullname
         _log.info(f"breakpoint updated: #{existing.number} {path}:{existing.line}")
         self.on_breakpoints(list(self.breakpoints))
+
 
     def handle_breaklist_result(self, results: dict) -> None:
         body = results.get("BreakpointTable", {})
@@ -298,6 +306,7 @@ class ParsingMixin:
         _log.info(f"breaklist: {len(new_bps)} breakpoints")
         self.on_breakpoints(list(self.breakpoints))
 
+
     def _handle_source_files(self, files) -> None:
         if isinstance(files, list):
             paths: list[str] = []
@@ -314,6 +323,7 @@ class ParsingMixin:
                         paths.append(f)
             self.source_files = paths
             self.on_source_files(list(self.source_files))
+
 
     @staticmethod
     def _safe_int(val) -> int:

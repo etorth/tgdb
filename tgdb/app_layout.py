@@ -51,6 +51,7 @@ class LayoutMixin:
             fallback = max(1, self.size.height - 1)
         return max(1, fallback)
 
+
     def _pane_axis(self: TGDBApp, is_horizontal: bool) -> int:
         # Subtract 1 only for horizontal mode where a 1-column Splitter exists.
         if is_horizontal:
@@ -59,10 +60,12 @@ class LayoutMixin:
             splitter_size = 0
         return max(0, self._split_axis(is_horizontal) - splitter_size)
 
+
     def _reset_window_shift(self: TGDBApp, is_horizontal: bool) -> None:
         half_axis = self._pane_axis(is_horizontal) // 2
         self._window_shift = int(half_axis * (self._cur_win_split / 2.0))
         self._validate_window_shift(is_horizontal)
+
 
     def _set_window_shift_from_ratio(self: TGDBApp, is_horizontal: bool, ratio: float) -> None:
         axis = self._pane_axis(is_horizontal)
@@ -72,6 +75,7 @@ class LayoutMixin:
         target_src = int(round(axis * ratio))
         self._window_shift = target_src - (axis // 2)
         self._validate_window_shift(is_horizontal)
+
 
     def _validate_window_shift(self: TGDBApp, is_horizontal: bool) -> None:
         axis = self._pane_axis(is_horizontal)
@@ -93,6 +97,7 @@ class LayoutMixin:
             self._window_shift = max_shift
         elif self._window_shift < min_shift:
             self._window_shift = min_shift
+
 
     def _compute_split_sizes(self: TGDBApp, is_horizontal: bool, axis: int | None = None) -> tuple[int, int]:
         if axis is None:
@@ -163,6 +168,7 @@ class LayoutMixin:
             self._validate_window_shift(is_horizontal)
             self.cfg.winsplit = "free"
             self._apply_split()
+
 
     def on_toggle_orientation(self: TGDBApp, _: ToggleOrientation) -> None:
         if self.cfg.winsplitorientation == "horizontal":
@@ -247,6 +253,7 @@ class LayoutMixin:
             self._last_orientation = self.cfg.winsplitorientation
             self._preserve_window_shift_once = False
 
+
     def on_drag_resize(self: TGDBApp, msg: DragResize) -> None:
         """Handle Splitter drag for the root #split-container (horizontal mode)."""
         if msg.splitter is None:
@@ -276,6 +283,7 @@ class LayoutMixin:
         self.cfg.winsplit = "free"
         self._apply_split()
 
+
     def on_title_bar_resized(self: TGDBApp, msg: TitleBarResized) -> None:
         """Sync _window_shift after a vertical title-bar drag on the root container."""
         try:
@@ -297,6 +305,7 @@ class LayoutMixin:
         # this, _apply_orientation() leaves fractional "fr" heights that
         # don't reliably trigger Resize, leaving blank rows in the source pane.
         self._apply_split()
+
 
     def on_resize(self: TGDBApp, event: events.Resize) -> None:
         self._apply_split()

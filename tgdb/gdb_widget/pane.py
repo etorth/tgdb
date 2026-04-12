@@ -69,8 +69,10 @@ class GDBWidget(PaneBase):
         self._content = _GDBContent(hl, max_scrollback)
         self.can_focus = True
 
+
     def title(self) -> Optional[str]:
         return None
+
 
     def compose(self):
         yield from super().compose()
@@ -82,6 +84,7 @@ class GDBWidget(PaneBase):
 
     def on_key(self, event: events.Key) -> None:
         self._content.on_key(event)
+
 
     def refresh(self, *args, **kwargs):
         if self._content.is_mounted:
@@ -97,6 +100,7 @@ class GDBWidget(PaneBase):
             setattr(self._content, name, value)
         else:
             super().__setattr__(name, value)
+
 
     def __getattr__(self, name: str):
         content = self.__dict__.get("_content")

@@ -35,10 +35,12 @@ class _StackContent(Widget):
         self._frames: list[Frame] = []
         self._current_level: int = 0
 
+
     def set_frames(self, frames: list[Frame], current_level: int = 0) -> None:
         self._frames = list(frames)
         self._current_level = current_level
         self.refresh()
+
 
     def _frame_text(self, frame: Frame) -> str:
         if frame.level == self._current_level:
@@ -51,6 +53,7 @@ class _StackContent(Widget):
         if location:
             text += f"  {location}"
         return text
+
 
     def render(self) -> Text:
         width = max(1, self.size.width or 1)
@@ -90,12 +93,15 @@ class StackPane(PaneBase):
         super().__init__(hl, **kwargs)
         self._content = _StackContent(hl)
 
+
     def title(self) -> str:
         return "STACK"
+
 
     def compose(self):
         yield from super().compose()
         yield self._content
+
 
     def set_frames(self, frames: list[Frame], current_level: int = 0) -> None:
         """Publish the latest frame list for the current thread."""

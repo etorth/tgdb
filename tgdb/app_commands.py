@@ -74,10 +74,12 @@ class CommandsMixin:
         for name, fn in cmds.items():
             self.cp.register_handler(name, fn)
 
+
     def _cmd_quit(self: TGDBApp, _: list) -> None:
         self._save_history_to_disk()
         self.gdb.terminate()
         self.exit(0)
+
 
     def _cmd_goto_line(self: TGDBApp, args: list) -> Optional[str]:
         """Handle :N line-jump: positive=goto, :+N=scroll down, :-N=scroll up."""
@@ -102,25 +104,31 @@ class CommandsMixin:
                 src.move_to(1)
         return None
 
+
     def _cmd_help(self: TGDBApp, _: list) -> None:
         self._show_help_in_source()
+
 
     def _cmd_logo(self: TGDBApp, _: list) -> None:
         src = self._get_source_view()
         if src is not None:
             src.show_logo()
 
+
     def _cmd_edit(self: TGDBApp, _: list) -> None:
         src = self._get_source_view()
         if src is not None and src.source_file:
             src.load_file(src.source_file.path)
 
+
     def _cmd_bang(self: TGDBApp, _: list) -> None:
         # cgdb registers :bang, but command_do_bang() is currently a no-op.
         pass
 
+
     def _cmd_insert(self: TGDBApp, _: list) -> None:
         self._switch_to_gdb()
+
 
     def _cmd_focus(self: TGDBApp, args: list) -> Optional[str]:
         if len(args) != 1:
@@ -133,12 +141,14 @@ class CommandsMixin:
             return None
         return "focus: requires cgdb or gdb"
 
+
     def _cmd_noh(self: TGDBApp, _: list) -> None:
         self.cfg.hlsearch = False
         src = self._get_source_view()
         if src is not None:
             src.hlsearch = False
             src.refresh()
+
 
     def _cmd_syntax(self: TGDBApp, args: list) -> None:
         """Mirror cgdb's :syntax [on|off|c|asm|…] command."""
@@ -150,6 +160,7 @@ class CommandsMixin:
             self.cfg.syntax = value.lower()
         # No args: cgdb prints info (TODO); we just refresh
         self._sync_config()
+
 
     def _cmd_shell(self: TGDBApp, args: list) -> Optional[str]:
         import os
@@ -170,6 +181,7 @@ class CommandsMixin:
             return str(e)
         self.refresh()
         return None
+
 
     def _cmd_capturescreen(self: TGDBApp, args: list) -> Optional[str]:
         """Save an SVG screenshot of the current screen.
@@ -192,6 +204,7 @@ class CommandsMixin:
             return str(e)
         return None
 
+
     def _send_gdb_cli(self: TGDBApp, cmd: str) -> None:
         _log.info(f"gdb cli: {cmd!r}")
         if self.cfg.showdebugcommands:
@@ -212,12 +225,14 @@ class CommandsMixin:
             )
         self._switch_to_gdb()
 
+
     def _safe_request_location(self: TGDBApp) -> None:
         """Safely request the current source location; swallow any error."""
         try:
             self.gdb.request_current_location(report_error=False)
         except Exception:
             pass
+
 
     def _show_help_in_source(self: TGDBApp) -> None:
         help_candidates = [
@@ -298,6 +313,7 @@ class CommandsMixin:
         self.gdb.send_signal(args[0])
         return None
 
+
     def _cmd_evaluate(self: TGDBApp, args: list) -> Optional[str]:
         """Add an expression to the Evaluations pane: :evaluate expr."""
         if not args:
@@ -309,6 +325,7 @@ class CommandsMixin:
         evaluate_pane.add_expression(expr)
         self._show_status(f"Evaluating: {expr}")
         return None
+
 
     def _cmd_unevaluate(self: TGDBApp, args: list) -> Optional[str]:
         """Remove an expression by 1-based index: :unevaluate N."""
@@ -328,6 +345,7 @@ class CommandsMixin:
             self._show_status(f"unevaluate: no expression at index {idx}")
         return None
 
+
     def _cmd_memory(self: TGDBApp, args: list) -> Optional[str]:
         """Inspect memory in the Memory pane: :memory addr [size].
 
@@ -346,6 +364,7 @@ class CommandsMixin:
             return f"memory: invalid size {args[1]!r}"
         memory_pane.set_address(addr, size)
         return None
+
 
     def _cmd_disasm(self: TGDBApp, args: list) -> Optional[str]:
         """Toggle inline disassembly in the source pane: :disasm [on|off]."""

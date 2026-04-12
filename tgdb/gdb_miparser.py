@@ -195,6 +195,7 @@ class _StringStream:
         self.index = 0
         self.len = len(raw_text)
 
+
     def read(self, count: int) -> str:
         new_index = self.index + count
         if new_index > self.len:
@@ -204,8 +205,10 @@ class _StringStream:
         self.index = new_index
         return buf
 
+
     def seek(self, offset: int) -> None:
         self.index = self.index + offset
+
 
     def advance_past_chars(self, chars: List[str]) -> str:
         start_index = self.index
@@ -217,6 +220,7 @@ class _StringStream:
             elif self.index == self.len:
                 break
         return self.raw_text[start_index : self.index - 1]
+
 
     def advance_past_string_with_gdb_escapes(self) -> str:
         assert self.index > 0 and self.raw_text[self.index - 1] == '"'

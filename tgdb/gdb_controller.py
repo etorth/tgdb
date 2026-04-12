@@ -180,16 +180,20 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self._mi_master_fd = mi_master_fd
         self._mi_slave_fd = mi_slave_fd
 
+
     def resize(self, rows: int, cols: int) -> None:
         if self._proc and self._proc.isalive():
             self._proc.setwinsize(rows, cols)
 
+
     def is_alive(self) -> bool:
         return bool(self._proc and self._proc.isalive())
+
 
     def send_interrupt(self) -> None:
         if self._proc and self._proc.isalive():
             self._proc.kill(signal.SIGINT)
+
 
     def send_input(self, data: str | bytes) -> None:
         """Write to GDB's primary PTY (user input / CLI commands)."""
@@ -198,6 +202,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                 data = data.encode()
             _log.debug(f"GDB input: {data!r}")
             self._proc.write(data)
+
 
     def terminate(self) -> None:
         _log.info("GDB terminated")
@@ -255,6 +260,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             _log.info("GDB exited")
             self.on_exit()
 
+
     def _on_console_readable(self, loop: asyncio.AbstractEventLoop) -> None:
         """Called by event loop the instant the primary PTY fd is readable."""
         try:
@@ -271,6 +277,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             if not self._console_done.done():
                 self._console_done.set_result(None)
 
+
     def _on_mi_readable(self) -> None:
         """Called by event loop the instant the MI fd is readable."""
         try:
@@ -282,6 +289,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         except (BlockingIOError, OSError):
             pass
 
+
     def _process_mi_buffer(self) -> None:
         while "\n" in self._mi_buf:
             line, self._mi_buf = self._mi_buf.split("\n", 1)
@@ -289,6 +297,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             if line:
                 _log.debug(f"MI raw: {line}")
             self._dispatch(line)
+
 
     def _dispatch(self, line: str) -> None:
         if not line:

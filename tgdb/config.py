@@ -79,13 +79,16 @@ class ConfigParser(
         self._exec_depth: int = 0
         self._cmdline_bar = None
 
+
     def set_cmdline_bar(self, bar) -> None:
         """Inject a reference to the CommandLineBar for history operations."""
         self._cmdline_bar = bar
 
+
     def register_handler(self, name: str, fn: Callable[[list[str]], Optional[str]]) -> None:
         """Register an extra command handler (e.g., GDB debug commands)."""
         self._handlers[name] = fn
+
 
     def set_py_globals(self, d: dict) -> None:
         """Merge *d* into the persistent Python namespace used by :python/:pyfile.

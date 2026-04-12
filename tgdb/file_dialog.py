@@ -93,6 +93,7 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
     def files(self) -> list[str]:
         return self._files
 
+
     @files.setter
     def files(self, value: list[str]) -> None:
         # Mirror cgdb filedlg_add_file_choice():
@@ -132,9 +133,11 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
             self._body_message = self._EMPTY_MESSAGE
         self.refresh()
 
+
     @property
     def is_open(self) -> bool:
         return self.has_class("visible")
+
 
     def _reset_interaction(self) -> None:
         if self._files:
@@ -149,11 +152,13 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
         self._num_buf = ""
         self._await_g = False
 
+
     def open(self) -> None:
         self._reset_interaction()
         self.add_class("visible")
         self.focus()
         self.refresh()
+
 
     def open_pending(self) -> None:
         self._files = []
@@ -163,6 +168,7 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
         self.add_class("visible")
         self.focus()
         self.refresh()
+
 
     def close(self) -> None:
         self._query_pending = False
