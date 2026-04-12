@@ -47,10 +47,13 @@ import re
 from typing import (
     Any,
     Callable,
+    Dict,
     Iterator,
     Match,
     Optional,
     Pattern,
+    Tuple,
+    Union,
 )
 
 
