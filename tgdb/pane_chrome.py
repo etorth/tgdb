@@ -1,15 +1,13 @@
 """
-PaneBase — base class for all tgdb pane widgets.
+Shared pane chrome for tgdb workspace widgets.
 
-Every pane has a 1-row title bar that is:
-  • Always visible (even when title() returns None — the row is blank).
-  • The drag handle for resizing within a vertical PaneContainer.
-  • Styled with the "StatusLine" highlight group.
+``PaneBase`` provides the 1-row title bar used by pane-like widgets such as the
+source view, GDB console, and the optional auxiliary panes. The title bar is:
 
-Subclasses override:
-  title()  → str | None   (text shown in the bar; None = blank bar)
-  color()  → str          (highlight-group name, default "StatusLine")
-  align()  → str          ("left" | "center" | "right")
+- always visible, even when ``title()`` returns ``None``;
+- styled with the ``StatusLine`` highlight group by default; and
+- usable as a drag handle when the pane sits inside a vertical
+  ``PaneContainer``.
 """
 
 from __future__ import annotations

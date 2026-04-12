@@ -1,6 +1,9 @@
 """
-Evaluate pane — user-defined expression evaluator.
-Expressions are evaluated via GDB -data-evaluate-expression on each stop.
+Public implementation of the evaluate-pane package.
+
+``EvaluatePane`` is a small black-box watch-expression widget. The caller
+constructs the pane, injects one async evaluation callback, then mutates the
+watch list through the public methods documented on the class below.
 """
 
 from __future__ import annotations
@@ -11,9 +14,9 @@ from typing import Callable, Optional
 from rich.text import Text
 from textual.widget import Widget
 
-from .highlight_groups import HighlightGroups
-from .pane_base import PaneBase
-from .pane_utils import fit_cells
+from ..highlight_groups import HighlightGroups
+from ..pane_chrome import PaneBase
+from ..pane_utils import fit_cells
 
 
 class _EvaluateContent(Widget):
@@ -54,9 +57,30 @@ class _EvaluateContent(Widget):
 
 
 class EvaluatePane(PaneBase):
-    """Evaluate pane: title bar + expression/value list."""
+    """Render a watch-expression list with async evaluation.
+
+    Public interface
+    ----------------
+    ``EvaluatePane(hl, **kwargs)``
+        Create the widget with an empty watch list.
+
+    ``set_eval_fn(fn)``
+        Inject the async callback used to evaluate one expression string in the
+        current debugger context.
+
+    ``add_expression(expr)``
+        Append a new watch expression and start evaluating it immediately.
+
+    ``remove_expression(index)``
+        Remove one watch expression by position.
+
+    ``refresh_all()``
+        Re-evaluate every stored watch expression, typically after the inferior
+        stops in a new frame.
+    """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        """Create an empty evaluate pane."""
         super().__init__(hl, **kwargs)
         self._content = _EvaluateContent(hl)
         self._expressions: list[str] = []
@@ -71,12 +95,14 @@ class EvaluatePane(PaneBase):
         yield self._content
 
     def set_eval_fn(self, fn: Callable) -> None:
+        """Install the async expression-evaluation callback."""
         self._eval_fn = fn
 
     def _update_content(self) -> None:
         self._content.set_entries(list(zip(self._expressions, self._values)))
 
     def add_expression(self, expr: str) -> None:
+        """Append a watch expression and start evaluating it."""
         idx = len(self._expressions)
         self._expressions.append(expr)
         self._values.append("<pending>")
@@ -84,6 +110,7 @@ class EvaluatePane(PaneBase):
         asyncio.create_task(self._eval_one(idx, expr))
 
     def remove_expression(self, index: int) -> Optional[str]:
+        """Remove one watch expression by index and return it."""
         if 0 <= index < len(self._expressions):
             removed = self._expressions.pop(index)
             self._values.pop(index)
@@ -102,6 +129,7 @@ class EvaluatePane(PaneBase):
                 self._update_content()
 
     async def refresh_all(self, current_frame: Optional[object] = None) -> None:
+        """Re-evaluate every stored watch expression."""
         for i, expr in enumerate(self._expressions):
             if self._eval_fn:
                 try:

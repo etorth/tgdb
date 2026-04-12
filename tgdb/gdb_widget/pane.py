@@ -1,16 +1,9 @@
 """
-GDB console widget — mirrors cgdb's scroller.cpp / vterminal.cpp.
+Public implementation of the GDB console widget package.
 
-cgdb uses libvterm (VT100 terminal emulator) for the bottom pane.
-We use pyte, which provides the same VT100 emulation in Python.
-
-The widget is a real terminal connected to GDB's PTY master:
-  • feed_bytes(data) drives the pyte screen with raw PTY bytes
-  • render() reads from the pyte screen (colours, cursor, etc.)
-  • on_key() writes raw bytes directly to GDB's PTY stdin
-
-Scroll mode (PageUp): vi-like navigation + regex search over
-a scrollback buffer of lines captured as they scroll off the screen.
+``GDBWidget`` is tgdb's terminal-backed debugger pane. It owns the pyte screen,
+scrollback buffer, scroll mode, and the imperative hooks that TGDBApp wires to
+the real GDB PTY.
 """
 
 from __future__ import annotations
@@ -23,7 +16,7 @@ from textual.widget import Widget
 from textual import events
 from rich.text import Text
 
-from .highlight_groups import HighlightGroups
+from ..highlight_groups import HighlightGroups
 
 
 # ---------------------------------------------------------------------------
@@ -35,9 +28,9 @@ from .highlight_groups import HighlightGroups
 # GDB widget
 # ---------------------------------------------------------------------------
 
-from .gdb_screen import _GDBScreen, _row_to_text  # noqa: F401
-from .gdb_scroll import ScrollMixin  # noqa: F401
-from .gdb_scroll import (  # noqa: F401 — re-exported
+from ..gdb_screen import _GDBScreen, _row_to_text  # noqa: F401
+from ..gdb_scroll import ScrollMixin  # noqa: F401
+from ..gdb_scroll import (  # noqa: F401 — re-exported
     ScrollModeChange,
     ScrollSearchStart,
     ScrollSearchUpdate,
@@ -46,7 +39,7 @@ from .gdb_scroll import (  # noqa: F401 — re-exported
 )
 
 
-from .pane_base import PaneBase
+from ..pane_chrome import PaneBase
 
 
 class _GDBContent(ScrollMixin, Widget):
@@ -477,11 +470,31 @@ _GDB_DELEGATE_SET = frozenset(
 
 
 class GDBWidget(PaneBase):
-    """GDB console pane: title bar (blank) + _GDBContent terminal widget."""
+    """Render the raw GDB console inside a titled workspace pane.
+
+    Public interface
+    ----------------
+    ``GDBWidget(hl, max_scrollback=10000, **kwargs)``
+        Create the widget.
+
+    After construction, TGDBApp treats the widget as a black box and drives it
+    through the delegated content surface. The main integration points are:
+
+    - ``send_to_gdb`` and ``resize_gdb`` callbacks;
+    - ``feed_bytes(data)`` for raw PTY output;
+    - mode/config flags such as ``gdb_focused``, ``debugwincolor``,
+      ``ignorecase``, and ``wrapscan``; and
+    - the scroll-mode messages re-exported by the package.
+
+    The delegated surface intentionally preserves the historical
+    ``tgdb.gdb_widget`` API so the rest of tgdb does not need to know about the
+    internal ``_GDBContent`` implementation widget.
+    """
 
     def __init__(
         self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs
     ) -> None:
+        """Create an empty GDB console pane."""
         super().__init__(hl, **kwargs)
         self._content = _GDBContent(hl, max_scrollback)
         self.can_focus = True

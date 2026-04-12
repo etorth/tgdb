@@ -26,7 +26,7 @@ from textual.widgets.tree import TreeNode
 from ..config_types import Config
 from ..gdb_types import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
-from ..pane_base import PaneBase
+from ..pane_chrome import PaneBase
 from .reconcile import LocalVariablePaneReconcileMixin
 from .support import LocalVariablePaneSupportMixin
 from .tree import LocalVariablePaneTreeMixin

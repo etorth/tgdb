@@ -1,5 +1,9 @@
 """
-Call stack pane widget.
+Public implementation of the stack-pane package.
+
+``StackPane`` is a black-box widget for showing the active thread's call stack.
+Construct it with the shared highlight palette, then push debugger snapshots
+through ``set_frames(...)`` whenever the active frame changes.
 """
 
 from __future__ import annotations
@@ -7,10 +11,10 @@ from __future__ import annotations
 from rich.text import Text
 from textual.widget import Widget
 
-from .gdb_controller import Frame
-from .highlight_groups import HighlightGroups
-from .pane_base import PaneBase
-from .pane_utils import fit_cells, frame_location
+from ..gdb_controller import Frame
+from ..highlight_groups import HighlightGroups
+from ..pane_chrome import PaneBase
+from ..pane_utils import fit_cells, frame_location
 
 
 class _StackContent(Widget):
@@ -68,9 +72,21 @@ class _StackContent(Widget):
 
 
 class StackPane(PaneBase):
-    """Call-stack pane: title bar + scrollable frame list."""
+    """Render the current call stack as a read-only pane.
+
+    Public interface
+    ----------------
+    ``StackPane(hl, **kwargs)``
+        Create the widget. No debugger callbacks are needed because the caller
+        pushes already-parsed frame snapshots into the pane.
+
+    ``set_frames(frames, current_level=0)``
+        Replace the visible stack contents. ``current_level`` marks the frame
+        that should be highlighted as the selected frame.
+    """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        """Create an empty stack pane."""
         super().__init__(hl, **kwargs)
         self._content = _StackContent(hl)
 
@@ -82,4 +98,5 @@ class StackPane(PaneBase):
         yield self._content
 
     def set_frames(self, frames: list[Frame], current_level: int = 0) -> None:
+        """Publish the latest frame list for the current thread."""
         self._content.set_frames(frames, current_level)

@@ -1,5 +1,10 @@
 """
-Disassembly pane — shows GDB disassembly of the current function.
+Public implementation of the disassembly-pane package.
+
+``DisasmPane`` is a black-box disassembly viewer. The caller constructs the
+widget, injects one async disassembly callback, and either pushes parsed lines
+directly with ``set_disasm(...)`` or asks the pane to refresh itself from a
+source location with ``refresh_disasm(...)``.
 """
 
 from __future__ import annotations
@@ -12,9 +17,9 @@ from rich.text import Text
 from textual import events
 from textual.widget import Widget
 
-from .highlight_groups import HighlightGroups
-from .pane_base import PaneBase
-from .pane_utils import fit_cells
+from ..highlight_groups import HighlightGroups
+from ..pane_chrome import PaneBase
+from ..pane_utils import fit_cells
 
 
 @dataclass
@@ -126,9 +131,26 @@ class _DisasmContent(Widget):
 
 
 class DisasmPane(PaneBase):
-    """Disassembly pane: title bar + asm line list."""
+    """Render the current function's disassembly.
+
+    Public interface
+    ----------------
+    ``DisasmPane(hl, **kwargs)``
+        Create the widget.
+
+    ``set_disasm(lines, current_addr="")``
+        Replace the visible disassembly with already-parsed lines.
+
+    ``set_disasm_fn(fn)``
+        Inject the async callback that asks GDB for disassembly data.
+
+    ``refresh_disasm(filename, line, current_addr="")``
+        Query GDB for disassembly near the given source location and redraw the
+        pane when the result arrives.
+    """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        """Create an empty disassembly pane."""
         super().__init__(hl, **kwargs)
         self._content = _DisasmContent(hl)
         self._disasm_fn: Optional[Callable] = None
@@ -141,14 +163,17 @@ class DisasmPane(PaneBase):
         yield self._content
 
     def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
+        """Publish a parsed disassembly snapshot."""
         self._content.set_disasm(lines, current_addr)
 
     def set_disasm_fn(self, fn: Callable) -> None:
+        """Install the async callback used to request disassembly from GDB."""
         self._disasm_fn = fn
 
     async def refresh_disasm(
         self, filename: str, line: int, current_addr: str = ""
     ) -> None:
+        """Fetch and display disassembly near a source location."""
         if not self._disasm_fn:
             return
         try:

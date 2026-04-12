@@ -1,16 +1,10 @@
 """
-Source view widget — mirrors cgdb's sources.cpp / interface.cpp source pane.
+Public implementation of the source-widget package.
 
-Features:
-  • Syntax highlighting via Pygments
-  • Vi-like navigation (j/k, G/gg, Ctrl-b/f/u/d, H/M/L)
-  • Breakpoint: line number shown in bold red (enabled) / bold yellow (disabled), set with Space
-  • Executing line indicator (shortarrow/longarrow/highlight/block)
-  • Selected line indicator (same styles)
-  • Regex search (/ ? n N) with optional hlsearch
-  • Marks (m[a-z/A-Z], '[a-z/A-Z], '', '.)
-  • Auto-reload on file change
-  • Footer row showing the current file path
+``SourceView`` is tgdb's source pane. It mirrors cgdb's source-mode behavior
+while exposing a stable import surface for the rest of the app: callers create
+the widget, then drive it by assigning source/selection state and by handling
+the semantic messages it emits.
 """
 
 from __future__ import annotations
@@ -23,10 +17,10 @@ from typing import Optional
 from textual.widget import Widget
 from textual import events
 
-from .highlight_groups import HighlightGroups
-from .gdb_controller import Breakpoint
-from .source_rendering import SourceViewRendering
-from .source_data import (  # noqa: F401 — re-exported
+from ..highlight_groups import HighlightGroups
+from ..gdb_controller import Breakpoint
+from ..source_rendering import SourceViewRendering
+from ..source_data import (  # noqa: F401 — re-exported
     SourceFile,
     BP_NONE,
     BP_ENABLED,
@@ -35,7 +29,7 @@ from .source_data import (  # noqa: F401 — re-exported
     _TOKEN_GROUPS,
     _LOGO_LINES,
 )
-from .source_messages import (  # noqa: F401 — re-exported
+from ..source_messages import (  # noqa: F401 — re-exported
     ToggleBreakpoint,
     OpenFileDialog,
     AwaitMarkJump,
@@ -53,7 +47,7 @@ from .source_messages import (  # noqa: F401 — re-exported
     GDBCommand,
 )
 
-from .pane_base import PaneBase
+from ..pane_chrome import PaneBase
 
 _log = logging.getLogger("tgdb.source")
 
@@ -657,9 +651,31 @@ _SRC_DELEGATE_SET = frozenset(
 
 
 class SourceView(PaneBase):
-    """Source-code pane: title bar (file path) + _SourceContent viewer."""
+    """Render source code and cgdb-style source-mode interactions.
+
+    Public interface
+    ----------------
+    ``SourceView(hl, **kwargs)``
+        Create the widget.
+
+    Callers typically treat the widget as a black box with a small imperative
+    surface:
+
+    - assign ``source_file`` to publish a new file;
+    - assign ``exe_line`` and ``sel_line`` to update execution/cursor state;
+    - assign options such as ``tabstop``, ``hlsearch``, ``ignorecase``,
+      ``wrapscan``, ``showmarks``, and ``color`` to mirror user config; and
+    - handle the semantic messages emitted by the content widget, such as
+      ``ToggleBreakpoint``, ``OpenFileDialog``, ``SearchStart``, and
+      ``GDBCommand``.
+
+    The delegated attribute surface intentionally matches the historical
+    ``tgdb.source_widget`` import surface so the rest of tgdb can keep treating
+    ``SourceView`` as the single public entry point for source-pane behavior.
+    """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        """Create an empty source pane."""
         super().__init__(hl, **kwargs)
         self._content = _SourceContent(hl)
         self._content._pane = self  # so _content.post_message bubbles through us

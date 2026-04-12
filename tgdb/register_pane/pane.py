@@ -1,5 +1,9 @@
 """
-Register pane widget.
+Public implementation of the register-pane package.
+
+``RegisterPane`` is a black-box widget for showing named register values. The
+caller constructs it once, then pushes parsed register snapshots through
+``set_registers(...)`` whenever the active frame changes.
 """
 
 from __future__ import annotations
@@ -7,10 +11,10 @@ from __future__ import annotations
 from rich.text import Text
 from textual.widget import Widget
 
-from .gdb_controller import RegisterInfo
-from .highlight_groups import HighlightGroups
-from .pane_base import PaneBase
-from .pane_utils import fit_cells
+from ..gdb_controller import RegisterInfo
+from ..highlight_groups import HighlightGroups
+from ..pane_chrome import PaneBase
+from ..pane_utils import fit_cells
 
 
 class _RegisterContent(Widget):
@@ -56,9 +60,19 @@ class _RegisterContent(Widget):
 
 
 class RegisterPane(PaneBase):
-    """Register pane: title bar + register list."""
+    """Render register values for the active frame.
+
+    Public interface
+    ----------------
+    ``RegisterPane(hl, **kwargs)``
+        Create the widget.
+
+    ``set_registers(registers)``
+        Replace the visible register snapshot.
+    """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        """Create an empty register pane."""
         super().__init__(hl, **kwargs)
         self._content = _RegisterContent(hl)
 
@@ -70,4 +84,5 @@ class RegisterPane(PaneBase):
         yield self._content
 
     def set_registers(self, registers: list[RegisterInfo]) -> None:
+        """Publish the latest named-register snapshot."""
         self._content.set_registers(registers)

@@ -8,4 +8,5 @@ Requires-Dist: textual>=2.0
 Requires-Dist: pygments>=2.18
 Requires-Dist: pyte>=0.8
 Requires-Dist: ptyprocess>=0.7
+Requires-Dist: pyperclip>=1.8
 Dynamic: license-file

@@ -1,5 +1,9 @@
 """
-Thread list pane widget.
+Public implementation of the thread-pane package.
+
+``ThreadPane`` is a black-box widget for showing the debugger's thread list.
+Construct it with the shared highlight palette, then publish parsed thread
+snapshots with ``set_threads(...)``.
 """
 
 from __future__ import annotations
@@ -7,10 +11,10 @@ from __future__ import annotations
 from rich.text import Text
 from textual.widget import Widget
 
-from .gdb_controller import ThreadInfo
-from .highlight_groups import HighlightGroups
-from .pane_base import PaneBase
-from .pane_utils import fit_cells, frame_location
+from ..gdb_controller import ThreadInfo
+from ..highlight_groups import HighlightGroups
+from ..pane_chrome import PaneBase
+from ..pane_utils import fit_cells, frame_location
 
 
 class _ThreadContent(Widget):
@@ -75,9 +79,20 @@ class _ThreadContent(Widget):
 
 
 class ThreadPane(PaneBase):
-    """Thread pane: title bar + thread list."""
+    """Render the current thread list as a read-only pane.
+
+    Public interface
+    ----------------
+    ``ThreadPane(hl, **kwargs)``
+        Create the widget.
+
+    ``set_threads(threads)``
+        Replace the visible thread snapshot. The pane highlights whichever
+        thread is marked current in the incoming data.
+    """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        """Create an empty thread pane."""
         super().__init__(hl, **kwargs)
         self._content = _ThreadContent(hl)
 
@@ -89,4 +104,5 @@ class ThreadPane(PaneBase):
         yield self._content
 
     def set_threads(self, threads: list[ThreadInfo]) -> None:
+        """Publish the latest debugger thread snapshot."""
         self._content.set_threads(threads)

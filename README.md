@@ -264,8 +264,8 @@ tgdb/
 ├── __main__.py          CLI entry point (argparse, launches app)
 ├── app.py               Main Textual App — layout, focus, event routing
 ├── gdb_controller.py    GDB subprocess (PTY), GDB/MI parser, callbacks
-├── source_widget.py     Source code viewer widget (Textual)
-├── gdb_widget.py        GDB console widget — scrollback, ANSI, scroll mode
+├── source_widget/       Source code viewer package (SourceView + reexports)
+├── gdb_widget/          GDB console package — scrollback, ANSI, scroll mode
 ├── status_bar.py        Status bar widget
 ├── file_dialog.py       File picker dialog widget
 ├── config.py            Configuration parser (cgdbrc format)

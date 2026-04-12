@@ -1,6 +1,9 @@
 """
-Memory viewer pane — displays memory as hex + ASCII columns.
-Use :memory addr [size] to set the address to inspect.
+Public implementation of the memory-pane package.
+
+``MemoryPane`` is a black-box hex/ASCII memory viewer. The caller constructs
+the widget, injects one async memory-read callback, and updates the requested
+address through ``set_address(...)``.
 """
 
 from __future__ import annotations
@@ -11,9 +14,9 @@ from typing import Callable, Optional
 from rich.text import Text
 from textual.widget import Widget
 
-from .highlight_groups import HighlightGroups
-from .pane_base import PaneBase
-from .pane_utils import fit_cells
+from ..highlight_groups import HighlightGroups
+from ..pane_chrome import PaneBase
+from ..pane_utils import fit_cells
 
 _HEADER = "  Address           +0 +1 +2 +3  +4 +5 +6 +7  +8 +9 +A +B  +C +D +E +F  ASCII"
 
@@ -114,9 +117,23 @@ class _MemoryContent(Widget):
 
 
 class MemoryPane(PaneBase):
-    """Memory viewer pane: title bar + hex/ASCII dump."""
+    """Render memory as a fixed-width hex/ASCII dump.
+
+    Public interface
+    ----------------
+    ``MemoryPane(hl, **kwargs)``
+        Create the widget with no active address.
+
+    ``set_read_fn(fn)``
+        Inject the async callback used to read raw memory blocks from GDB.
+
+    ``set_address(addr, size=64)``
+        Request a new memory region. The pane asynchronously fetches the bytes
+        and refreshes itself when the request completes.
+    """
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+        """Create an empty memory pane."""
         super().__init__(hl, **kwargs)
         self._content = _MemoryContent(hl)
         self._current_address: str = ""
@@ -131,10 +148,12 @@ class MemoryPane(PaneBase):
         yield self._content
 
     def set_read_fn(self, fn: Callable) -> None:
+        """Install the async callback used to fetch raw memory bytes."""
         self._read_fn = fn
         self._content._read_fn = fn
 
     def set_address(self, addr: str, size: int = 64) -> None:
+        """Request a new memory dump starting at *addr*."""
         self._current_address = addr
         self._current_size = size
         asyncio.create_task(self._fetch(addr, size))

@@ -2,8 +2,8 @@
 Scroll-mode mixin for GDBWidget.
 
 Extracts all scroll-mode rendering, navigation, search, and key handling
-into a mixin class so gdb_widget.py stays focused on core terminal
-emulation and live rendering.
+into a mixin class so the GDB-widget package can keep its pane implementation
+focused on core terminal emulation and live rendering.
 """
 
 from __future__ import annotations

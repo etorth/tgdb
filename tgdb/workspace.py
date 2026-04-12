@@ -17,7 +17,7 @@ from textual.message import Message
 from textual.widget import Widget
 
 from .highlight_groups import HighlightGroups
-from .pane_base import PaneBase  # noqa: F401 — re-exported for callers
+from .pane_chrome import PaneBase
 
 
 class DragResize(Message):
