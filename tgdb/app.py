@@ -45,13 +45,13 @@ from .register_pane import RegisterPane
 from .source_widget import SourceView
 from .stack_pane import StackPane
 from .thread_pane import ThreadPane
-from .app_callbacks import CallbacksMixin
-from .app_commands import CommandsMixin
-from .app_core import AppCoreMixin
-from .app_keys import KeyRoutingMixin
-from .app_layout import LayoutMixin
+from .callbacks import CallbacksMixin
+from .commands import CommandsMixin
+from .core import AppCoreMixin
+from .keys import KeyRoutingMixin
+from .layout import LayoutMixin
 from .workspace import PaneContainer, PaneDescriptor
-from .app_workspace import WorkspaceMixin
+from .workspace_actions import WorkspaceMixin
 
 
 class TGDBApp(
