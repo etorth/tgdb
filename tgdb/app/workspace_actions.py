@@ -203,11 +203,11 @@ class WorkspaceMixin:
             and not node.data.get("load_more")
         ):
             # Both actions are always available; the distinction (limited vs
-            # full load for array/map) is handled inside do_expand_some.
+            # full load for array/map) is handled inside do_expand_limited.
             locals_items: list[ContextMenuItem] = [
                 ContextMenuItem("Expand", children=(
-                    ContextMenuItem("Limited", action="locals:expand_some"),
-                    ContextMenuItem("Full", action="locals:expand_all"),
+                    ContextMenuItem("Limited", action="locals:expand_limited"),
+                    ContextMenuItem("Full", action="locals:expand_full"),
                 )),
                 ContextMenuItem("Fold", action="locals:fold"),
             ]
@@ -410,10 +410,10 @@ class WorkspaceMixin:
         node = getattr(self, "_locals_context_node", None)
         self._locals_context_node = None
         if node is not None and isinstance(target, LocalVariablePane):
-            if sub == "expand_some":
-                asyncio.create_task(target.do_expand_some(node))
-            elif sub == "expand_all":
-                asyncio.create_task(target.do_expand_all(node))
+            if sub == "expand_limited":
+                asyncio.create_task(target.do_expand_limited(node))
+            elif sub == "expand_full":
+                asyncio.create_task(target.do_expand_full(node))
             elif sub == "fold":
                 target.do_fold(node)
 

@@ -208,7 +208,7 @@ class LocalVariablePaneTreeMixin:
         return expandable_children
 
 
-    async def do_expand_some(self, node: TreeNode, _depth: int = 0) -> None:
+    async def do_expand_limited(self, node: TreeNode, _depth: int = 0) -> None:
         """Recursively expand a subtree using the pane's "expand some" policy.
 
         This is a public helper used by the locals-pane context menu.
@@ -242,13 +242,13 @@ class LocalVariablePaneTreeMixin:
             await self._expand_node_unlimited(node, varobj_name, displayhint)
 
         for child_node in self._iter_expandable_child_nodes(node):
-            await self.do_expand_some(child_node, _depth + 1)
+            await self.do_expand_limited(child_node, _depth + 1)
 
 
-    async def do_expand_all(self, node: TreeNode, _depth: int = 0) -> None:
+    async def do_expand_full(self, node: TreeNode, _depth: int = 0) -> None:
         """Recursively expand a subtree without any child-limit paging.
 
-        This is the "load everything" companion to ``do_expand_some`` and is
+        This is the "load everything" companion to ``do_expand_limited`` and is
         intended for UI actions such as an "Expand All" context-menu command.
         """
         if _depth > 20:
@@ -267,7 +267,7 @@ class LocalVariablePaneTreeMixin:
 
         await self._expand_node_unlimited(node, varobj_name, displayhint)
         for child_node in self._iter_expandable_child_nodes(node):
-            await self.do_expand_all(child_node, _depth + 1)
+            await self.do_expand_full(child_node, _depth + 1)
 
 
     def do_fold(self, node: TreeNode) -> None:

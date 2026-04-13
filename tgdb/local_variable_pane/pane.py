@@ -59,7 +59,7 @@ class LocalVariablePane(
         main state-mutation API. Call it whenever the inferior stops or when
         the running/stopped state changes.
 
-    ``do_expand_some(node)``, ``do_expand_all(node)``, ``do_fold(node)``
+    ``do_expand_limited(node)``, ``do_expand_full(node)``, ``do_fold(node)``
         Optional subtree actions used by the context-menu layer. They are part
         of the public widget contract because other UI code may call them, but
         they do not need any direct knowledge of the internals beyond passing a
