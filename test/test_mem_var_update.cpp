@@ -7,10 +7,10 @@
 
 struct Test
 {
-    int a = 12;
-    float b = 23.2;
-    long c = 1234567890123456789L;
-    std::string d = "Hello, C++26!";
+    int a = 1;
+    float b = 1.5f;
+    long c = 2;
+    std::string d = "Hello, World!";
     std::map<int, std::string> e
     {
         {1, "one"},
@@ -49,21 +49,21 @@ int main()
     TestWrapper r {};
 
     w.test.a = 10;
-    w.test.b = 45.6f;
+    w.test.b = 20.5f;
 
     f();
 
-    w.test.c = 4567890L;
+    w.test.c = 30;
     w.test.d = "Updated string in main()";
 
     {
         TestWrapper w {};
 
-        w.test.a = 10;
-        w.test.b = 45.6f;
+        w.test.a = 40;
+        w.test.b = 50.5f;
 
-        w.test.c = 4567890L;
-        w.test.d = "Updated string in main()";
+        w.test.c = 60;
+        w.test.d = "Updated string in main() inner scope";
     }
 
     {
