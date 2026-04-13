@@ -1,5 +1,5 @@
 """
-Shared pane chrome for tgdb workspace widgets.
+Shared pane chrome and rendering helpers for tgdb workspace widgets.
 
 ``PaneBase`` provides the 1-row title bar used by pane-like widgets such as the
 source view, GDB console, and the optional auxiliary panes. The title bar is:
@@ -8,18 +8,74 @@ source view, GDB console, and the optional auxiliary panes. The title bar is:
 - styled with the ``StatusLine`` highlight group by default; and
 - usable as a drag handle when the pane sits inside a vertical
   ``PaneContainer``.
+
+Module-level helpers
+--------------------
+``fit_cells(text, width)``
+    Clip *text* to *width* display cells and right-pad the remainder.
+
+``center_cells(text, width)``
+    Centre *text* within *width* display cells, clipping if needed.
+
+``frame_location(frame)``
+    Return a short human-readable location string for a GDB frame.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
+from rich.cells import cell_len, split_graphemes
 from rich.text import Text
 from textual import events
 from textual.widget import Widget
 
+from .gdb_controller import Frame
 from .highlight_groups import HighlightGroups
-from .pane_utils import center_cells, fit_cells
+
+
+def fit_cells(text: str, width: int) -> str:
+    """Clip text to a given display-cell width and right-pad the remainder."""
+    if width <= 0:
+        return ""
+    used = 0
+    parts: list[str] = []
+    graphemes, _ = split_graphemes(text)
+    for start, end, grapheme_width in graphemes:
+        if used + grapheme_width > width:
+            break
+        parts.append(text[start:end])
+        used += grapheme_width
+    return "".join(parts) + (" " * max(0, width - used))
+
+
+def center_cells(text: str, width: int) -> str:
+    """Centre text within a given display-cell width, clipping if needed."""
+    if width <= 0:
+        return ""
+    text_width = cell_len(text)
+    if text_width >= width:
+        return fit_cells(text, width)
+    pad = width - text_width
+    left = pad // 2
+    right = pad - left
+    return (" " * left) + text + (" " * right)
+
+
+def frame_location(frame: Frame | None) -> str:
+    """Return a short human-readable location for a GDB frame."""
+    if frame is None:
+        return ""
+    path = frame.fullname or frame.file
+    if path:
+        name = os.path.basename(path)
+        if frame.line > 0:
+            return f"{name}:{frame.line}"
+        return name
+    if frame.addr:
+        return frame.addr
+    return ""
 
 
 class _TitleBar(Widget):

@@ -16,7 +16,7 @@ from textual.widget import Widget
 
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
-from ..pane_utils import fit_cells
+from ..pane_base import fit_cells
 
 _HEADER = "  Address           +0 +1 +2 +3  +4 +5 +6 +7  +8 +9 +A +B  +C +D +E +F  ASCII"
 

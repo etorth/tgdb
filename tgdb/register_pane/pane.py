@@ -14,7 +14,7 @@ from textual.widget import Widget
 from ..gdb_controller import RegisterInfo
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
-from ..pane_utils import fit_cells
+from ..pane_base import fit_cells
 
 
 class _RegisterContent(Widget):

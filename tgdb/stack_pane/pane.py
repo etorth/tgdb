@@ -14,7 +14,7 @@ from textual.widget import Widget
 from ..gdb_controller import Frame
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
-from ..pane_utils import fit_cells, frame_location
+from ..pane_base import fit_cells, frame_location
 
 
 class _StackContent(Widget):
