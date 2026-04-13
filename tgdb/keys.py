@@ -321,6 +321,10 @@ class KeyRoutingMixin:
         char = event.character or ""
         menu = self._get_context_menu()
 
+        if self._file_dialog_pending:
+            # Let the file dialog widget consume the key directly.
+            return
+
         if menu and menu.is_open:
             if key == "escape":
                 self._close_context_menu()
