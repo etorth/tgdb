@@ -191,7 +191,7 @@ class TGDBScreen:
 
     def _get_widget_at(self, address: list[int]):
         """Synchronously navigate the live widget tree to the node at *address*."""
-        from .app import PaneContainer
+        from .workspace import PaneContainer
 
         try:
             root = self._app.query_one("#split-container", PaneContainer)
@@ -214,7 +214,7 @@ class TGDBScreen:
 
 
     async def _do_close_all(self) -> None:
-        from .app import EmptyPane
+        from .workspace import EmptyPane
 
         app = self._app
         if app is None:
@@ -226,7 +226,7 @@ class TGDBScreen:
 
 
     async def _do_split(self, pane: list[int], mode: SplitMode) -> None:
-        from .app import EmptyPane, PaneContainer
+        from .workspace import EmptyPane, PaneContainer
 
         app = self._app
         if app is None:
@@ -267,7 +267,7 @@ class TGDBScreen:
 
 
     async def _do_attach(self, address: list[int], pane_type: Pane) -> None:
-        from .app import PaneContainer
+        from .workspace import PaneContainer
 
         app = self._app
         if app is None:

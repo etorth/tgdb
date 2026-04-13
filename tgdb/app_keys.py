@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from textual import events
 from textual.css.query import NoMatches
 
-from ..command_line_bar import CommandLineBar, CommandSubmit
-from ..local_variable_pane import LocalVariablePane
+from .command_line_bar import CommandLineBar, CommandSubmit
+from .local_variable_pane import LocalVariablePane
 
 if TYPE_CHECKING:
     from .main import TGDBApp

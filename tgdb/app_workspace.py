@@ -9,23 +9,23 @@ from typing import Optional, TYPE_CHECKING
 from textual.widget import Widget
 from textual.css.query import NoMatches
 
-from ..source_widget import SourceView
-from ..gdb_widget import GDBWidget
-from ..command_line_bar import CommandLineBar
-from ..file_dialog import FileDialog
-from ..context_menu import (
+from .source_widget import SourceView
+from .gdb_widget import GDBWidget
+from .command_line_bar import CommandLineBar
+from .file_dialog import FileDialog
+from .context_menu import (
     ContextMenu,
     ContextMenuItem,
     ContextMenuClosed,
     ContextMenuSelected,
 )
-from ..local_variable_pane import LocalVariablePane
-from ..register_pane import RegisterPane
-from ..stack_pane import StackPane
-from ..thread_pane import ThreadPane
-from ..evaluate_pane import EvaluatePane
-from ..memory_pane import MemoryPane
-from ..disasm_pane import DisasmPane
+from .local_variable_pane import LocalVariablePane
+from .register_pane import RegisterPane
+from .stack_pane import StackPane
+from .thread_pane import ThreadPane
+from .evaluate_pane import EvaluatePane
+from .memory_pane import MemoryPane
+from .disasm_pane import DisasmPane
 from .workspace import EmptyPane, PaneContainer, Splitter
 
 if TYPE_CHECKING:

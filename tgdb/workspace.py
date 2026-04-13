@@ -15,8 +15,8 @@ from textual import events
 from textual.message import Message
 from textual.widget import Widget
 
-from ..highlight_groups import HighlightGroups
-from ..pane_base import PaneBase
+from .highlight_groups import HighlightGroups
+from .pane_base import PaneBase
 
 
 class DragResize(Message):

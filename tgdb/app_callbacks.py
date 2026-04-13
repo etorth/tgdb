@@ -9,7 +9,7 @@ from typing import Optional
 
 from textual.css.query import NoMatches
 
-from ..source_widget import (
+from .source_widget import (
     ToggleBreakpoint,
     OpenFileDialog,
     OpenTTY,
@@ -24,21 +24,21 @@ from ..source_widget import (
     GDBCommand,
     ShowHelp,
 )
-from ..gdb_widget import (
+from .gdb_widget import (
     ScrollModeChange,
     ScrollSearchStart,
     ScrollSearchUpdate,
     ScrollSearchCommit,
     ScrollSearchCancel,
 )
-from ..command_line_bar import (
+from .command_line_bar import (
     CommandLineBar,
     CommandSubmit,
     CommandCancel,
     MessageDismissed,
 )
-from ..file_dialog import FileDialog, FileSelected, FileDialogClosed
-from ..gdb_controller import Breakpoint, Frame, LocalVariable, ThreadInfo, RegisterInfo
+from .file_dialog import FileDialog, FileSelected, FileDialogClosed
+from .gdb_controller import Breakpoint, Frame, LocalVariable, ThreadInfo, RegisterInfo
 
 _log = logging.getLogger("tgdb.app")
 

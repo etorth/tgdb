@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
-from ..source_widget import SourceFile
+from .source_widget import SourceFile
 
 if TYPE_CHECKING:
     from .main import TGDBApp

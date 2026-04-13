@@ -23,35 +23,35 @@ from typing import Optional
 from textual.app import App
 from textual.widget import Widget
 
-from ..command_line_bar import CommandLineBar
-from ..config import Config, ConfigParser
-from ..context_menu import ContextMenu
-from ..disasm_pane import DisasmPane
-from ..evaluate_pane import EvaluatePane
-from ..file_dialog import FileDialog
-from ..gdb_controller import (
+from .command_line_bar import CommandLineBar
+from .config import Config, ConfigParser
+from .context_menu import ContextMenu
+from .disasm_pane import DisasmPane
+from .evaluate_pane import EvaluatePane
+from .file_dialog import FileDialog
+from .gdb_controller import (
     GDBController,
     Frame,
     LocalVariable,
     RegisterInfo,
     ThreadInfo,
 )
-from ..gdb_widget import GDBWidget
-from ..highlight_groups import HighlightGroups
-from ..key_mapper import KeyMapper
-from ..local_variable_pane import LocalVariablePane
-from ..memory_pane import MemoryPane
-from ..register_pane import RegisterPane
-from ..source_widget import SourceView
-from ..stack_pane import StackPane
-from ..thread_pane import ThreadPane
-from .callbacks import CallbacksMixin
-from .commands import CommandsMixin
-from .core import AppCoreMixin
-from .keys import KeyRoutingMixin
-from .layout import LayoutMixin
+from .gdb_widget import GDBWidget
+from .highlight_groups import HighlightGroups
+from .key_mapper import KeyMapper
+from .local_variable_pane import LocalVariablePane
+from .memory_pane import MemoryPane
+from .register_pane import RegisterPane
+from .source_widget import SourceView
+from .stack_pane import StackPane
+from .thread_pane import ThreadPane
+from .app_callbacks import CallbacksMixin
+from .app_commands import CommandsMixin
+from .app_core import AppCoreMixin
+from .app_keys import KeyRoutingMixin
+from .app_layout import LayoutMixin
 from .workspace import PaneContainer, PaneDescriptor
-from .workspace_actions import WorkspaceMixin
+from .app_workspace import WorkspaceMixin
 
 
 class TGDBApp(

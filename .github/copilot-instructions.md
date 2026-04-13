@@ -35,7 +35,7 @@
 ## High-level architecture
 
 - `tgdb/__main__.py` is a thin cgdb-compatible CLI wrapper. It parses `-d`, `-w`, `-r`, `--args`, and `--cd`, then launches `TGDBApp`.
-- `tgdb/app/` is the orchestration package. `main.py` exposes `TGDBApp`, while `core.py`, `commands.py`, `callbacks.py`, `keys.py`, `layout.py`, `workspace_actions.py`, and `workspace.py` keep the app lifecycle, command routing, callbacks, key dispatch, split logic, and workspace-tree widgets self-contained under one package boundary.
+- `tgdb/app.py` is the top-level orchestration module. It defines `TGDBApp` and imports all mixin layers and sibling packages directly. The implementation is split across `app_core.py`, `app_commands.py`, `app_callbacks.py`, `app_keys.py`, `app_layout.py`, and `app_workspace.py`, which keep the app lifecycle, command routing, callbacks, key dispatch, split logic, and workspace-tree actions as separate top-level files. `workspace.py` holds the workspace layout widgets (`PaneContainer`, `EmptyPane`, `Splitter`, `DragResize`, `TitleBarResized`, `PaneDescriptor`).
 - `tgdb/gdb_controller/` is the debugger bridge package. `controller.py` exposes `GDBController`, while `types.py`, `requests.py`, `results.py`, `parsing.py`, `varobj.py`, and `miparser.py` split the controller internals by responsibility. It uses **two PTYs**:
   - the primary PTY is the normal GDB console stream, forwarded as raw bytes to the bottom pane;
   - the secondary PTY is a `new-ui mi ...` channel used for structured MI records such as stopped frames, source files, and breakpoints.

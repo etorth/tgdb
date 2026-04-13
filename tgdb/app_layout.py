@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from textual import events
 from textual.css.query import NoMatches
 
-from ..source_widget import ResizeSource, ToggleOrientation
+from .source_widget import ResizeSource, ToggleOrientation
 from .workspace import DragResize, PaneContainer, TitleBarResized
 
 if TYPE_CHECKING:
