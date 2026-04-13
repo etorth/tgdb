@@ -64,6 +64,8 @@ int main()
 
         w.test.c = 60;
         w.test.d = "Updated string in main() inner scope";
+
+        { int w = 23; w = 12; {int w = 55; w = 144; }}
     }
 
     {
