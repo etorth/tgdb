@@ -16,6 +16,7 @@ class FileDialogKeyMixin:
 
         if self._query_pending:
             if key in ("q", "escape"):
+                self.close()
                 self.post_message(FileDialogClosed())
             event.stop()
             return
@@ -44,6 +45,7 @@ class FileDialogKeyMixin:
         self._num_buf = ""
 
         if key in ("q", "escape"):
+            self.close()
             self.post_message(FileDialogClosed())
         elif key in ("j", "down"):
             self._move(count)
@@ -88,5 +90,6 @@ class FileDialogKeyMixin:
             self._search(self._search_pattern, not self._search_forward)
         elif key in ("enter", "return"):
             if 0 <= self._sel < len(self._files):
+                self.close()
                 self.post_message(FileSelected(self._files[self._sel]))
         event.stop()
