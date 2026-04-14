@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
+
+_log = logging.getLogger("tgdb.gdb_controller")
 
 
 class GDBRequestMixin:
@@ -24,10 +28,10 @@ class GDBRequestMixin:
             "report_error": report_error,
             "kind": kind,
         }
+        raw = f"{token}{cmd}\n"
+        _log.debug(f"MI> {raw.rstrip()}")
         try:
-            import os
-
-            os.write(self._mi_master_fd, f"{token}{cmd}\n".encode())
+            os.write(self._mi_master_fd, raw.encode())
         except OSError:
             self._request_meta.pop(token, None)
             return None
