@@ -295,7 +295,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             line, self._mi_buf = self._mi_buf.split("\n", 1)
             line = line.rstrip("\r")
             if line:
-                _log.debug(f"MI raw: {line}")
+                _log.debug(f"MI<-: {line}")
             self._dispatch(line)
 
 

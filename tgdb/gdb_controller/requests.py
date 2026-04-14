@@ -29,7 +29,7 @@ class GDBRequestMixin:
             "kind": kind,
         }
         raw = f"{token}{cmd}\n"
-        _log.debug(f"MI> {raw.rstrip()}")
+        _log.debug(f"MI->: {raw.rstrip()}")
         try:
             os.write(self._mi_master_fd, raw.encode())
         except OSError:
