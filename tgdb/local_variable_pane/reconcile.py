@@ -169,6 +169,15 @@ class LocalVariablePaneReconcileMixin:
             return
 
         new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(variables, addrs)
+
+        if self._get_locals:
+            try:
+                locals_info = await self._get_locals()
+                if locals_info:
+                    shadowed_keys = self._shadowed_keys_from_locals(new_bindings, locals_info)
+            except Exception as exc:
+                _log.debug(f"get_locals shadow detection failed: {exc}")
+
         new_frame_key = self._build_frame_key(frame, new_binding_keys)
         current_keys = set(self._tracked.keys())
 

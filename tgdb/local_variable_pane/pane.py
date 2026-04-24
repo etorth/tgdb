@@ -97,6 +97,15 @@ class LocalVariablePane(
         frame. The pane uses this to hide variables whose constructors have not
         run yet.
 
+    ``get_locals() -> list[dict]``
+        Must call ``get_locals_b64()`` in GDB Python (loaded by
+        ``tgdb_pysetup.py``) and return a decoded ``list[dict]``.  Each dict
+        must have at least ``name`` and ``is_shadowed`` keys.  The pane uses
+        this to determine which variable bindings are overshadowed by an inner
+        scope, overriding the address-comparison fallback in
+        ``_compute_bindings``.  Pass ``None`` to disable and fall back to
+        address-comparison shadow detection.
+
     Behavior contract
     -----------------
     After the callbacks are installed, the pane behaves as follows:
@@ -158,6 +167,7 @@ class LocalVariablePane(
         self._var_eval: Optional[Callable[..., Coroutine]] = None
         self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
         self._get_decl_lines: Optional[Callable[..., Coroutine]] = None
+        self._get_locals: Optional[Callable[..., Coroutine]] = None
 
         self._tracked: dict[tuple[str, str], str] = {}
         self._pinned_varobjs: set[str] = set()
@@ -196,6 +206,7 @@ class LocalVariablePane(
         var_eval: Callable[..., Coroutine],
         var_eval_expr: Callable[..., Coroutine],
         get_decl_lines: Callable[..., Coroutine],
+        get_locals: Optional[Callable[..., Coroutine]] = None,
     ) -> None:
         """Install the async debugger callbacks used by the pane.
 
@@ -215,6 +226,7 @@ class LocalVariablePane(
         self._var_eval = var_eval
         self._var_eval_expr = var_eval_expr
         self._get_decl_lines = get_decl_lines
+        self._get_locals = get_locals
 
 
     def set_variables(self, variables: list[LocalVariable], frame: Frame | None = None) -> None:

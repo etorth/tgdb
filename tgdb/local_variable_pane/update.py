@@ -11,7 +11,41 @@ from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log
 class LocalVariablePaneUpdateMixin:
     """State reconciliation and varobj lifecycle management."""
 
-    def _build_safe_to_update_varobjs(self, safe_dynamic_updated: set[str], garbage_dynamic: set[str]) -> list[str]:
+    def _shadowed_keys_from_locals(
+        self,
+        new_bindings: list[BindingEntry],
+        locals_info: list[dict],
+    ) -> set[BindingKey]:
+        """Build ``shadowed_keys`` from the ``get_locals()`` result.
+
+        ``get_locals()`` returns variables in block-walk order (innermost first)
+        with ``is_shadowed=True`` on every entry whose name is already claimed
+        by an inner scope.  We match by tracking the nth occurrence of each
+        name: the ith entry for a name in ``new_bindings`` corresponds to the
+        ith entry for that name in ``locals_info``.  This avoids address-format
+        normalisation since both lists walk scopes in the same order.
+        """
+        shadow_by_name: dict[str, list[bool]] = {}
+        for info in locals_info:
+            name = info.get("name", "")
+            if not name:
+                continue
+            shadow_by_name.setdefault(name, []).append(bool(info.get("is_shadowed", False)))
+
+        shadowed_keys: set[BindingKey] = set()
+        occurrence: dict[str, int] = {}
+
+        for binding_name, binding_addr, _ in new_bindings:
+            idx = occurrence.get(binding_name, 0)
+            occurrence[binding_name] = idx + 1
+            flags = shadow_by_name.get(binding_name, [])
+            if idx < len(flags) and flags[idx]:
+                shadowed_keys.add((binding_name, binding_addr))
+
+        return shadowed_keys
+
+
+
         safe_to_update: list[str] = []
 
         for varobj_name in self._varobj_to_node:
