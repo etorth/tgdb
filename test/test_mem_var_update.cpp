@@ -43,6 +43,8 @@ void f()
     w.test.d = "Updated string in f()";
 }
 
+TestWrapper w {};
+
 int main()
 {
     TestWrapper w {};
@@ -51,6 +53,7 @@ int main()
     w.test.a = 10;
     w.test.b = 20.5f;
 
+    auto &rw = w;
     f();
 
     w.test.c = 30;
