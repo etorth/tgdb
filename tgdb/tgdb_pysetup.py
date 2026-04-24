@@ -2,6 +2,12 @@ import gdb
 import json
 import base64
 
+# Lift GDB's memory read limit so str(val) never fails for large variables.
+try:
+    gdb.execute("set max-value-size unlimited", to_string=True)
+except gdb.error:
+    pass
+
 
 def get_locals_b64():
     try:
@@ -52,12 +58,12 @@ def get_locals_b64():
                 if is_reference:
                     try:
                         addr_str = str(val.referenced_value().address)
-                    except gdb.error:
+                    except Exception:
                         addr_str = "unknown (referenced target)"
                 else:
                     addr_str = str(val.address) if val.address else "register"
 
-            except gdb.error:
+            except Exception:
                 val_str = "<optimized out>"
                 addr_str = "unknown"
 

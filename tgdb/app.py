@@ -188,7 +188,7 @@ class TGDBApp(
                 "Locals",
                 self._make_local_variable_pane,
                 lambda: self._locals_pane,
-                lambda: self.gdb.request_current_frame_locals(report_error=False),
+                lambda: asyncio.ensure_future(self.gdb._publish_locals_async()),
             ),
             "registers": PaneDescriptor(
                 "Registers",
