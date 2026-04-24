@@ -16,7 +16,7 @@ def get_locals_b64():
     except gdb.error:
         return base64.b64encode(b"[]").decode("ascii")
 
-    # Only show variables declared on or before the current executing line.
+    # Only show variables declared before the current executing line.
     # sal.line is 0 when no line info is available; in that case we fall back
     # to showing everything (line filter disabled).
     sal = frame.find_sal()
@@ -30,12 +30,12 @@ def get_locals_b64():
             if not (symbol.is_variable or symbol.is_argument):
                 continue
 
-            # Skip variables whose declaration comes after the current line.
+            # Skip variables whose declaration comes at or after the current line.
             # Arguments always pass (their "line" is the function signature
             # line, which may equal current_line on entry — always show them).
             decl_line = symbol.line
             if current_line > 0 and not symbol.is_argument:
-                if decl_line > 0 and decl_line > current_line:
+                if decl_line > 0 and decl_line >= current_line:
                     continue
 
             name = symbol.name
