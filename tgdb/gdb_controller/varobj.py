@@ -9,6 +9,7 @@ declaration-line helpers used by ``LocalVariablePane``. Mixed into
 from __future__ import annotations
 
 import base64
+import json
 import logging
 
 _log = logging.getLogger("tgdb.gdb_varobj")
@@ -53,87 +54,7 @@ while b:
 gdb.set_convenience_variable("tgdb_decls", ",".join(f"{n}:{l}" for n, l in decls.items()))
 """
 
-_GET_LOCALS_SCRIPT = """\
-import gdb
-import json
-import base64
-
-def get_all_locals():
-    try:
-        frame = gdb.selected_frame()
-        block = frame.block()
-    except gdb.error:
-        return []
-
-    all_vars = []
-    seen_names = set()
-
-    while block:
-        for symbol in block:
-            if symbol.is_variable or symbol.is_argument:
-                name = symbol.name
-
-                # 1. Get the underlying type code to detect references
-                # strip_typedefs() handles cases like 'typedef int& my_ref_type;'
-                type_obj = symbol.type.strip_typedefs()
-
-                is_lref = type_obj.code == gdb.TYPE_CODE_REF
-                is_rref = type_obj.code == gdb.TYPE_CODE_RVALUE_REF
-                is_reference = is_lref or is_rref
-
-                try:
-                    val = symbol.value(frame)
-                    val_str = str(val)
-
-                    # 2. Address Logic:
-                    # If it's a reference, val.address is often the address of the
-                    # metadata/pointer. val.referenced_value().address is the actual object.
-                    if is_reference:
-                        try:
-                            addr_str = str(val.referenced_value().address)
-                        except gdb.error:
-                            addr_str = "unknown (referenced target)"
-                    else:
-                        addr_str = str(val.address) if val.address else "register"
-
-                except gdb.error:
-                    val_str = "<optimized out>"
-                    addr_str = "unknown"
-
-                is_shadowed = name in seen_names
-
-                all_vars.append({
-                    "name": name,
-                    "value": val_str,
-                    "type": str(symbol.type),
-                    "is_reference": is_reference,
-                    "ref_kind": "lvalue (&)" if is_lref else ("rvalue (&&)" if is_rref else None),
-                    "line": symbol.line,
-                    "addr": addr_str,
-                    "is_shadowed": is_shadowed,
-                    "scope_start": hex(block.start)
-                })
-
-                seen_names.add(name)
-
-        # Stop after processing the global block or static block
-        if block.superblock is None:
-            break
-
-        # Optional: Stop after reaching the function boundary
-        # but ONLY after processing the function block itself.
-        if block.function is not None:
-            # We just processed the function's top-level block;
-            # usually, we stop here for "locals".
-            break
-
-        block = block.superblock
-
-    return base64.b64encode(json.dump(all_vars, indent=2))
-"""
-
 _DECL_LINES_B64 = base64.b64encode(_DECL_LINES_SCRIPT.encode()).decode()
-_GET_LOCALS_B64 = base64.b64encode(_GET_LOCALS_SCRIPT.encode()).decode()
 
 class VarobjMixin:
     """Mixin providing varobj commands built on the controller MI helper.
@@ -221,13 +142,60 @@ class VarobjMixin:
             pass
 
 
-    async def get_all_locals(self):
-        py_cmd = f"import base64; exec(base64.b64decode('{_GET_LOCALS_B64}').decode())"
+    async def get_locals(self) -> list[dict]:
+        await self.mi_command_async(
+            "-gdb-set print elements unlimited",
+            raise_on_error=True,
+        )
+        await self.mi_command_async(
+            "-gdb-set print characters unlimited",
+            raise_on_error=True,
+        )
+
         try:
-            await self.mi_command_async(f'-data-evaluate-expression "get_all_locals_b64()"', raise_on_error=True)
+            result = await self.mi_command_async(
+                '-data-evaluate-expression "$get_locals_b64()"',
+                raise_on_error=True,
+            )
         except RuntimeError as exc:
-            _log.debug(f"get_all_locals_b64 failed: {exc}")
-            return {}
+            _log.debug(f"get_locals failed: {exc}")
+            return []
+        finally:
+            try:
+                await self.mi_command_async(
+                    "-gdb-set print elements 200",
+                    raise_on_error=True,
+                )
+            except RuntimeError:
+                pass
+            try:
+                await self.mi_command_async(
+                    "-gdb-set print characters elements",
+                    raise_on_error=True,
+                )
+            except RuntimeError:
+                pass
+
+        payload = result.get("payload") or {}
+        raw = payload.get("value", "")
+        if not isinstance(raw, str):
+            return []
+
+        try:
+            encoded = json.loads(raw)
+            decoded = base64.b64decode(encoded).decode("utf-8")
+            locals_payload = json.loads(decoded)
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            _log.debug(f"get_locals decode failed: {exc}")
+            return []
+
+        if isinstance(locals_payload, list):
+            return locals_payload
+
+        _log.debug(
+            f"get_locals returned non-list payload: {type(locals_payload).__name__}"
+        )
+        return []
 
 
     async def get_decl_lines(self) -> dict[str, int]:
