@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -52,27 +51,20 @@ class GDBRequestMixin:
 
 
     def load_tgdb_pysetup(self, *, report_error: bool = False) -> None:
-        """Send ``tgdb_pysetup.py`` into GDB's embedded Python runtime."""
+        """Load ``tgdb_pysetup.py`` into GDB's embedded Python runtime.
+
+        Uses GDB's ``source`` command, which natively executes ``.py`` files
+        as Python.  This keeps the MI command short regardless of the script
+        size.
+        """
         setup_path = Path(__file__).resolve().parents[1] / "tgdb_pysetup.py"
         if not setup_path.is_file():
             _log.debug(f"Skipping tgdb pysetup; file not found: {setup_path}")
             return
 
-        try:
-            setup_source = setup_path.read_bytes()
-        except OSError as exc:
-            _log.warning(f"Failed to read tgdb pysetup {setup_path}: {exc}")
-            return
-
-        setup_path_text = str(setup_path)
-        setup_b64 = base64.b64encode(setup_source).decode("ascii")
-        py_cmd = (
-            "import base64; "
-            f"exec(compile(base64.b64decode('{setup_b64}').decode('utf-8'), "
-            f"{setup_path_text!r}, 'exec'), globals())"
-        )
-        console_cmd = json.dumps(f"python {py_cmd}")
         _log.debug(f"Loading tgdb pysetup into GDB: {setup_path}")
+        path_str = str(setup_path).replace("\\", "\\\\").replace('"', '\\"')
+        console_cmd = json.dumps(f"source {path_str}")
         self.mi_command(
             f"-interpreter-exec console {console_cmd}",
             report_error=report_error,

@@ -8,6 +8,7 @@ source files), and the ``_safe_int`` utility. Mixed into ``GDBController``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from .types import (
@@ -33,7 +34,7 @@ class ParsingMixin:
     # Async (notify) record handler
     # ------------------------------------------------------------------
 
-    def _handle_async(self, rec: dict) -> None:
+    async def _handle_async(self, rec: dict) -> None:
         cls = rec.get("message", "")
         results = rec.get("payload") or {}
 
@@ -48,7 +49,7 @@ class ParsingMixin:
             path = frame.file or frame.fullname
             _log.info(f"stopped reason={reason} frame={path}:{frame.line}")
             self.on_stopped(frame)
-            self.request_current_frame_locals(report_error=False)
+            await self._publish_locals_async()
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)

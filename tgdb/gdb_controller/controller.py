@@ -308,5 +308,5 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         if t == "result":
             self._handle_result(rec)
         elif t == "notify":
-            self._handle_async(rec)
+            asyncio.ensure_future(self._handle_async(rec))
         # console/target/log/done/output on MI channel are noise — ignore
