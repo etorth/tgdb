@@ -172,6 +172,7 @@ class VarobjMixin:
                 is_arg=bool(d.get("is_arg", False)),
                 addr=d.get("addr", ""),
                 is_shadowed=bool(d.get("is_shadowed", False)),
+                is_reference=bool(d.get("is_reference", False)),
             )
             for d in dicts
             if d.get("name")

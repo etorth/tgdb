@@ -41,6 +41,7 @@ class LocalVariable:
     is_arg: bool = False
     addr: str = ""          # stack address from GDB Python (empty on fallback path)
     is_shadowed: bool = False  # True when an inner scope has a same-named variable
+    is_reference: bool = False  # True for lvalue & and rvalue && reference types
 
 
 @dataclass
