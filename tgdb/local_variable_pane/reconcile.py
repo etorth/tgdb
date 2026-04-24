@@ -120,7 +120,7 @@ class LocalVariablePaneReconcileMixin:
             _log.debug(f"var_create {variable.name}: uninitialized memory in response ({value[:80]!r}), placeholder added")
             return True
 
-        varobj_name = self._remember_root_varobj(key, info)
+        varobj_name = self._remember_root_varobj(key, info, is_pinned=use_addr)
         numchild = self._safe_int(info.get("numchild", "0"))
         has_children = (numchild > 0 or info.get("dynamic", "0") == "1") and not _suppress_children(info)
         displayhint = info.get("displayhint", "")

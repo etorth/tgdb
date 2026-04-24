@@ -63,7 +63,7 @@ class LocalVariablePaneSupportMixin:
         return matching_paths
 
 
-    def _remember_root_varobj(self, key: BindingKey, info: dict) -> str:
+    def _remember_root_varobj(self, key: BindingKey, info: dict, is_pinned: bool = False) -> str:
         varobj_name = info.get("name", "")
         self._tracked[key] = varobj_name
         if not varobj_name:
@@ -71,6 +71,9 @@ class LocalVariablePaneSupportMixin:
 
         if varobj_name not in self._varobj_names:
             self._varobj_names.append(varobj_name)
+
+        if is_pinned:
+            self._pinned_varobjs.add(varobj_name)
 
         if info.get("dynamic", "0") == "1":
             self._dynamic_varobjs.add(varobj_name)
