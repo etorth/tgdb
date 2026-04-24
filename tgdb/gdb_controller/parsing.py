@@ -58,7 +58,6 @@ class ParsingMixin:
             self._inferior_running = True
             self.current_frame = None
             self.locals = []
-            self.on_locals([])
             self.stack = []
             self.on_stack([])
             _log.info("running")
