@@ -78,23 +78,8 @@ class LocalVariablePaneReconcileMixin:
             _log.debug(f"Skipping var_create for {variable.name}: uninitialized memory in bvar.value ({stack_value[:80]!r})")
             return True
 
-        # When we have a precise address from get_locals_b64(), create the
-        # varobj by address expression so GDB resolves the right object even
-        # when another variable with the same name is in scope at the current
-        # PC (e.g. an inner "int w" shadowing an outer "TestWrapper w").
-        # References are excluded: their addr is the referent's address and
-        # the type includes "&", which cannot be used in a cast expression.
-        type_str = variable.type or ""
-        use_addr = (
-            binding_addr
-            and binding_addr not in ("register", "unknown", "")
-            and not variable.is_reference
-            and type_str
-        )
-        var_expr = f"*({type_str}*){binding_addr}" if use_addr else variable.name
-
         try:
-            info = await self._var_create(var_expr)
+            info = await self._var_create(variable.name)
         except Exception:
             value = variable.value.replace("\n", " ")
             if not value:
