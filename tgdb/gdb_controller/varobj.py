@@ -143,37 +143,47 @@ class VarobjMixin:
 
 
     async def get_locals(self) -> list[dict]:
-        console_cmd = json.dumps(
-            "python print(get_locals_b64().decode('ascii'))"
-        )
+        """Fetch local variables from GDB via the ``$get_locals_b64()`` convenience function.
+
+        The function is registered by ``tgdb_pysetup.py`` at GDB startup.
+        It returns a base64-encoded JSON array of variable dicts which we
+        decode here and return as ``list[dict]``.
+        """
+        await self.mi_command_async("-gdb-set print elements unlimited", raise_on_error=False)
         try:
-            result = await self.mi_command_async(
-                f"-interpreter-exec console {console_cmd}",
-                raise_on_error=True,
-                capture_console=True,
-            )
+            await self.mi_command_async("-gdb-set print characters unlimited", raise_on_error=True)
+        except RuntimeError:
+            pass  # older GDB without separate print characters setting
+
+        try:
+            raw = await self._eval_expr_raw("$get_locals_b64()")
         except RuntimeError as exc:
             _log.debug(f"get_locals failed: {exc}")
             return []
+        finally:
+            try:
+                await self.mi_command_async("-gdb-set print elements 200", raise_on_error=False)
+            except RuntimeError:
+                pass
+            try:
+                await self.mi_command_async("-gdb-set print characters elements", raise_on_error=False)
+            except RuntimeError:
+                pass
 
-        raw = result.get("console_output", "")
-        if not isinstance(raw, str):
+        encoded = raw.strip().strip('"')
+        if not encoded:
             return []
 
         try:
-            encoded = raw.strip()
-            decoded = base64.b64decode(encoded).decode("utf-8")
-            locals_payload = json.loads(decoded)
+            locals_list = json.loads(base64.b64decode(encoded).decode("utf-8"))
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             _log.debug(f"get_locals decode failed: {exc}")
             return []
 
-        if isinstance(locals_payload, list):
-            return locals_payload
+        if isinstance(locals_list, list):
+            return locals_list
 
-        _log.debug(
-            f"get_locals returned non-list payload: {type(locals_payload).__name__}"
-        )
+        _log.debug(f"get_locals: unexpected payload type {type(locals_list).__name__}")
         return []
 
 
