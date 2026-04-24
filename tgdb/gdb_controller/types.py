@@ -39,6 +39,8 @@ class LocalVariable:
     value: str = ""
     type: str = ""
     is_arg: bool = False
+    addr: str = ""          # stack address from GDB Python (empty on fallback path)
+    is_shadowed: bool = False  # True when an inner scope has a same-named variable
 
 
 @dataclass

@@ -67,6 +67,7 @@ def get_locals_b64():
                 "name": name,
                 "value": val_str,
                 "type": str(symbol.type),
+                "is_arg": symbol.is_argument,
                 "is_reference": is_reference,
                 "ref_kind": "lvalue (&)" if is_lref else ("rvalue (&&)" if is_rref else None),
                 "line": decl_line,

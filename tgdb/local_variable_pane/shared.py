@@ -5,7 +5,6 @@ Shared helpers and type aliases for the local-variable pane modules.
 from __future__ import annotations
 
 import logging
-import re
 from typing import TypeAlias
 
 from ..gdb_controller import LocalVariable
@@ -14,7 +13,6 @@ _log = logging.getLogger("tgdb.locals")
 
 _SHADOW_SUFFIX = "  ← shadowed"
 _ACCESS_SPECIFIERS = {"public", "private", "protected"}
-_HEX_ADDR_RE = re.compile(r"0x[0-9a-fA-F]+")
 
 BindingKey: TypeAlias = tuple[str, str]
 BindingEntry: TypeAlias = tuple[str, str, LocalVariable]

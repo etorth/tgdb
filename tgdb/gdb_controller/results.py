@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 _log = logging.getLogger("tgdb.gdb_controller")
@@ -154,7 +155,7 @@ class GDBResultMixin:
             self.request_source_file(report_error=report)
 
         if meta.get("kind") == "current-location":
-            self.request_current_frame_locals(report_error=False)
+            asyncio.create_task(self._publish_locals_async())
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)

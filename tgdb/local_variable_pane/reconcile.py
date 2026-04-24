@@ -157,26 +157,24 @@ class LocalVariablePaneReconcileMixin:
         except Exception:
             return
 
-        addrs = await self._eval_variable_addresses(gen, variables)
-        if addrs is None:
-            return
+        # Fast path: variables published by _publish_locals_async() carry addr
+        # and is_shadowed directly from GDB Python — no extra MI round-trips.
+        if variables and variables[0].addr:
+            new_bindings, new_binding_keys, shadowed_keys = self._bindings_from_local_variables(variables)
+        else:
+            # Fallback: evaluate addresses via &name, filter by decl lines.
+            addrs = await self._eval_variable_addresses(gen, variables)
+            if addrs is None:
+                return
 
-        if self._rebuild_gen != gen:
-            return
+            if self._rebuild_gen != gen:
+                return
 
-        variables = await self._filter_by_decl_lines(variables, frame)
-        if self._rebuild_gen != gen:
-            return
+            variables = await self._filter_by_decl_lines(variables, frame)
+            if self._rebuild_gen != gen:
+                return
 
-        new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(variables, addrs)
-
-        if self._get_locals:
-            try:
-                locals_info = await self._get_locals()
-                if locals_info:
-                    shadowed_keys = self._shadowed_keys_from_locals(new_bindings, locals_info)
-            except Exception as exc:
-                _log.debug(f"get_locals shadow detection failed: {exc}")
+            new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(variables, addrs)
 
         new_frame_key = self._build_frame_key(frame, new_binding_keys)
         current_keys = set(self._tracked.keys())

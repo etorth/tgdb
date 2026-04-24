@@ -45,7 +45,33 @@ class LocalVariablePaneUpdateMixin:
         return shadowed_keys
 
 
+    def _bindings_from_local_variables(
+        self,
+        variables: list[LocalVariable],
+    ) -> tuple[list[BindingEntry], set[BindingKey], set[BindingKey]]:
+        """Build binding structures from rich ``LocalVariable`` objects.
 
+        Used when variables were produced by ``_publish_locals_async()``:
+        each object carries its own ``addr`` (unique stack slot) and
+        ``is_shadowed`` flag from GDB Python, so no separate ``&name``
+        evaluation or decl-line filtering is needed.
+        """
+        new_bindings: list[BindingEntry] = []
+        new_binding_keys: set[BindingKey] = set()
+        shadowed_keys: set[BindingKey] = set()
+
+        for variable in variables:
+            addr = variable.addr or variable.type
+            key = (variable.name, addr)
+            new_bindings.append((variable.name, addr, variable))
+            new_binding_keys.add(key)
+            if variable.is_shadowed:
+                shadowed_keys.add(key)
+
+        return new_bindings, new_binding_keys, shadowed_keys
+
+
+    def _build_safe_to_update_varobjs(self, safe_dynamic_updated: set[str], garbage_dynamic: set[str]) -> list[str]:
         safe_to_update: list[str] = []
 
         for varobj_name in self._varobj_to_node:

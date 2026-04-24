@@ -12,6 +12,8 @@ import base64
 import json
 import logging
 
+from .types import LocalVariable
+
 _log = logging.getLogger("tgdb.gdb_varobj")
 
 # Python script run inside GDB to collect DWARF declaration lines for all
@@ -185,6 +187,38 @@ class VarobjMixin:
 
         _log.debug(f"get_locals: unexpected payload type {type(locals_list).__name__}")
         return []
+
+
+    async def _publish_locals_async(self) -> None:
+        """Fetch locals via get_locals() and publish them through on_locals().
+
+        Called instead of ``request_current_frame_locals()`` so that
+        ``-stack-list-variables`` is never sent.  The richer ``LocalVariable``
+        objects produced here carry ``addr`` and ``is_shadowed`` directly from
+        GDB Python, which lets ``LocalVariablePane`` build its binding keys
+        without an extra ``&name`` evaluation round-trip.
+        """
+        try:
+            dicts = await self.get_locals()
+        except Exception as exc:
+            _log.debug(f"_publish_locals_async failed: {exc}")
+            self.on_locals([])
+            return
+
+        variables = [
+            LocalVariable(
+                name=d.get("name", ""),
+                value=d.get("value", ""),
+                type=d.get("type", ""),
+                is_arg=bool(d.get("is_arg", False)),
+                addr=d.get("addr", ""),
+                is_shadowed=bool(d.get("is_shadowed", False)),
+            )
+            for d in dicts
+            if d.get("name")
+        ]
+        _log.debug(f"_publish_locals_async: {len(variables)} variables")
+        self.on_locals(variables)
 
 
     async def get_decl_lines(self) -> dict[str, int]:
