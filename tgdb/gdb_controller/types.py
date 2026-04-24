@@ -42,6 +42,7 @@ class LocalVariable:
     addr: str = ""          # stack address from GDB Python (empty on fallback path)
     is_shadowed: bool = False  # True when an inner scope has a same-named variable
     is_reference: bool = False  # True for lvalue & and rvalue && reference types
+    line: int = 0           # declaration line from GDB DWARF (0 = unknown)
 
 
 @dataclass

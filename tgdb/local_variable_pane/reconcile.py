@@ -228,7 +228,13 @@ class LocalVariablePaneReconcileMixin:
         if new_frame_key:
             restore = self._saved_expansions.get(new_frame_key, set())
 
-        if not await self._add_new_bindings(gen, tree, to_add, restore, shadowed_keys):
+        # Sort new bindings by declaration line so outer-scope variables are
+        # inserted before inner-scope ones.  On incremental steps the newly
+        # entering variable has the highest line number and lands at the end,
+        # which matches the "new variables append at end" requirement.
+        to_add_sorted = sorted(to_add, key=lambda b: b[2].line)
+
+        if not await self._add_new_bindings(gen, tree, to_add_sorted, restore, shadowed_keys):
             return
 
         self._sync_shadow_labels(shadowed_keys)
