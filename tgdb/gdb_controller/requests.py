@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import os
+from pathlib import Path
 
 _log = logging.getLogger("tgdb.gdb_controller")
 
@@ -46,6 +49,35 @@ class GDBRequestMixin:
         kind: str | None = None,
     ) -> int | None:
         return self._send_mi_command(cmd, report_error=report_error, kind=kind)
+
+
+    def load_tgdb_pysetup(self, *, report_error: bool = False) -> None:
+        """Send ``tgdb_pysetup.py`` into GDB's embedded Python runtime."""
+        setup_path = Path(__file__).resolve().parents[1] / "tgdb_pysetup.py"
+        if not setup_path.is_file():
+            _log.debug(f"Skipping tgdb pysetup; file not found: {setup_path}")
+            return
+
+        try:
+            setup_source = setup_path.read_bytes()
+        except OSError as exc:
+            _log.warning(f"Failed to read tgdb pysetup {setup_path}: {exc}")
+            return
+
+        setup_path_text = str(setup_path)
+        setup_b64 = base64.b64encode(setup_source).decode("ascii")
+        py_cmd = (
+            "import base64; "
+            f"exec(compile(base64.b64decode('{setup_b64}').decode('utf-8'), "
+            f"{setup_path_text!r}, 'exec'), globals())"
+        )
+        console_cmd = json.dumps(f"python {py_cmd}")
+        _log.debug(f"Loading tgdb pysetup into GDB: {setup_path}")
+        self.mi_command(
+            f"-interpreter-exec console {console_cmd}",
+            report_error=report_error,
+            kind="tgdb-pysetup",
+        )
 
 
     async def mi_command_async(

@@ -240,8 +240,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
         _log.info("MI reader started")
 
-        # Enable pretty-printing so varobj operations return logical children
-        # (e.g. vector elements, map key-value pairs) instead of raw internals.
+        # Load tgdb's embedded GDB/Python helpers before stop handling needs
+        # them, then enable pretty-printing for logical varobj children.
+        self.load_tgdb_pysetup(report_error=False)
         self.mi_command("-enable-pretty-printing", report_error=False)
 
         # Wait for GDB's console PTY to close (GDB exited)
