@@ -162,15 +162,11 @@ class LocalVariablePaneReconcileMixin:
         if variables and variables[0].addr:
             new_bindings, new_binding_keys, shadowed_keys = self._bindings_from_local_variables(variables)
         else:
-            # Fallback: evaluate addresses via &name, filter by decl lines.
+            # Fallback: evaluate addresses via &name.
             addrs = await self._eval_variable_addresses(gen, variables)
             if addrs is None:
                 return
 
-            if self._rebuild_gen != gen:
-                return
-
-            variables = await self._filter_by_decl_lines(variables, frame)
             if self._rebuild_gen != gen:
                 return
 

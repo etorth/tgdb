@@ -184,47 +184,6 @@ class LocalVariablePaneUpdateMixin:
         return addrs
 
 
-    async def _filter_by_decl_lines(self, variables: list[LocalVariable], frame: Frame | None) -> list[LocalVariable]:
-        """Remove variables whose constructor has not run yet."""
-        current_line = 0
-        if frame is not None:
-            current_line = frame.line
-
-        if current_line <= 0 or not self._get_decl_lines:
-            return variables
-
-        try:
-            decl_lines = await self._get_decl_lines()
-        except Exception as exc:
-            _log.debug(f"get_decl_lines failed: {exc}")
-            return variables
-
-        if not decl_lines:
-            return variables
-
-        filtered: list[LocalVariable] = []
-        innermost_seen: set[str] = set()
-
-        for variable in variables:
-            if variable.is_arg:
-                filtered.append(variable)
-                continue
-
-            if variable.name in innermost_seen:
-                filtered.append(variable)
-                continue
-
-            innermost_seen.add(variable.name)
-            decl_line = decl_lines.get(variable.name, 0)
-            if decl_line > 0 and current_line <= decl_line:
-                _log.debug(f"Hiding uninitialized var {variable.name} (decl={decl_line} current={current_line})")
-                continue
-
-            filtered.append(variable)
-
-        return filtered
-
-
     def _compute_bindings(self, variables: list[LocalVariable], addrs: dict[str, str]) -> tuple[list[BindingEntry], set[BindingKey], set[BindingKey]]:
         """Build binding entries and determine which ones are shadowed."""
         tracked_outer: dict[str, list[str]] = {}

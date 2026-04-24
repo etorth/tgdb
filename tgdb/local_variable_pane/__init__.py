@@ -16,7 +16,6 @@ Typical usage::
         var_update=...,
         var_eval=...,
         var_eval_expr=...,
-        get_decl_lines=...,
     )
     pane.set_variables(locals_snapshot, current_frame)
 

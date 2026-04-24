@@ -92,11 +92,6 @@ class LocalVariablePane(
         Must evaluate the current value string of an existing varobj without
         re-enumerating its children.
 
-    ``get_decl_lines() -> dict[str, int]``
-        Must return declaration line information for locals in the current
-        frame. The pane uses this to hide variables whose constructors have not
-        run yet.
-
     Behavior contract
     -----------------
     After the callbacks are installed, the pane behaves as follows:
@@ -157,7 +152,6 @@ class LocalVariablePane(
         self._var_update: Optional[Callable[..., Coroutine]] = None
         self._var_eval: Optional[Callable[..., Coroutine]] = None
         self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
-        self._get_decl_lines: Optional[Callable[..., Coroutine]] = None
 
         self._tracked: dict[tuple[str, str], str] = {}
         self._pinned_varobjs: set[str] = set()
@@ -195,7 +189,6 @@ class LocalVariablePane(
         var_update: Callable[..., Coroutine],
         var_eval: Callable[..., Coroutine],
         var_eval_expr: Callable[..., Coroutine],
-        get_decl_lines: Callable[..., Coroutine],
     ) -> None:
         """Install the async debugger callbacks used by the pane.
 
@@ -214,7 +207,6 @@ class LocalVariablePane(
         self._var_update = var_update
         self._var_eval = var_eval
         self._var_eval_expr = var_eval_expr
-        self._get_decl_lines = get_decl_lines
 
 
     def set_variables(self, variables: list[LocalVariable], frame: Frame | None = None) -> None:

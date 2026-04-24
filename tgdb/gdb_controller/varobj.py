@@ -2,7 +2,7 @@
 VarobjMixin — varobj-related async MI commands.
 
 Provides var_create, var_list_children, var_delete, var_update, and the
-declaration-line helpers used by ``LocalVariablePane``. Mixed into
+get_locals helper that drives ``LocalVariablePane``. Mixed into
 ``GDBController``.
 """
 
@@ -16,47 +16,6 @@ from .types import LocalVariable
 
 _log = logging.getLogger("tgdb.gdb_varobj")
 
-# Python script run inside GDB to collect DWARF declaration lines for all
-# local variables in the current function.
-#
-# We base64-encode it so the MI command stays a single safe ASCII string —
-# no newlines, quotes, or backslashes that would confuse the GDB MI parser.
-#
-# Algorithm:
-#   1. Start from frame.block() — the innermost DWARF block at the current PC.
-#   2. Walk UP through superblocks to collect all variables currently in scope.
-#   3. Use "first seen wins" so the innermost declaration for each name is kept
-#      (inner scopes shadow outer ones with the same name).
-#   4. Stop at the function block to avoid leaking variables from the caller.
-#   5. Store the result in the GDB convenience variable $tgdb_decls so it can
-#      be read back via a normal -data-evaluate-expression MI command.
-#
-# Why not enumerate sibling blocks?
-#   The previous version walked the full function PC range to catch variables
-#   in sibling DWARF blocks (e.g. GCC's goto-label blocks).  But that walk
-#   started at the FUNCTION's start address, so gdb.block_for_pc() returned
-#   the outermost function block on the first iteration, skipping all inner
-#   blocks entirely.  For our purpose — hiding variables that haven't been
-#   initialized yet at the current PC — we only need the decl_line of variables
-#   that GDB is currently reporting as in-scope.  Those are exactly the
-#   variables reachable by walking up from frame.block(), so the sibling scan
-#   was both broken and unnecessary.
-_DECL_LINES_SCRIPT = """\
-import gdb
-frame = gdb.selected_frame()
-b = frame.block()
-decls = {}
-while b:
-    for s in b:
-        if s.is_variable and s.name not in decls:
-            decls[s.name] = s.line
-    if b.function:
-        break
-    b = b.superblock
-gdb.set_convenience_variable("tgdb_decls", ",".join(f"{n}:{l}" for n, l in decls.items()))
-"""
-
-_DECL_LINES_B64 = base64.b64encode(_DECL_LINES_SCRIPT.encode()).decode()
 
 class VarobjMixin:
     """Mixin providing varobj commands built on the controller MI helper.
@@ -222,93 +181,16 @@ class VarobjMixin:
 
 
     async def get_decl_lines(self) -> dict[str, int]:
-        """Return DWARF declaration lines for all local variables in the frame.
+        """Stub kept for backward compatibility — always returns empty dict.
 
-        Runs a GDB Python script via ``-interpreter-exec console`` that walks
-        every DWARF block within the current function's address range, then
-        stores the result in a GDB convenience variable which is retrieved via
-        ``-data-evaluate-expression``.
-
-        Returns ``{var_name: decl_line}``.  Returns an empty dict on error.
-
-        Why walk ALL blocks?
-        --------------------
-        ``frame.block()`` returns only the INNERMOST block at the current PC.
-        Functions are commonly split into SIBLING blocks in DWARF — for
-        example GCC puts variables declared after a ``goto`` label into a
-        separate block.  Iterating only the current block (and its parents)
-        misses those sibling blocks.
-
-        The fix: starting from the function block's start address, jump from
-        one block's end to the next to enumerate every sibling block.  At
-        each PC, also walk UP the block chain to collect variables from outer
-        (enclosing) blocks, using a visited set to avoid double-counting.
-
-        The Python script (_DECL_LINES_SCRIPT) is base64-encoded so that the
-        resulting MI command is a single safe ASCII string — no embedded
-        newlines, quotes, or backslashes that would trip up the GDB MI parser.
+        Declaration-line filtering is now done inside ``get_locals_b64()`` in
+        ``tgdb_pysetup.py``, which uses ``frame.find_sal().line`` to skip
+        variables declared after the current executing line before the result
+        even leaves GDB.  The ``get_decl_lines`` callback is no longer wired
+        into ``LocalVariablePane``; this method remains so callers that
+        reference ``self.gdb.get_decl_lines`` do not get an AttributeError.
         """
-        py_cmd = f"import base64; exec(base64.b64decode('{_DECL_LINES_B64}').decode())"
-        try:
-            await self.mi_command_async(
-                f'-interpreter-exec console "python {py_cmd}"',
-                raise_on_error=True,
-            )
-        except RuntimeError as exc:
-            _log.debug(f"get_decl_lines python step failed: {exc}")
-            return {}
-
-        # Set both print limits to unlimited so the convenience variable value
-        # is never truncated with "..." (which would drop remaining variable
-        # entries).  GDB 14+ has a separate "print characters" setting that
-        # controls string display independently of "print elements".
-        # We cannot read the current values via $-gdb_setting() in an MI
-        # data-evaluate-expression (the embedded quotes confuse the MI parser),
-        # so we simply restore to the GDB defaults (200 / elements) afterwards.
-        await self.mi_command_async("-gdb-set print elements unlimited", raise_on_error=True)
-        await self.mi_command_async("-gdb-set print characters unlimited", raise_on_error=True)
-
-        # Read back the convenience variable.
-        try:
-            raw = await self._eval_expr_raw("$tgdb_decls")
-        except RuntimeError as exc:
-            _log.debug(f"get_decl_lines eval step failed: {exc}")
-            return {}
-        finally:
-            # Restore GDB defaults.  "elements 200" is the factory default;
-            # "characters elements" (GDB 14+) means "follow print elements".
-            try:
-                await self.mi_command_async(
-                    "-gdb-set print elements 200",
-                    raise_on_error=True,
-                )
-            except RuntimeError:
-                pass
-            try:
-                await self.mi_command_async(
-                    "-gdb-set print characters elements",
-                    raise_on_error=True,
-                )
-            except RuntimeError:
-                pass  # older GDB without print characters — ignore
-
-        # raw looks like: '"v:5,x:3"' (GDB wraps strings in double quotes)
-        raw = raw.strip().strip('"')
-        result: dict[str, int] = {}
-        for part in raw.split(","):
-            part = part.strip()
-            if ":" not in part:
-                continue
-            name, _, line_str = part.partition(":")
-            name = name.strip()
-            line_str = line_str.strip()
-            try:
-                result[name] = int(line_str)
-            except ValueError:
-                pass
-
-        _log.debug(f"get_decl_lines -> {result}")
-        return result
+        return {}
 
 
     async def var_evaluate_expression(self, varobj_name: str) -> str:
