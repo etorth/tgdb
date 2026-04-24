@@ -74,21 +74,6 @@ def get_locals_b64():
 
         block = block.superblock
 
-    # Call it from GDB as:
-    #   (gdb) print $get_locals_b64()
-    # or from the embedded Python prompt as:
+    # Call it from the embedded Python prompt as:
     #   (gdb) python print(base64.b64decode(get_locals_b64()).decode("utf-8"))
     return base64.b64encode(json.dumps(all_vars, indent=2).encode())
-
-
-class _GetLocalsB64Function(gdb.Function):
-    def __init__(self) -> None:
-        super().__init__("get_locals_b64")
-
-
-    def invoke(self) -> str:
-        return get_locals_b64().decode("ascii")
-
-
-if "_TGDB_GET_LOCALS_B64_FUNCTION" not in globals():
-    _TGDB_GET_LOCALS_B64_FUNCTION = _GetLocalsB64Function()

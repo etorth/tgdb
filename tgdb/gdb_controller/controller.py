@@ -106,6 +106,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
         self._request_meta: dict[int, dict[str, object]] = {}
+        self._captured_console_token: Optional[int] = None
+        self._captured_console_chunks: list[str] = []
 
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
@@ -309,4 +311,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             self._handle_result(rec)
         elif t == "notify":
             self._handle_async(rec)
+        elif t == "console":
+            if self._captured_console_token is not None:
+                payload = rec.get("payload")
+                if isinstance(payload, str):
+                    self._captured_console_chunks.append(payload)
         # console/target/log/done/output on MI channel are noise — ignore

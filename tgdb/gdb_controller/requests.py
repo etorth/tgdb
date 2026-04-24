@@ -86,6 +86,7 @@ class GDBRequestMixin:
         timeout: float | None = 5.0,
         *,
         raise_on_error: bool = False,
+        capture_console: bool = False,
     ) -> dict:
         """Send an MI command and await the decoded response.
 
@@ -93,6 +94,10 @@ class GDBRequestMixin:
         ``{}``, while ``^error`` responses are returned to the caller for
         explicit inspection. When ``raise_on_error`` is true, send failures,
         timeouts, and ``^error`` responses raise ``RuntimeError``.
+
+        When ``capture_console`` is true, MI ``~"..."`` console stream output
+        emitted while this command is in flight is concatenated into the
+        returned ``console_output`` string.
         """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
@@ -101,6 +106,15 @@ class GDBRequestMixin:
             if raise_on_error:
                 raise RuntimeError("MI channel not open")
             return {}
+        if capture_console:
+            if self._captured_console_token is not None:
+                self._pending.pop(token, None)
+                self._request_meta.pop(token, None)
+                if raise_on_error:
+                    raise RuntimeError("MI console capture already in progress")
+                return {}
+            self._captured_console_token = token
+            self._captured_console_chunks = []
         self._pending[token] = future
         try:
             if timeout is None:
@@ -110,6 +124,9 @@ class GDBRequestMixin:
         except asyncio.TimeoutError as exc:
             self._pending.pop(token, None)
             self._request_meta.pop(token, None)
+            if token == self._captured_console_token:
+                self._captured_console_token = None
+                self._captured_console_chunks = []
             if raise_on_error:
                 raise RuntimeError("MI command timed out — GDB may be busy") from exc
             return {}

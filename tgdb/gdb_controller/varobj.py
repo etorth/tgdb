@@ -143,46 +143,25 @@ class VarobjMixin:
 
 
     async def get_locals(self) -> list[dict]:
-        await self.mi_command_async(
-            "-gdb-set print elements unlimited",
-            raise_on_error=True,
+        console_cmd = json.dumps(
+            "python print(get_locals_b64().decode('ascii'))"
         )
-        await self.mi_command_async(
-            "-gdb-set print characters unlimited",
-            raise_on_error=True,
-        )
-
         try:
             result = await self.mi_command_async(
-                '-data-evaluate-expression "$get_locals_b64()"',
+                f"-interpreter-exec console {console_cmd}",
                 raise_on_error=True,
+                capture_console=True,
             )
         except RuntimeError as exc:
             _log.debug(f"get_locals failed: {exc}")
             return []
-        finally:
-            try:
-                await self.mi_command_async(
-                    "-gdb-set print elements 200",
-                    raise_on_error=True,
-                )
-            except RuntimeError:
-                pass
-            try:
-                await self.mi_command_async(
-                    "-gdb-set print characters elements",
-                    raise_on_error=True,
-                )
-            except RuntimeError:
-                pass
 
-        payload = result.get("payload") or {}
-        raw = payload.get("value", "")
+        raw = result.get("console_output", "")
         if not isinstance(raw, str):
             return []
 
         try:
-            encoded = json.loads(raw)
+            encoded = raw.strip()
             decoded = base64.b64decode(encoded).decode("utf-8")
             locals_payload = json.loads(decoded)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:

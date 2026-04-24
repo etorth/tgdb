@@ -18,6 +18,10 @@ class GDBResultMixin:
         if token is not None:
             meta = self._request_meta.pop(token, {})
             future = self._pending.pop(token, None)
+            if token == self._captured_console_token:
+                rec["console_output"] = "".join(self._captured_console_chunks)
+                self._captured_console_token = None
+                self._captured_console_chunks = []
             if future is not None and not future.done():
                 future.set_result(rec)
         _log.debug(f"MI result token={token} cls={cls}")
