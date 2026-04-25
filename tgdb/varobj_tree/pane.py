@@ -16,6 +16,13 @@ from .support import VarobjTreeSupportMixin
 from .tree import VarobjTreeMixin
 
 
+class _VarobjTree(Tree):
+    """Tree widget for varobj panes with Textual's built-in toggle icons disabled."""
+
+    ICON_NODE = ""
+    ICON_NODE_EXPANDED = ""
+
+
 class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
     """Shared base for LocalVariablePane and EvaluatePane.
 
@@ -77,7 +84,7 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
 
     def compose(self):
         yield from super().compose()
-        yield Tree("")
+        yield _VarobjTree("")
 
 
     def on_mount(self) -> None:
