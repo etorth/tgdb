@@ -97,8 +97,14 @@ class WorkspaceMixin:
 
     def _make_evaluate_pane(self: TGDBApp) -> EvaluatePane:
         if self._evaluate_pane is None:
-            self._evaluate_pane = EvaluatePane(self.hl)
-            self._evaluate_pane.set_eval_fn(self.gdb.eval_expr)
+            self._evaluate_pane = EvaluatePane(self.hl, self.cfg)
+            self._evaluate_pane.set_var_callbacks(
+                var_create=self.gdb.var_create,
+                var_list_children=self.gdb.var_list_children,
+                var_delete=self.gdb.var_delete,
+                var_update=self.gdb.var_update,
+                var_eval_expr=self.gdb.var_evaluate_expression,
+            )
         return self._evaluate_pane
 
 
