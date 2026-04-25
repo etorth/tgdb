@@ -11,8 +11,6 @@ from textual.widgets.tree import TreeNode
 class VarobjTreeSupportMixin:
     """General node/varobj tracking helpers shared by all varobj-tree panes."""
 
-    _MARKER_ACTIVE_STYLE = "green"
-
     def _remember_child_varobj(self, child_info: dict, node: TreeNode) -> None:
         varobj_name = child_info.get("name", "")
         if not varobj_name:
@@ -24,26 +22,15 @@ class VarobjTreeSupportMixin:
             self._dynamic_varobjs.add(varobj_name)
 
 
-    _MARKER_EXPANDABLE = "▶"
     _MARKER_LEAF = "●"
 
-    def _expand_marker(self, has_children: bool) -> str:
-        return self._MARKER_EXPANDABLE if has_children else self._MARKER_LEAF
+    @staticmethod
+    def _plain_label(body: str) -> Text:
+        return Text(body, no_wrap=True, overflow="crop")
 
 
-    def _build_marker_label(
-        self,
-        body: str,
-        has_children: bool,
-        *,
-        marker_active: bool = True,
-    ) -> Text:
-        label = Text(no_wrap=True, overflow="crop")
-        marker_style = self._MARKER_ACTIVE_STYLE if marker_active else ""
-        label.append(self._expand_marker(has_children), style=marker_style)
-        label.append(" ")
-        label.append(body)
-        return label
+    def _build_leaf_label(self, body: str) -> Text:
+        return self._plain_label(f"{self._MARKER_LEAF} {body}")
 
 
     def _build_value_label(
@@ -55,21 +42,24 @@ class VarobjTreeSupportMixin:
         *,
         marker_active: bool = True,
     ) -> Text:
+        del marker_active
+
         if not value:
-            return self._build_marker_label(exp, has_children, marker_active=marker_active)
+            body = exp
+        else:
+            shown_value = value
+            if has_children:
+                if collapse_compound:
+                    shown_value = self._compact_value(value)
+                else:
+                    shown_value = self._truncate(value)
 
-        shown_value = value
+            body = f"{exp} = {shown_value}"
+
         if has_children:
-            if collapse_compound:
-                shown_value = self._compact_value(value)
-            else:
-                shown_value = self._truncate(value)
+            return self._plain_label(body)
 
-        return self._build_marker_label(
-            f"{exp} = {shown_value}",
-            has_children,
-            marker_active=marker_active,
-        )
+        return self._build_leaf_label(body)
 
 
     def _add_value_node(

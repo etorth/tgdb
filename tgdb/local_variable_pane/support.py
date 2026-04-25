@@ -67,12 +67,12 @@ class LocalVariablePaneSupportMixin:
         if data.get("load_more"):
             return
 
-        label = node.label
-        label_plain = label.plain if hasattr(label, "plain") else str(label)
-        body = label_plain[2:]
-        has_children = data.get("has_children", False)
         data["marker_active"] = marker_active
-        node.set_label(self._build_marker_label(body, has_children, marker_active=marker_active))
+        label = node.label
+        if hasattr(label, "copy"):
+            label = label.copy()
+
+        node.set_label(label)
 
         for child in node.children:
             self._set_node_marker_active(child, marker_active)

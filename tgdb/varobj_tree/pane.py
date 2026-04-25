@@ -6,6 +6,7 @@ import asyncio
 import re
 from typing import Callable, Coroutine, Optional
 
+from rich.text import Text
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
@@ -17,10 +18,30 @@ from .tree import VarobjTreeMixin
 
 
 class _VarobjTree(Tree):
-    """Tree widget for varobj panes with Textual's built-in toggle icons disabled."""
+    """Tree widget for varobj panes with marker color driven by node state."""
 
-    ICON_NODE = ""
-    ICON_NODE_EXPANDED = ""
+    _MARKER_ACTIVE_STYLE = "green"
+
+    def render_label(self, node, base_style, style) -> Text:
+        text = super().render_label(node, base_style, style)
+        data = node.data
+        if not isinstance(data, dict):
+            return text
+
+        if not data.get("marker_active", True):
+            return text
+
+        if node.allow_expand:
+            marker = self.ICON_NODE_EXPANDED if node.is_expanded else self.ICON_NODE
+            if marker:
+                text.stylize(self._MARKER_ACTIVE_STYLE, 0, len(marker))
+            return text
+
+        label_plain = node.label.plain if hasattr(node.label, "plain") else str(node.label)
+        if label_plain.startswith("●"):
+            text.stylize(self._MARKER_ACTIVE_STYLE, 0, 1)
+
+        return text
 
 
 class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
