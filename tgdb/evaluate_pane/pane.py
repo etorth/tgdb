@@ -10,25 +10,17 @@ through the public methods documented on the class below.
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Callable, Coroutine, Optional
 
 from textual.widgets import Tree
-from textual.widgets.tree import TreeNode
 
 from ..config import Config
 from ..highlight_groups import HighlightGroups
-from ..local_variable_pane.shared import _suppress_children
-from ..local_variable_pane.support import LocalVariablePaneSupportMixin
-from ..local_variable_pane.tree import LocalVariablePaneTreeMixin
-from ..pane_base import PaneBase
+from ..varobj_tree import VarobjTreePane
+from ..varobj_tree.shared import _suppress_children
 
 
-class EvaluatePane(
-    LocalVariablePaneTreeMixin,
-    LocalVariablePaneSupportMixin,
-    PaneBase,
-):
+class EvaluatePane(VarobjTreePane):
     """Render a watch-expression list as an expandable varobj tree.
 
     Public interface
@@ -65,18 +57,7 @@ class EvaluatePane(
         min-height: 2;
         overflow: hidden;
     }
-    EvaluatePane > Tree {
-        width: 1fr;
-        height: 1fr;
-        background: $surface;
-    }
     """
-
-    _RE_CONTAINER_LENGTH = re.compile(
-        r"(?:length|size)\s+(\d+)|with\s+(\d+)\s+elements",
-        re.IGNORECASE,
-    )
-    _SAFE_CHILD_COUNT = 1_000_000
 
     def __init__(self, hl: HighlightGroups, cfg: Optional[Config] = None, **kwargs) -> None:
         """Create an empty evaluate pane.
@@ -86,60 +67,13 @@ class EvaluatePane(
             cfg: Runtime configuration used for ``expandchildlimit``.  A
                  default ``Config()`` is used when omitted.
         """
-        super().__init__(hl, **kwargs)
-        self._cfg = cfg if cfg is not None else Config()
-
-        # Ordered list of watch expressions and their root varobj names.
+        super().__init__(hl, cfg, **kwargs)
         self._expressions: list[str] = []
         self._expr_varobjs: list[str] = []
-
-        # Shared state expected by LocalVariablePaneTreeMixin /
-        # LocalVariablePaneSupportMixin.
-        self._varobj_to_node: dict[str, TreeNode] = {}
-        self._varobj_names: list[str] = []
-        self._dynamic_varobjs: set[str] = set()
-        self._varobj_type: dict[str, str] = {}
-        self._pinned_varobjs: set[str] = set()
-        self._uninitialized_nodes: dict = {}
-        self._rebuild_gen: int = 0
-
-        # Async callbacks.
-        self._var_create: Optional[Callable[..., Coroutine]] = None
-        self._var_list_children: Optional[Callable[..., Coroutine]] = None
-        self._var_delete: Optional[Callable[..., Coroutine]] = None
-        self._var_update: Optional[Callable[..., Coroutine]] = None
-        self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
 
 
     def title(self) -> str:
         return "EVALUATIONS"
-
-
-    def compose(self):
-        yield from super().compose()
-        yield Tree("", id="eval-tree")
-
-
-    def on_mount(self) -> None:
-        tree = self.query_one(Tree)
-        tree.show_root = False
-        tree.root.expand()
-
-
-    def set_var_callbacks(
-        self,
-        var_create: Callable[..., Coroutine],
-        var_list_children: Callable[..., Coroutine],
-        var_delete: Callable[..., Coroutine],
-        var_update: Callable[..., Coroutine],
-        var_eval_expr: Callable[..., Coroutine],
-    ) -> None:
-        """Install the async debugger callbacks used by the pane."""
-        self._var_create = var_create
-        self._var_list_children = var_list_children
-        self._var_delete = var_delete
-        self._var_update = var_update
-        self._var_eval_expr = var_eval_expr
 
 
     def set_eval_fn(self, fn: Callable) -> None:
@@ -189,48 +123,6 @@ class EvaluatePane(
         self._apply_watch_changelist(changelist)
 
 
-    # ------------------------------------------------------------------
-    # Helpers required by LocalVariablePaneTreeMixin
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def _parse_container_length(cls, value_str: str) -> int | None:
-        """Return the container length from a GDB summary string, or None."""
-        if "<error reading" in value_str or "Cannot access memory" in value_str:
-            return None
-
-        match = cls._RE_CONTAINER_LENGTH.search(value_str)
-        if not match:
-            return None
-
-        if match.group(1) is not None:
-            return int(match.group(1))
-
-        return int(match.group(2))
-
-
-    def _child_fetch_limit(self, displayhint: str) -> int:
-        """Return the raw GDB child limit for the given pretty-printer hint."""
-        limit = self._cfg.expandchildlimit
-        if displayhint == "map" and limit > 0:
-            return limit * 2
-
-        return limit
-
-
-    @staticmethod
-    def _child_display_count(raw_count: int, displayhint: str) -> int:
-        """Convert a raw GDB child count to the user-visible item count."""
-        if displayhint == "map":
-            return raw_count // 2
-
-        return raw_count
-
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
     async def _create_expression_node(self, idx: int, expr: str) -> None:
         """Create a varobj for *expr* and add it as a root tree node."""
         if not self._var_create:
@@ -251,7 +143,6 @@ class EvaluatePane(
                 )
             return
 
-        # Guard: expression may have been removed while we were waiting.
         if idx >= len(self._expressions) or self._expressions[idx] != expr:
             varobj_name = info.get("name", "")
             if varobj_name and self._var_delete:
@@ -285,13 +176,6 @@ class EvaluatePane(
         )
         if varobj_name:
             self._varobj_to_node[varobj_name] = node
-
-
-    async def _delete_varobj_safe(self, varobj_name: str) -> None:
-        try:
-            await self._var_delete(varobj_name)
-        except Exception:
-            pass
 
 
     def _apply_watch_changelist(self, changelist: list[dict]) -> None:

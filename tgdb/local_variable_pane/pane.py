@@ -17,35 +17,29 @@ stops.
 from __future__ import annotations
 
 import asyncio
-import re
-from typing import Callable, Coroutine, Optional
+from typing import Optional
 
-from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
 from ..config import Config
 from ..gdb_controller import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
-from ..pane_base import PaneBase
+from ..varobj_tree import VarobjTreePane
 from .reconcile import LocalVariablePaneReconcileMixin
 from .support import LocalVariablePaneSupportMixin
-from .tree import LocalVariablePaneTreeMixin
 from .update import LocalVariablePaneUpdateMixin
 
 
 class LocalVariablePane(
     LocalVariablePaneReconcileMixin,
     LocalVariablePaneUpdateMixin,
-    LocalVariablePaneTreeMixin,
     LocalVariablePaneSupportMixin,
-    PaneBase,
+    VarobjTreePane,
 ):
     """Render the current frame's local variables as an expandable tree.
 
     Public interface
     ----------------
-    ``LocalVariablePane`` intentionally exposes a small caller-facing API:
-
     ``LocalVariablePane(hl, cfg, **kwargs)``
         Create the widget. At construction time the pane has no debugger I/O
         attached yet; it is just a UI object with empty internal state.
@@ -120,15 +114,7 @@ class LocalVariablePane(
         min-height: 2;
         overflow: hidden;
     }
-    LocalVariablePane > Tree {
-        width: 1fr;
-        height: 1fr;
-        background: $surface;
-    }
     """
-
-    _RE_CONTAINER_LENGTH = re.compile(r"(?:length|size)\s+(\d+)|with\s+(\d+)\s+elements", re.IGNORECASE)
-    _SAFE_CHILD_COUNT = 1_000_000
 
     def __init__(self, hl: HighlightGroups, cfg: Config, **kwargs) -> None:
         """Create a locals pane widget.
@@ -137,76 +123,21 @@ class LocalVariablePane(
             hl: Highlight-group palette shared by tgdb panes.
             cfg: Runtime configuration. ``LocalVariablePane`` currently uses it
                 for behaviors such as ``expandchildlimit``.
-            **kwargs: Forwarded to ``PaneBase`` / Textual widget construction.
+            **kwargs: Forwarded to ``VarobjTreePane`` / Textual widget construction.
 
         The pane is intentionally inert after construction. It becomes fully
         operational once ``set_var_callbacks`` has been called.
         """
-        super().__init__(hl, **kwargs)
-        self._cfg = cfg
+        super().__init__(hl, cfg, **kwargs)
         self._variables: list[LocalVariable] = []
-
-        self._var_create: Optional[Callable[..., Coroutine]] = None
-        self._var_list_children: Optional[Callable[..., Coroutine]] = None
-        self._var_delete: Optional[Callable[..., Coroutine]] = None
-        self._var_update: Optional[Callable[..., Coroutine]] = None
-        self._var_eval: Optional[Callable[..., Coroutine]] = None
-        self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
-
         self._tracked: dict[tuple[str, str], str] = {}
-        self._pinned_varobjs: set[str] = set()
-        self._varobj_type: dict[str, str] = {}
-        self._varobj_to_node: dict[str, TreeNode] = {}
-        self._varobj_names: list[str] = []
-        self._dynamic_varobjs: set[str] = set()
         self._uninitialized_nodes: dict[tuple[str, str], TreeNode] = {}
-
         self._frame_key: tuple | None = None
         self._saved_expansions: dict[tuple, set[tuple[tuple[str, int], ...]]] = {}
-        self._rebuild_gen = 0
 
 
     def title(self) -> str:
         return "LOCALS"
-
-
-    def compose(self):
-        yield from super().compose()
-        yield Tree("", id="var-tree")
-
-
-    def on_mount(self) -> None:
-        tree = self.query_one(Tree)
-        tree.show_root = False
-        tree.root.expand()
-
-
-    def set_var_callbacks(
-        self,
-        var_create: Callable[..., Coroutine],
-        var_list_children: Callable[..., Coroutine],
-        var_delete: Callable[..., Coroutine],
-        var_update: Callable[..., Coroutine],
-        var_eval: Callable[..., Coroutine],
-        var_eval_expr: Callable[..., Coroutine],
-    ) -> None:
-        """Install the async debugger callbacks used by the pane.
-
-        This is the only required dependency-injection step after
-        construction. Once these callbacks are installed, the pane can be used
-        as a black-box: callers only need to push fresh locals snapshots
-        through ``set_variables``.
-
-        The callbacks are expected to follow the contract documented in the
-        class docstring. In the tgdb app, they are normally wired directly to
-        ``GDBController`` / ``VarobjMixin`` methods.
-        """
-        self._var_create = var_create
-        self._var_list_children = var_list_children
-        self._var_delete = var_delete
-        self._var_update = var_update
-        self._var_eval = var_eval
-        self._var_eval_expr = var_eval_expr
 
 
     def set_variables(self, variables: list[LocalVariable], frame: Frame | None = None) -> None:
@@ -243,37 +174,3 @@ class LocalVariablePane(
             return
 
         asyncio.create_task(self._update_variables(gen, frame, self._variables))
-
-
-    @classmethod
-    def _parse_container_length(cls, value_str: str) -> int | None:
-        """Return the container length from a GDB summary string, or None."""
-        if "<error reading" in value_str or "Cannot access memory" in value_str:
-            return None
-
-        match = cls._RE_CONTAINER_LENGTH.search(value_str)
-        if not match:
-            return None
-
-        if match.group(1) is not None:
-            return int(match.group(1))
-
-        return int(match.group(2))
-
-
-    def _child_fetch_limit(self, displayhint: str) -> int:
-        """Return the raw GDB child limit for the given pretty-printer hint."""
-        limit = self._cfg.expandchildlimit
-        if displayhint == "map" and limit > 0:
-            return limit * 2
-
-        return limit
-
-
-    @staticmethod
-    def _child_display_count(raw_count: int, displayhint: str) -> int:
-        """Convert a raw GDB child count to the user-visible item count."""
-        if displayhint == "map":
-            return raw_count // 2
-
-        return raw_count

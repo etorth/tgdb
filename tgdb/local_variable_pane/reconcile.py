@@ -270,7 +270,7 @@ class LocalVariablePaneReconcileMixin:
         fallback_value = outer_var.value or "?"
         if not type_str:
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, shadowed=True, compact_value=True)
+                self._collapse_to_leaf_node(node, name, fallback_value, shadow_suffix=_SHADOW_SUFFIX, compact_value=True)
             return
 
         addr_expr = f"*({type_str}*){addr}"
@@ -278,7 +278,7 @@ class LocalVariablePaneReconcileMixin:
             info = await self._var_create(addr_expr)
         except Exception:
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, shadowed=True, compact_value=True)
+                self._collapse_to_leaf_node(node, name, fallback_value, shadow_suffix=_SHADOW_SUFFIX, compact_value=True)
             return
 
         if self._rebuild_gen != gen:
@@ -314,7 +314,7 @@ class LocalVariablePaneReconcileMixin:
                 node.add_leaf("⏳ loading...")
                 asyncio.create_task(self._load_children(node, new_varobj))
             elif not has_children:
-                self._collapse_to_leaf_node(node, exp, value, shadowed=True)
+                self._collapse_to_leaf_node(node, exp, value, shadow_suffix=_SHADOW_SUFFIX)
 
             return
 
