@@ -15,9 +15,16 @@ def _is_builtin_local_name(name):
     C++ range-for lowering creates reserved implementation names such as
     ``__for_begin``, ``__for_end``, and ``__for_range``.  Those variables are
     noise in the locals pane, so filter the whole ``__for_`` family here before
-    the payload leaves GDB.
+    the payload leaves GDB.  Also hide the standalone ``_`` scratch variable,
+    which is commonly used as an intentionally-ignored binding.
     """
-    return bool(name) and name.startswith("__for_")
+    if not name:
+        return False
+
+    if name == "_":
+        return True
+
+    return name.startswith("__for_")
 
 
 def get_locals_b64():
