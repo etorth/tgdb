@@ -13,6 +13,7 @@ import shlex
 from typing import Callable, Optional
 
 from .types import _CMD_NAME_RE, UserCommandDef
+from .execution import BUILTIN_COMMAND_NAMES
 
 
 class UserCommandMixin:
@@ -232,8 +233,29 @@ class UserCommandMixin:
 
 
     def get_completions(self, arg_lead: str, cmd_line: str, cursor_pos: int) -> list[str]:
-        """Return completion candidates for Tab completion in the status bar."""
+        """Return completion candidates for Tab completion in the status bar.
+
+        When the cursor is still inside arg[0] (no space has been typed yet),
+        complete against all known command names: built-ins, registered
+        handlers, and user-defined ``:command`` names.  When the cursor is
+        past arg[0], delegate to the user-defined command's ``-complete``
+        function (if one was registered).
+        """
         line = cmd_line.lstrip(":")
+
+        # Command-name completion: user has not typed a space yet.
+        if " " not in line:
+            prefix = line.lower()
+            candidates: set[str] = set(BUILTIN_COMMAND_NAMES)
+            for name in self._handlers:
+                if not name.startswith("_"):
+                    candidates.add(name)
+            for name in self._user_commands:
+                candidates.add(name)
+            return sorted(n for n in candidates if n.startswith(prefix))
+
+        # Argument completion: only supported for user-defined commands that
+        # declare a ``-complete`` function.
         m = re.match(r"([A-Z][A-Za-z0-9]*)", line)
         if not m:
             return []

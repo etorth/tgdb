@@ -13,6 +13,23 @@ from ..xdg_path import XDGPath
 
 _log = logging.getLogger("tgdb.config")
 
+# Built-in command names that are dispatched directly in execute_async or
+# _dispatch_builtin_command and therefore never appear in self._handlers.
+# Exposed so that get_completions can include them in command-name completion.
+BUILTIN_COMMAND_NAMES: frozenset[str] = frozenset({
+    "command",
+    "highlight", "hi",
+    "history",
+    "imap", "im",
+    "iunmap", "iu",
+    "map",
+    "py", "pyf", "pyfile", "python",
+    "save",
+    "set",
+    "so", "source",
+    "unmap", "unm",
+})
+
 
 class ConfigExecutionMixin:
     """Mixin providing file loading and command dispatch for ``ConfigParser``."""
