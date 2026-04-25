@@ -372,6 +372,11 @@ class VarobjTreeMixin:
 
 
     async def _add_map_children(self, node: TreeNode, children: list[dict]) -> None:
+        marker_active = True
+        node_data = node.data
+        if isinstance(node_data, dict):
+            marker_active = node_data.get("marker_active", True)
+
         child_index = 0
         while child_index + 1 < len(children):
             key_child = children[child_index]
@@ -392,6 +397,7 @@ class VarobjTreeMixin:
                 has_children,
                 varobj_name=value_child.get("name", ""),
                 displayhint=displayhint,
+                marker_active=marker_active,
             )
             self._remember_child_varobj(value_child, child_node)
 
@@ -416,6 +422,11 @@ class VarobjTreeMixin:
 
 
     async def _add_regular_children(self, node: TreeNode, children: list[dict], flat_limit: Optional[int]) -> None:
+        marker_active = True
+        node_data = node.data
+        if isinstance(node_data, dict):
+            marker_active = node_data.get("marker_active", True)
+
         for child in children:
             exp = child.get("exp", "")
             numchild = self._safe_int(child.get("numchild", "0"))
@@ -433,5 +444,6 @@ class VarobjTreeMixin:
                 has_children,
                 varobj_name=child.get("name", ""),
                 displayhint=child.get("displayhint", ""),
+                marker_active=marker_active,
             )
             self._remember_child_varobj(child, child_node)

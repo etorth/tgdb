@@ -17,10 +17,6 @@ from ..varobj_tree.shared import (
 
 _log = logging.getLogger("tgdb.locals")
 
-_TAG_ARG = "\U0001F170\uFE0F "
-_TAG_LOCAL = "\U0001F17B\uFE0F "
-_TAG_SHADOW = "\U0001F182\uFE0F "
-
 BindingKey: TypeAlias = tuple[str, str]
 BindingEntry: TypeAlias = tuple[str, str, LocalVariable]
 ExpansionSegment: TypeAlias = tuple[str, int]

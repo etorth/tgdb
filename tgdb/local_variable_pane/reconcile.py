@@ -9,7 +9,7 @@ import asyncio
 from textual.widgets import Tree
 
 from ..gdb_controller import Frame, LocalVariable
-from .shared import BindingEntry, BindingKey, ExpansionPath, _TAG_SHADOW, _log, _suppress_children
+from .shared import BindingEntry, BindingKey, ExpansionPath, _log, _suppress_children
 
 
 class LocalVariablePaneReconcileMixin:
@@ -69,13 +69,12 @@ class LocalVariablePaneReconcileMixin:
         key = (binding_name, binding_addr)
         self._remove_placeholder_node(key)
 
-        kind = self._kind_tag(variable.is_arg)
-        prefix = self._binding_prefix(key, variable.is_arg, shadowed_keys)
+        marker_active = self._binding_marker_active(key, shadowed_keys)
         stack_value = variable.value or ""
 
         if "<error reading variable:" in stack_value:
-            label = f"{prefix}{variable.name} = <not yet initialized>"
-            self._add_placeholder_node(tree, key, variable.name, label, kind=kind, prefix=prefix)
+            label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
+            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
             _log.debug(f"Skipping var_create for {variable.name}: uninitialized memory in bvar.value ({stack_value[:80]!r})")
             return True
 
@@ -100,8 +99,8 @@ class LocalVariablePaneReconcileMixin:
             if not value:
                 value = "<complex>"
 
-            label = f"{prefix}{variable.name} = {value}"
-            self._add_placeholder_node(tree, key, variable.name, label, kind=kind, prefix=prefix)
+            label = self._build_value_label(variable.name, value, False, marker_active=marker_active)
+            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
             return True
 
         if self._rebuild_gen != gen:
@@ -116,8 +115,8 @@ class LocalVariablePaneReconcileMixin:
                 except Exception:
                     pass
 
-            label = f"{prefix}{variable.name} = <not yet initialized>"
-            self._add_placeholder_node(tree, key, variable.name, label, kind=kind, prefix=prefix)
+            label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
+            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
             _log.debug(f"var_create {variable.name}: uninitialized memory in response ({value[:80]!r}), placeholder added")
             return True
 
@@ -133,10 +132,8 @@ class LocalVariablePaneReconcileMixin:
             has_children,
             varobj_name=varobj_name,
             displayhint=displayhint,
-            prefix=prefix,
+            marker_active=marker_active,
         )
-        if isinstance(node.data, dict):
-            node.data["kind"] = kind
         if varobj_name:
             self._varobj_to_node[varobj_name] = node
 
@@ -273,7 +270,7 @@ class LocalVariablePaneReconcileMixin:
         fallback_value = outer_var.value or "?"
         if not type_str:
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, prefix=_TAG_SHADOW, compact_value=True)
+                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True, marker_active=False)
             return
 
         addr_expr = f"*({type_str}*){addr}"
@@ -281,7 +278,7 @@ class LocalVariablePaneReconcileMixin:
             info = await self._var_create(addr_expr)
         except Exception:
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, prefix=_TAG_SHADOW, compact_value=True)
+                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True, marker_active=False)
             return
 
         if self._rebuild_gen != gen:
@@ -299,7 +296,7 @@ class LocalVariablePaneReconcileMixin:
                 node_data["varobj"] = new_varobj
                 node_data["has_children"] = has_children
                 node_data["displayhint"] = displayhint
-                node_data["prefix"] = _TAG_SHADOW
+                node_data["marker_active"] = False
 
             node.allow_expand = has_children
             if new_varobj:
@@ -309,8 +306,8 @@ class LocalVariablePaneReconcileMixin:
             if isinstance(node_data, dict):
                 exp = node_data.get("exp", name)
 
-            label = self._build_value_label(exp, value, has_children, collapse_compound=True)
-            node.set_label(f"{_TAG_SHADOW}{label}")
+            label = self._build_value_label(exp, value, has_children, collapse_compound=True, marker_active=False)
+            node.set_label(label)
 
             if isinstance(node_data, dict) and node_data.get("loaded") and has_children and new_varobj:
                 node_data["loaded"] = False
@@ -318,7 +315,7 @@ class LocalVariablePaneReconcileMixin:
                 node.add_leaf("⏳ loading...")
                 asyncio.create_task(self._load_children(node, new_varobj))
             elif not has_children:
-                self._collapse_to_leaf_node(node, exp, value, prefix=_TAG_SHADOW)
+                self._collapse_to_leaf_node(node, exp, value, marker_active=False)
 
             return
 
@@ -329,11 +326,9 @@ class LocalVariablePaneReconcileMixin:
             has_children,
             varobj_name=new_varobj,
             displayhint=displayhint,
-            prefix=_TAG_SHADOW,
             collapse_compound=True,
+            marker_active=False,
         )
-        if isinstance(node.data, dict):
-            node.data.setdefault("kind", "L")
         if new_varobj:
             self._varobj_to_node[new_varobj] = node
 
@@ -351,25 +346,12 @@ class LocalVariablePaneReconcileMixin:
             if not isinstance(data, dict):
                 continue
 
-            kind = data.get("kind", "L")
-            current_prefix = data.get("prefix", "")
-            should_be_shadowed = name_addr in shadowed_keys
-            new_prefix = self._prefix_from_kind(kind, should_be_shadowed)
-            if new_prefix == current_prefix:
+            current_marker_active = data.get("marker_active", True)
+            new_marker_active = name_addr not in shadowed_keys
+            if new_marker_active == current_marker_active:
                 continue
 
-            if hasattr(node.label, "plain"):
-                label_plain = node.label.plain
-            else:
-                label_plain = str(node.label)
-
-            if current_prefix and label_plain.startswith(current_prefix):
-                body = label_plain[len(current_prefix):]
-            else:
-                body = label_plain
-
-            data["prefix"] = new_prefix
-            node.set_label(f"{new_prefix}{body}")
+            self._set_node_marker_active(node, new_marker_active)
 
 
     def _apply_changelist(self, changelist: list[dict], skip_varobjs: frozenset[str] = frozenset()) -> None:
@@ -402,11 +384,15 @@ class LocalVariablePaneReconcileMixin:
             has_children = data.get("has_children", False)
             new_value = change.get("value", "")
             is_pinned = varobj_name in self._pinned_varobjs
-            prefix = data.get("prefix", "")
+            marker_active = data.get("marker_active", True)
 
-            label = self._build_value_label(exp, new_value, has_children, collapse_compound=is_pinned)
-            if prefix:
-                label = f"{prefix}{label}"
+            label = self._build_value_label(
+                exp,
+                new_value,
+                has_children,
+                collapse_compound=is_pinned,
+                marker_active=marker_active,
+            )
 
             node.set_label(label)
 

@@ -7,36 +7,15 @@ from __future__ import annotations
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from .shared import BindingKey, ExpansionPath, _TAG_ARG, _TAG_LOCAL, _TAG_SHADOW
+from .shared import BindingKey, ExpansionPath
 
 
 class LocalVariablePaneSupportMixin:
     """Locals-specific helpers: shadowing, placeholder nodes, varobj registration."""
 
-    def _binding_prefix(self, key: BindingKey, is_arg: bool, shadowed_keys: set[BindingKey]) -> str:
-        """Return the leading tag for a top-level binding label.
-
-        Shadowed bindings get ``[S]`` (takes priority over kind). Otherwise
-        arguments get ``[A]`` and locals get ``[L]``. Includes a trailing
-        space so callers can prepend without extra formatting.
-        """
-        return self._prefix_from_kind(self._kind_tag(is_arg), key in shadowed_keys)
-
-
     @staticmethod
-    def _kind_tag(is_arg: bool) -> str:
-        return "A" if is_arg else "L"
-
-
-    @staticmethod
-    def _prefix_from_kind(kind: str, shadowed: bool) -> str:
-        if shadowed:
-            return _TAG_SHADOW
-
-        if kind == "A":
-            return _TAG_ARG
-
-        return _TAG_LOCAL
+    def _binding_marker_active(key: BindingKey, shadowed_keys: set[BindingKey]) -> bool:
+        return key not in shadowed_keys
 
 
     def _remove_placeholder_node(self, key: BindingKey) -> None:
@@ -63,8 +42,7 @@ class LocalVariablePaneSupportMixin:
         exp: str,
         label: str,
         *,
-        kind: str = "L",
-        prefix: str = "",
+        marker_active: bool = True,
     ) -> TreeNode:
         self._remove_placeholder_node(key)
         node = tree.root.add_leaf(
@@ -74,12 +52,30 @@ class LocalVariablePaneSupportMixin:
                 "exp": exp,
                 "has_children": False,
                 "displayhint": "",
-                "prefix": prefix,
-                "kind": kind,
+                "marker_active": marker_active,
             },
         )
         self._uninitialized_nodes[key] = node
         return node
+
+
+    def _set_node_marker_active(self, node: TreeNode, marker_active: bool) -> None:
+        data = node.data
+        if not isinstance(data, dict):
+            return
+
+        if data.get("load_more"):
+            return
+
+        label = node.label
+        label_plain = label.plain if hasattr(label, "plain") else str(label)
+        body = label_plain[2:]
+        has_children = data.get("has_children", False)
+        data["marker_active"] = marker_active
+        node.set_label(self._build_marker_label(body, has_children, marker_active=marker_active))
+
+        for child in node.children:
+            self._set_node_marker_active(child, marker_active)
 
 
     def _restore_paths_for_name(self, restore: set[ExpansionPath], name: str) -> list[ExpansionPath]:

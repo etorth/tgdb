@@ -4,11 +4,14 @@ General-purpose varobj-tree support helpers.
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual.widgets.tree import TreeNode
 
 
 class VarobjTreeSupportMixin:
     """General node/varobj tracking helpers shared by all varobj-tree panes."""
+
+    _MARKER_ACTIVE_STYLE = "green"
 
     def _remember_child_varobj(self, child_info: dict, node: TreeNode) -> None:
         varobj_name = child_info.get("name", "")
@@ -21,9 +24,39 @@ class VarobjTreeSupportMixin:
             self._dynamic_varobjs.add(varobj_name)
 
 
-    def _build_value_label(self, exp: str, value: str, has_children: bool, collapse_compound: bool = False) -> str:
+    _MARKER_EXPANDABLE = "▶"
+    _MARKER_LEAF = "⬤"
+
+    def _expand_marker(self, has_children: bool) -> str:
+        return self._MARKER_EXPANDABLE if has_children else self._MARKER_LEAF
+
+
+    def _build_marker_label(
+        self,
+        body: str,
+        has_children: bool,
+        *,
+        marker_active: bool = True,
+    ) -> Text:
+        label = Text(no_wrap=True, overflow="crop")
+        marker_style = self._MARKER_ACTIVE_STYLE if marker_active else ""
+        label.append(self._expand_marker(has_children), style=marker_style)
+        label.append(" ")
+        label.append(body)
+        return label
+
+
+    def _build_value_label(
+        self,
+        exp: str,
+        value: str,
+        has_children: bool,
+        collapse_compound: bool = False,
+        *,
+        marker_active: bool = True,
+    ) -> Text:
         if not value:
-            return exp
+            return self._build_marker_label(exp, has_children, marker_active=marker_active)
 
         shown_value = value
         if has_children:
@@ -32,7 +65,11 @@ class VarobjTreeSupportMixin:
             else:
                 shown_value = self._truncate(value)
 
-        return f"{exp} = {shown_value}"
+        return self._build_marker_label(
+            f"{exp} = {shown_value}",
+            has_children,
+            marker_active=marker_active,
+        )
 
 
     def _add_value_node(
@@ -44,19 +81,23 @@ class VarobjTreeSupportMixin:
         *,
         varobj_name: str = "",
         displayhint: str = "",
-        prefix: str = "",
         collapse_compound: bool = False,
+        marker_active: bool = True,
     ) -> TreeNode:
-        label = self._build_value_label(exp, value, has_children, collapse_compound)
-        if prefix:
-            label = f"{prefix}{label}"
+        label = self._build_value_label(
+            exp,
+            value,
+            has_children,
+            collapse_compound,
+            marker_active=marker_active,
+        )
 
         data = {
             "varobj": varobj_name,
             "exp": exp,
             "has_children": has_children,
             "displayhint": displayhint,
-            "prefix": prefix,
+            "marker_active": marker_active,
         }
 
         if has_children:
@@ -74,15 +115,13 @@ class VarobjTreeSupportMixin:
         exp: str,
         value: str,
         *,
-        prefix: str = "",
         compact_value: bool = False,
+        marker_active: bool = True,
     ) -> None:
         if compact_value:
             value = self._compact_value(value)
 
-        label = self._build_value_label(exp, value, False)
-        if prefix:
-            label = f"{prefix}{label}"
+        label = self._build_value_label(exp, value, False, marker_active=marker_active)
 
         node.collapse()
         node.remove_children()
@@ -97,7 +136,7 @@ class VarobjTreeSupportMixin:
         data["has_children"] = False
         data["loaded"] = False
         data["displayhint"] = ""
-        data["prefix"] = prefix
+        data["marker_active"] = marker_active
 
 
     def _remove_varobj_names(self, varobj_name: str, include_root: bool) -> None:
