@@ -9,6 +9,17 @@ except gdb.error:
     pass
 
 
+def _is_builtin_local_name(name):
+    """Return True for compiler-generated locals we should hide.
+
+    C++ range-for lowering creates reserved implementation names such as
+    ``__for_begin``, ``__for_end``, and ``__for_range``.  Those variables are
+    noise in the locals pane, so filter the whole ``__for_`` family here before
+    the payload leaves GDB.
+    """
+    return bool(name) and name.startswith("__for_")
+
+
 def get_locals_b64():
     try:
         frame = gdb.selected_frame()
@@ -30,6 +41,10 @@ def get_locals_b64():
             if not (symbol.is_variable or symbol.is_argument):
                 continue
 
+            name = symbol.name
+            if _is_builtin_local_name(name):
+                continue
+
             # Skip variables whose declaration comes at or after the current line.
             # Arguments always pass (their "line" is the function signature
             # line, which may equal current_line on entry — always show them).
@@ -37,8 +52,6 @@ def get_locals_b64():
             if current_line > 0 and not symbol.is_argument:
                 if decl_line > 0 and decl_line >= current_line:
                     continue
-
-            name = symbol.name
 
             # Get the underlying type code to detect references.
             # strip_typedefs() handles 'typedef int& my_ref_type;' etc.
