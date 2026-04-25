@@ -25,7 +25,7 @@ class VarobjTreeSupportMixin:
 
 
     _MARKER_EXPANDABLE = "▶"
-    _MARKER_LEAF = "⬤"
+    _MARKER_LEAF = "●"
 
     def _expand_marker(self, has_children: bool) -> str:
         return self._MARKER_EXPANDABLE if has_children else self._MARKER_LEAF
