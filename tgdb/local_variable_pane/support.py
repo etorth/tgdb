@@ -7,17 +7,36 @@ from __future__ import annotations
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from .shared import BindingKey, ExpansionPath, _SHADOW_SUFFIX
+from .shared import BindingKey, ExpansionPath, _TAG_ARG, _TAG_LOCAL, _TAG_SHADOW
 
 
 class LocalVariablePaneSupportMixin:
     """Locals-specific helpers: shadowing, placeholder nodes, varobj registration."""
 
-    def _shadow_suffix(self, key: BindingKey, shadowed_keys: set[BindingKey]) -> str:
-        if key in shadowed_keys:
-            return _SHADOW_SUFFIX
+    def _binding_prefix(self, key: BindingKey, is_arg: bool, shadowed_keys: set[BindingKey]) -> str:
+        """Return the leading tag for a top-level binding label.
 
-        return ""
+        Shadowed bindings get ``[S]`` (takes priority over kind). Otherwise
+        arguments get ``[A]`` and locals get ``[L]``. Includes a trailing
+        space so callers can prepend without extra formatting.
+        """
+        return self._prefix_from_kind(self._kind_tag(is_arg), key in shadowed_keys)
+
+
+    @staticmethod
+    def _kind_tag(is_arg: bool) -> str:
+        return "A" if is_arg else "L"
+
+
+    @staticmethod
+    def _prefix_from_kind(kind: str, shadowed: bool) -> str:
+        if shadowed:
+            return _TAG_SHADOW
+
+        if kind == "A":
+            return _TAG_ARG
+
+        return _TAG_LOCAL
 
 
     def _remove_placeholder_node(self, key: BindingKey) -> None:
@@ -37,11 +56,27 @@ class LocalVariablePaneSupportMixin:
             self._remove_placeholder_node(key)
 
 
-    def _add_placeholder_node(self, tree: Tree, key: BindingKey, exp: str, label: str) -> TreeNode:
+    def _add_placeholder_node(
+        self,
+        tree: Tree,
+        key: BindingKey,
+        exp: str,
+        label: str,
+        *,
+        kind: str = "L",
+        prefix: str = "",
+    ) -> TreeNode:
         self._remove_placeholder_node(key)
         node = tree.root.add_leaf(
             label,
-            data={"varobj": "", "exp": exp, "has_children": False, "displayhint": ""},
+            data={
+                "varobj": "",
+                "exp": exp,
+                "has_children": False,
+                "displayhint": "",
+                "prefix": prefix,
+                "kind": kind,
+            },
         )
         self._uninitialized_nodes[key] = node
         return node

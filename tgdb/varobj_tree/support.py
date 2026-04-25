@@ -44,18 +44,19 @@ class VarobjTreeSupportMixin:
         *,
         varobj_name: str = "",
         displayhint: str = "",
-        shadow_suffix: str = "",
+        prefix: str = "",
         collapse_compound: bool = False,
     ) -> TreeNode:
         label = self._build_value_label(exp, value, has_children, collapse_compound)
-        if shadow_suffix:
-            label = f"{label}{shadow_suffix}"
+        if prefix:
+            label = f"{prefix}{label}"
 
         data = {
             "varobj": varobj_name,
             "exp": exp,
             "has_children": has_children,
             "displayhint": displayhint,
+            "prefix": prefix,
         }
 
         if has_children:
@@ -73,15 +74,15 @@ class VarobjTreeSupportMixin:
         exp: str,
         value: str,
         *,
-        shadow_suffix: str = "",
+        prefix: str = "",
         compact_value: bool = False,
     ) -> None:
         if compact_value:
             value = self._compact_value(value)
 
         label = self._build_value_label(exp, value, False)
-        if shadow_suffix:
-            label = f"{label}{shadow_suffix}"
+        if prefix:
+            label = f"{prefix}{label}"
 
         node.collapse()
         node.remove_children()
@@ -96,6 +97,7 @@ class VarobjTreeSupportMixin:
         data["has_children"] = False
         data["loaded"] = False
         data["displayhint"] = ""
+        data["prefix"] = prefix
 
 
     def _remove_varobj_names(self, varobj_name: str, include_root: bool) -> None:

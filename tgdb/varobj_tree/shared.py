@@ -8,7 +8,6 @@ import logging
 
 _log = logging.getLogger("tgdb.varobj_tree")
 
-_SHADOW_SUFFIX = "  ← shadowed"
 _ACCESS_SPECIFIERS = {"public", "private", "protected"}
 
 
