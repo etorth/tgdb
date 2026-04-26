@@ -5,8 +5,6 @@ This module defines the public ``Config`` state object, ``UserCommandDef``, and
 the option/alias constants used internally by the configuration package.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 

@@ -1,7 +1,5 @@
 """Message types emitted by ``CommandLineBar``."""
 
-from __future__ import annotations
-
 from textual.message import Message
 
 

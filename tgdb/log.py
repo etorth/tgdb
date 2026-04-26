@@ -27,8 +27,6 @@ ERROR   — failures that degrade functionality (MI channel closed
           unexpectedly, PTY spawn failure, file not found)
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import platform

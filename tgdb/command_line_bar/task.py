@@ -1,7 +1,5 @@
 """Async task helpers for ``CommandLineBar``."""
 
-from __future__ import annotations
-
 from typing import Callable
 
 

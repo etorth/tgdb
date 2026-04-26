@@ -1,11 +1,8 @@
 """Message handlers and GDB UI callbacks for the application package."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os
-from typing import Optional
 
 from textual.css.query import NoMatches
 
@@ -230,7 +227,7 @@ class CallbacksMixin:
             cmdline._add_to_history(hist, max_size=self.cfg.historysize)
 
         task_lock_gen = cmdline.lock_for_task()
-        error_output: Optional[str] = None
+        error_output: str | None = None
         cancelled = False
 
         def _print_fn(chunk: str) -> None:
@@ -327,14 +324,14 @@ class CallbacksMixin:
         self._close_completion_popup()
 
 
-    def _get_cmdline(self) -> Optional[CommandLineBar]:
+    def _get_cmdline(self) -> CommandLineBar | None:
         try:
             return self.query_one("#cmdline", CommandLineBar)
         except NoMatches:
             return None
 
 
-    def _get_completion_popup(self) -> Optional[CompletionPopup]:
+    def _get_completion_popup(self) -> CompletionPopup | None:
         try:
             return self.query_one("#completion-popup", CompletionPopup)
         except NoMatches:

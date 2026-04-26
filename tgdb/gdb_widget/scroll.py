@@ -6,8 +6,6 @@ into a mixin class so the GDB-widget package can keep its pane implementation
 focused on core terminal emulation and live rendering.
 """
 
-from __future__ import annotations
-
 import re
 
 from textual.message import Message

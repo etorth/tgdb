@@ -6,16 +6,13 @@ own token (``"s"``, ``":"``, ``"("``).  This makes the trie compatible with
 the key names Textual delivers via ``event.key``.
 """
 
-from __future__ import annotations
-
 import time
-from typing import Optional
 
 
 class TrieNode:
     def __init__(self) -> None:
         self.children: dict[str, "TrieNode"] = {}
-        self.value: Optional[list[str]] = None  # Leaf: RHS token list
+        self.value: list[str] | None = None  # Leaf: RHS token list
 
 
 class KeyMapper:

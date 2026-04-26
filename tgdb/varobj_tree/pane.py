@@ -1,10 +1,8 @@
 """Base class for varobj-tree panes (LocalVariablePane, EvaluatePane)."""
 
-from __future__ import annotations
-
 import asyncio
 import re
-from typing import Callable, Coroutine, Optional
+from typing import Callable, Coroutine
 
 from rich.text import Text
 from textual.widgets import Tree
@@ -67,7 +65,7 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
     _RE_CONTAINER_LENGTH = re.compile(r"(?:length|size)\s+(\d+)|with\s+(\d+)\s+elements", re.IGNORECASE)
     _SAFE_CHILD_COUNT = 1_000_000
 
-    def __init__(self, hl: HighlightGroups, cfg: Optional[Config] = None, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, cfg: Config | None = None, **kwargs) -> None:
         super().__init__(hl, **kwargs)
         self._cfg = cfg if cfg is not None else Config()
         self._varobj_to_node: dict[str, TreeNode] = {}
@@ -76,12 +74,12 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
         self._varobj_type: dict[str, str] = {}
         self._pinned_varobjs: set[str] = set()
         self._rebuild_gen: int = 0
-        self._var_create: Optional[Callable[..., Coroutine]] = None
-        self._var_list_children: Optional[Callable[..., Coroutine]] = None
-        self._var_delete: Optional[Callable[..., Coroutine]] = None
-        self._var_update: Optional[Callable[..., Coroutine]] = None
-        self._var_eval: Optional[Callable[..., Coroutine]] = None
-        self._var_eval_expr: Optional[Callable[..., Coroutine]] = None
+        self._var_create: Callable[..., Coroutine] | None = None
+        self._var_list_children: Callable[..., Coroutine] | None = None
+        self._var_delete: Callable[..., Coroutine] | None = None
+        self._var_update: Callable[..., Coroutine] | None = None
+        self._var_eval: Callable[..., Coroutine] | None = None
+        self._var_eval_expr: Callable[..., Coroutine] | None = None
 
 
     def set_var_callbacks(
@@ -92,7 +90,7 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
         var_update: Callable[..., Coroutine],
         var_eval_expr: Callable[..., Coroutine],
         *,
-        var_eval: Optional[Callable[..., Coroutine]] = None,
+        var_eval: Callable[..., Coroutine] | None = None,
     ) -> None:
         """Install the async debugger callbacks."""
         self._var_create = var_create

@@ -1,9 +1,7 @@
 """Workspace and pane-management helpers for the application package."""
 
-from __future__ import annotations
-
 from dataclasses import replace
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from textual.widget import Widget
 from textual.css.query import NoMatches
@@ -38,13 +36,13 @@ class WorkspaceMixin:
     # Pane factories
     # ------------------------------------------------------------------
 
-    def _make_source_pane(self: TGDBApp) -> SourceView:
+    def _make_source_pane(self: "TGDBApp") -> SourceView:
         if self._source_view is None:
             self._source_view = SourceView(self.hl, id="src-pane")
         return self._source_view
 
 
-    def _make_gdb_pane(self: TGDBApp) -> GDBWidget:
+    def _make_gdb_pane(self: "TGDBApp") -> GDBWidget:
         if self._gdb_widget is None:
             self._gdb_widget = GDBWidget(
                 self.hl,
@@ -54,7 +52,7 @@ class WorkspaceMixin:
         return self._gdb_widget
 
 
-    def _make_local_variable_pane(self: TGDBApp) -> LocalVariablePane:
+    def _make_local_variable_pane(self: "TGDBApp") -> LocalVariablePane:
         if self._locals_pane is None:
             self._locals_pane = LocalVariablePane(self.hl, self.cfg)
             self._locals_pane.set_var_callbacks(
@@ -69,14 +67,14 @@ class WorkspaceMixin:
         return self._locals_pane
 
 
-    def _make_register_pane(self: TGDBApp) -> RegisterPane:
+    def _make_register_pane(self: "TGDBApp") -> RegisterPane:
         if self._register_pane is None:
             self._register_pane = RegisterPane(self.hl)
         self._register_pane.set_registers(self._current_registers)
         return self._register_pane
 
 
-    def _make_stack_pane(self: TGDBApp) -> StackPane:
+    def _make_stack_pane(self: "TGDBApp") -> StackPane:
         if self.gdb.current_frame:
             current_level = self.gdb.current_frame.level
         else:
@@ -87,14 +85,14 @@ class WorkspaceMixin:
         return self._stack_pane
 
 
-    def _make_thread_pane(self: TGDBApp) -> ThreadPane:
+    def _make_thread_pane(self: "TGDBApp") -> ThreadPane:
         if self._thread_pane is None:
             self._thread_pane = ThreadPane(self.hl)
         self._thread_pane.set_threads(self._current_threads)
         return self._thread_pane
 
 
-    def _make_evaluate_pane(self: TGDBApp) -> EvaluatePane:
+    def _make_evaluate_pane(self: "TGDBApp") -> EvaluatePane:
         if self._evaluate_pane is None:
             self._evaluate_pane = EvaluatePane(self.hl, self.cfg)
             self._evaluate_pane.set_var_callbacks(
@@ -107,14 +105,14 @@ class WorkspaceMixin:
         return self._evaluate_pane
 
 
-    def _make_memory_pane(self: TGDBApp) -> MemoryPane:
+    def _make_memory_pane(self: "TGDBApp") -> MemoryPane:
         if self._memory_pane is None:
             self._memory_pane = MemoryPane(self.hl)
             self._memory_pane.set_read_fn(self.gdb.read_memory_bytes_async)
         return self._memory_pane
 
 
-    def _make_disasm_pane(self: TGDBApp) -> DisasmPane:
+    def _make_disasm_pane(self: "TGDBApp") -> DisasmPane:
         if self._disasm_pane is None:
             self._disasm_pane = DisasmPane(self.hl)
             self._disasm_pane.set_disasm_fn(self.gdb.request_disassembly_async)
@@ -124,32 +122,32 @@ class WorkspaceMixin:
     # Pane queries
     # ------------------------------------------------------------------
 
-    def _pane_widget(self: TGDBApp, pane_kind: str) -> Optional[Widget]:
+    def _pane_widget(self: "TGDBApp", pane_kind: str) -> Widget | None:
         descriptor = self._pane_descriptors.get(pane_kind)
         if descriptor is None:
             return None
         return descriptor.current()
 
 
-    def _pane_label(self: TGDBApp, pane_kind: str) -> str:
+    def _pane_label(self: "TGDBApp", pane_kind: str) -> str:
         descriptor = self._pane_descriptors.get(pane_kind)
         if descriptor is not None:
             return descriptor.label
         return pane_kind
 
 
-    def _pane_is_attached(self: TGDBApp, pane_kind: str) -> bool:
+    def _pane_is_attached(self: "TGDBApp", pane_kind: str) -> bool:
         return self._widget_attached(self._pane_widget(pane_kind))
 
 
-    def _pane_kind_for_widget(self: TGDBApp, widget: Widget) -> Optional[str]:
+    def _pane_kind_for_widget(self: "TGDBApp", widget: Widget) -> str | None:
         for pane_kind, descriptor in self._pane_descriptors.items():
             if widget is descriptor.current():
                 return pane_kind
         return None
 
 
-    def _create_pane(self: TGDBApp, pane_kind: str) -> Optional[Widget]:
+    def _create_pane(self: "TGDBApp", pane_kind: str) -> Widget | None:
         descriptor = self._pane_descriptors.get(pane_kind)
         if descriptor is None:
             return None
@@ -159,21 +157,21 @@ class WorkspaceMixin:
     # Context menu helpers
     # ------------------------------------------------------------------
 
-    def _get_context_menu(self: TGDBApp) -> Optional[ContextMenu]:
+    def _get_context_menu(self: "TGDBApp") -> ContextMenu | None:
         try:
             return self.query_one("#context-menu", ContextMenu)
         except NoMatches:
             return None
 
 
-    def _context_menu_contains(self: TGDBApp, screen_x: int, screen_y: int) -> bool:
+    def _context_menu_contains(self: "TGDBApp", screen_x: int, screen_y: int) -> bool:
         menu = self._get_context_menu()
         if not menu or not menu.is_open:
             return False
         return menu.contains_point(screen_x, screen_y)
 
 
-    def _build_context_menu_items(self: TGDBApp) -> list[ContextMenuItem]:
+    def _build_context_menu_items(self: "TGDBApp") -> list[ContextMenuItem]:
         add_children = []
         for pane_kind in self._add_menu_order:
             if not self._pane_is_attached(pane_kind):
@@ -222,7 +220,7 @@ class WorkspaceMixin:
         return pane_items
 
 
-    def _open_context_menu(self: TGDBApp, screen_x: int, screen_y: int) -> None:
+    def _open_context_menu(self: "TGDBApp", screen_x: int, screen_y: int) -> None:
         menu = self._get_context_menu()
         if not menu:
             return
@@ -230,7 +228,7 @@ class WorkspaceMixin:
         menu.open_at(screen_x, screen_y)
 
 
-    def _restore_focus_after_context_menu(self: TGDBApp) -> None:
+    def _restore_focus_after_context_menu(self: "TGDBApp") -> None:
         if self._mode == "FILEDLG":
             try:
                 self.query_one("#file-dlg", FileDialog).focus()
@@ -251,7 +249,7 @@ class WorkspaceMixin:
         self._focus_widget(self._first_workspace_leaf())
 
 
-    def _close_context_menu(self: TGDBApp, *, restore_focus: bool = True) -> None:
+    def _close_context_menu(self: "TGDBApp", *, restore_focus: bool = True) -> None:
         menu = self._get_context_menu()
         if not menu or not menu.is_open:
             return
@@ -265,8 +263,8 @@ class WorkspaceMixin:
     # ------------------------------------------------------------------
 
     def _find_workspace_item(
-        self: TGDBApp, widget: Optional[Widget]
-    ) -> Optional[Widget]:
+        self: "TGDBApp", widget: Widget | None
+    ) -> Widget | None:
         current = widget
         while isinstance(current, Widget):
             if isinstance(current, Splitter):
@@ -281,7 +279,7 @@ class WorkspaceMixin:
         return None
 
 
-    async def _ensure_dynamic_workspace(self: TGDBApp) -> Optional[PaneContainer]:
+    async def _ensure_dynamic_workspace(self: "TGDBApp") -> PaneContainer | None:
         """Return the root PaneContainer (always present since the layout is unified)."""
         try:
             return self.query_one("#split-container", PaneContainer)
@@ -289,7 +287,7 @@ class WorkspaceMixin:
             return None
 
 
-    async def _replace_workspace_item(self: TGDBApp, target: Widget, new_item: Widget) -> bool:
+    async def _replace_workspace_item(self: "TGDBApp", target: Widget, new_item: Widget) -> bool:
         if isinstance(target.parent, PaneContainer):
             parent = target.parent
         else:
@@ -301,8 +299,8 @@ class WorkspaceMixin:
 
 
     async def _normalize_container_after_delete(
-        self: TGDBApp, container: PaneContainer
-    ) -> Optional[Widget]:
+        self: "TGDBApp", container: PaneContainer
+    ) -> Widget | None:
         current = container
         while True:
             if isinstance(current.parent, PaneContainer):
@@ -326,7 +324,7 @@ class WorkspaceMixin:
             current = parent
 
 
-    async def _add_pane_to_workspace(self: TGDBApp, target: Widget, pane_kind: str) -> Optional[Widget]:
+    async def _add_pane_to_workspace(self: "TGDBApp", target: Widget, pane_kind: str) -> Widget | None:
         pane = self._create_pane(pane_kind)
         if pane is None:
             return None
@@ -349,7 +347,7 @@ class WorkspaceMixin:
         return pane
 
 
-    async def _hide_workspace_item(self: TGDBApp, target: Widget) -> Optional[Widget]:
+    async def _hide_workspace_item(self: "TGDBApp", target: Widget) -> Widget | None:
         if isinstance(target, EmptyPane):
             return target
         replacement = EmptyPane(self.hl)
@@ -358,7 +356,7 @@ class WorkspaceMixin:
         return None
 
 
-    async def _delete_workspace_item(self: TGDBApp, target: Widget) -> Optional[Widget]:
+    async def _delete_workspace_item(self: "TGDBApp", target: Widget) -> Widget | None:
         if isinstance(target.parent, PaneContainer):
             parent = target.parent
         else:
@@ -369,7 +367,7 @@ class WorkspaceMixin:
         return await self._normalize_container_after_delete(parent)
 
 
-    async def _apply_context_menu_action(self: TGDBApp, target: Widget, direction: str) -> bool:
+    async def _apply_context_menu_action(self: "TGDBApp", target: Widget, direction: str) -> bool:
         if direction in ("left", "right"):
             axis = "horizontal"
         else:
@@ -402,14 +400,14 @@ class WorkspaceMixin:
     # ------------------------------------------------------------------
 
     def _get_parent_container(
-        self: TGDBApp, widget: Widget
-    ) -> Optional[PaneContainer]:
+        self: "TGDBApp", widget: Widget
+    ) -> PaneContainer | None:
         """Return *widget*'s parent if it is a PaneContainer, else None."""
         parent = widget.parent
         return parent if isinstance(parent, PaneContainer) else None
 
 
-    async def _handle_locals_context_action(self: TGDBApp, target: Widget, sub: str) -> None:
+    async def _handle_locals_context_action(self: "TGDBApp", target: Widget, sub: str) -> None:
         """Dispatch a 'locals:*' context-menu action on an expandable tree node."""
         node = getattr(self, "_locals_context_node", None)
         self._locals_context_node = None
@@ -422,7 +420,7 @@ class WorkspaceMixin:
                 target.do_fold(node)
 
 
-    async def _handle_add_context_action(self: TGDBApp, target: Widget, pane_kind: str) -> None:
+    async def _handle_add_context_action(self: "TGDBApp", target: Widget, pane_kind: str) -> None:
         """Add a pane of *pane_kind* next to *target*."""
         if self._pane_is_attached(pane_kind):
             self._show_status(f"{self._pane_label(pane_kind)} is already shown")
@@ -433,7 +431,7 @@ class WorkspaceMixin:
         self._show_status(f"Added {self._pane_label(pane_kind)}")
 
 
-    async def _handle_hide_context_action(self: TGDBApp, target: Widget) -> None:
+    async def _handle_hide_context_action(self: "TGDBApp", target: Widget) -> None:
         """Replace *target* with an EmptyPane."""
         if isinstance(target, EmptyPane):
             self._show_status("Cell is already empty")
@@ -446,7 +444,7 @@ class WorkspaceMixin:
         self._show_status(f"Hid {label}")
 
 
-    async def _handle_delete_context_action(self: TGDBApp, target: Widget) -> None:
+    async def _handle_delete_context_action(self: "TGDBApp", target: Widget) -> None:
         """Remove *target* from the workspace tree."""
         if await self._delete_workspace_item(target) is None:
             self._show_status("Unable to delete cell")
@@ -454,7 +452,7 @@ class WorkspaceMixin:
         self._show_status("Deleted cell")
 
 
-    async def _handle_split_context_action(self: TGDBApp, target: Widget, direction: str) -> None:
+    async def _handle_split_context_action(self: "TGDBApp", target: Widget, direction: str) -> None:
         """Insert a new empty cell adjacent to *target* in *direction*."""
         if await self._apply_context_menu_action(target, direction):
             self._show_status(f"Added window {direction}")
@@ -462,7 +460,7 @@ class WorkspaceMixin:
             self._show_status(f"Unable to add window {direction}")
 
 
-    async def on_context_menu_selected(self: TGDBApp, msg: ContextMenuSelected) -> None:
+    async def on_context_menu_selected(self: "TGDBApp", msg: ContextMenuSelected) -> None:
         target = self._context_menu_target
         self._close_context_menu(restore_focus=False)
         if target is None:
@@ -496,5 +494,5 @@ class WorkspaceMixin:
             self._restore_focus_after_context_menu()
 
 
-    def on_context_menu_closed(self: TGDBApp, _: ContextMenuClosed) -> None:
+    def on_context_menu_closed(self: "TGDBApp", _: ContextMenuClosed) -> None:
         self._close_context_menu()

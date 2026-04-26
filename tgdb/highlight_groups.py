@@ -1,16 +1,14 @@
 """Highlight group definitions — mirrors cgdb's highlight_groups.cpp."""
 
-from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class HighlightStyle:
     """One highlight group (foreground, background, attributes)."""
 
-    fg: Optional[str] = None  # Textual/Rich color name or None
-    bg: Optional[str] = None
+    fg: str | None = None  # Textual/Rich color name or None
+    bg: str | None = None
     bold: bool = False
     underline: bool = False
     reverse: bool = False

@@ -1,7 +1,5 @@
 """Layout helpers for the application package."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from textual import events
@@ -34,7 +32,7 @@ class LayoutMixin:
         2: "src_full",
     }
 
-    def _split_axis(self: TGDBApp, is_horizontal: bool) -> int:
+    def _split_axis(self: "TGDBApp", is_horizontal: bool) -> int:
         try:
             container = self.query_one("#split-container")
             if is_horizontal:
@@ -52,7 +50,7 @@ class LayoutMixin:
         return max(1, fallback)
 
 
-    def _pane_axis(self: TGDBApp, is_horizontal: bool) -> int:
+    def _pane_axis(self: "TGDBApp", is_horizontal: bool) -> int:
         # Subtract 1 only for horizontal mode where a 1-column Splitter exists.
         if is_horizontal:
             splitter_size = 1
@@ -61,13 +59,13 @@ class LayoutMixin:
         return max(0, self._split_axis(is_horizontal) - splitter_size)
 
 
-    def _reset_window_shift(self: TGDBApp, is_horizontal: bool) -> None:
+    def _reset_window_shift(self: "TGDBApp", is_horizontal: bool) -> None:
         half_axis = self._pane_axis(is_horizontal) // 2
         self._window_shift = int(half_axis * (self._cur_win_split / 2.0))
         self._validate_window_shift(is_horizontal)
 
 
-    def _set_window_shift_from_ratio(self: TGDBApp, is_horizontal: bool, ratio: float) -> None:
+    def _set_window_shift_from_ratio(self: "TGDBApp", is_horizontal: bool, ratio: float) -> None:
         axis = self._pane_axis(is_horizontal)
         if axis <= 0:
             self._window_shift = 0
@@ -77,7 +75,7 @@ class LayoutMixin:
         self._validate_window_shift(is_horizontal)
 
 
-    def _validate_window_shift(self: TGDBApp, is_horizontal: bool) -> None:
+    def _validate_window_shift(self: "TGDBApp", is_horizontal: bool) -> None:
         axis = self._pane_axis(is_horizontal)
         if axis <= 0:
             self._window_shift = 0
@@ -99,7 +97,7 @@ class LayoutMixin:
             self._window_shift = min_shift
 
 
-    def _compute_split_sizes(self: TGDBApp, is_horizontal: bool, axis: int | None = None) -> tuple[int, int]:
+    def _compute_split_sizes(self: "TGDBApp", is_horizontal: bool, axis: int | None = None) -> tuple[int, int]:
         if axis is None:
             axis = self._pane_axis(is_horizontal)
         else:
@@ -117,7 +115,7 @@ class LayoutMixin:
     # Resize / orientation message handlers
     # ------------------------------------------------------------------
 
-    def on_resize_source(self: TGDBApp, msg: ResizeSource) -> None:
+    def on_resize_source(self: "TGDBApp", msg: ResizeSource) -> None:
         is_horizontal = self.cfg.winsplitorientation == "horizontal"
         half_axis = self._split_axis(is_horizontal) // 2
 
@@ -170,7 +168,7 @@ class LayoutMixin:
             self._apply_split()
 
 
-    def on_toggle_orientation(self: TGDBApp, _: ToggleOrientation) -> None:
+    def on_toggle_orientation(self: "TGDBApp", _: ToggleOrientation) -> None:
         if self.cfg.winsplitorientation == "horizontal":
             new_orientation = "vertical"
         else:
@@ -186,7 +184,7 @@ class LayoutMixin:
     # Apply split
     # ------------------------------------------------------------------
 
-    def _apply_split(self: TGDBApp) -> None:
+    def _apply_split(self: "TGDBApp") -> None:
         split = self.cfg.winsplit.lower()
         is_horizontal = self.cfg.winsplitorientation == "horizontal"
         split_changed = split != self._last_split_setting
@@ -254,7 +252,7 @@ class LayoutMixin:
             self._preserve_window_shift_once = False
 
 
-    def on_drag_resize(self: TGDBApp, msg: DragResize) -> None:
+    def on_drag_resize(self: "TGDBApp", msg: DragResize) -> None:
         """Handle Splitter drag for the root #split-container (horizontal mode)."""
         if msg.splitter is None:
             return
@@ -284,7 +282,7 @@ class LayoutMixin:
         self._apply_split()
 
 
-    def on_title_bar_resized(self: TGDBApp, msg: TitleBarResized) -> None:
+    def on_title_bar_resized(self: "TGDBApp", msg: TitleBarResized) -> None:
         """Sync _window_shift after a vertical title-bar drag on the root container."""
         try:
             root = self.query_one("#split-container", PaneContainer)
@@ -307,6 +305,6 @@ class LayoutMixin:
         self._apply_split()
 
 
-    def on_resize(self: TGDBApp, event: events.Resize) -> None:
+    def on_resize(self: "TGDBApp", event: events.Resize) -> None:
         self._apply_split()
         # GDBWidget.on_resize handles pyte + PTY resize itself via resize_gdb callback

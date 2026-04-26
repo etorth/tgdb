@@ -12,14 +12,12 @@ Secondary PTY: GDB machine-interface channel opened via "new-ui mi <device>".
                MI commands sent here; user input goes to primary PTY only.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os
 import signal
 import termios
-from typing import Callable, Optional
+from typing import Callable
 
 import ptyprocess
 
@@ -105,7 +103,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self.gdb_args = args or []
         self.init_commands = init_commands or []
 
-        self._proc: Optional[ptyprocess.PtyProcess] = None
+        self._proc: ptyprocess.PtyProcess | None = None
         self._mi_master_fd: int = -1
         self._mi_slave_fd: int = -1  # kept open to prevent master EIO
         self._mi_buf: str = ""
@@ -114,11 +112,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self._request_meta: dict[int, dict[str, object]] = {}
         # Pending debounced -break-list refresh (replaces any in-flight task
         # so rapid set_breakpoint() calls coalesce into one MI request).
-        self._break_list_task: Optional[asyncio.Task] = None
+        self._break_list_task: asyncio.Task | None = None
 
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
-        self.current_frame: Optional[Frame] = None
+        self.current_frame: Frame | None = None
         self.locals: list[LocalVariable] = []
         self.stack: list[Frame] = []
         self.threads: list[ThreadInfo] = []

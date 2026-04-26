@@ -15,10 +15,7 @@ The source pane itself reserves its bottom row for the current file path.
 Modes: TGDB | GDB_PROMPT | GDB_SCROLL | CMD | ML_MESSAGE | FILEDLG
 """
 
-from __future__ import annotations
-
 import asyncio
-from typing import Optional
 
 from textual.app import App
 from textual.widget import Widget
@@ -129,7 +126,7 @@ class TGDBApp(
         self,
         gdb_path: str = "gdb",
         gdb_args: list[str] | None = None,
-        rc_file: Optional[str] = None,
+        rc_file: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -148,13 +145,13 @@ class TGDBApp(
         _tgdb_pkg.screen._set_app(self)
         self.cp.set_py_globals({"app": self, "tgdb": _tgdb_pkg})
 
-        self._rc_file: Optional[str] = (
+        self._rc_file: str | None = (
             rc_file  # resolved in on_mount after app is ready
         )
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
-        self._gdb_task: Optional[asyncio.Task] = None
-        self._cmd_task: Optional[asyncio.Task] = None  # running CommandLineBar command
+        self._gdb_task: asyncio.Task | None = None
+        self._cmd_task: asyncio.Task | None = None  # running CommandLineBar command
         self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
 
         self._mode: str = "GDB_PROMPT"
@@ -173,23 +170,23 @@ class TGDBApp(
         self._last_orientation: str = ""
         self._preserve_window_shift_once: bool = False
         self._file_dialog_pending: bool = False
-        self._inf_tty_fd: Optional[int] = None
+        self._inf_tty_fd: int | None = None
         self._shutting_down: bool = False
-        self._context_menu_target: Optional[Widget] = None
-        self._locals_context_node: Optional[object] = None  # TreeNode | None
-        self._source_view: Optional[SourceView] = None
-        self._gdb_widget: Optional[GDBWidget] = None
-        self._locals_pane: Optional[LocalVariablePane] = None
+        self._context_menu_target: Widget | None = None
+        self._locals_context_node: object | None = None  # TreeNode | None
+        self._source_view: SourceView | None = None
+        self._gdb_widget: GDBWidget | None = None
+        self._locals_pane: LocalVariablePane | None = None
         self._current_locals: list[LocalVariable] = []
-        self._stack_pane: Optional[StackPane] = None
+        self._stack_pane: StackPane | None = None
         self._current_stack: list[Frame] = []
-        self._thread_pane: Optional[ThreadPane] = None
+        self._thread_pane: ThreadPane | None = None
         self._current_threads: list[ThreadInfo] = []
-        self._register_pane: Optional[RegisterPane] = None
+        self._register_pane: RegisterPane | None = None
         self._current_registers: list[RegisterInfo] = []
-        self._evaluate_pane: Optional[EvaluatePane] = None
-        self._memory_pane: Optional[MemoryPane] = None
-        self._disasm_pane: Optional[DisasmPane] = None
+        self._evaluate_pane: EvaluatePane | None = None
+        self._memory_pane: MemoryPane | None = None
+        self._disasm_pane: DisasmPane | None = None
         self._in_map_replay: bool = False
         self._pane_descriptors: dict[str, PaneDescriptor] = {
             "source": PaneDescriptor(

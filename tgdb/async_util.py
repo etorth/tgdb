@@ -15,11 +15,9 @@ of :func:`supervise` is to make sure that "fire-and-forget" coroutines
 never silently swallow exceptions.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
-from typing import Any, Awaitable, Coroutine, Optional
+from typing import Any, Awaitable, Coroutine
 
 _log = logging.getLogger("tgdb.async")
 
@@ -40,7 +38,7 @@ def _on_supervised_done(task: asyncio.Task) -> None:
 def supervise(
     coro: Coroutine[Any, Any, Any],
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> asyncio.Task:
     """Schedule *coro* on the running loop and log any unhandled exception.
 

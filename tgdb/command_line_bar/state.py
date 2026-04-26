@@ -1,8 +1,5 @@
 """State-transition helpers for ``CommandLineBar``."""
 
-from __future__ import annotations
-
-
 class CommandLineStateMixin:
     """Mixin providing prompt/message state management for ``CommandLineBar``."""
 

@@ -1,7 +1,5 @@
 """Key dispatch helpers for the application package."""
 
-from __future__ import annotations
-
 import logging
 from typing import TYPE_CHECKING
 
@@ -78,7 +76,7 @@ def _read_clipboard(app: "TGDBApp") -> str:
 class KeyRoutingMixin:
     """Key dispatch and input routing."""
 
-    def _handle_pending_mark_key(self: TGDBApp, char: str) -> bool:
+    def _handle_pending_mark_key(self: "TGDBApp", char: str) -> bool:
         src = self._get_source_view(mounted_only=True)
         if src is None:
             self._await_mark_jump = False
@@ -104,7 +102,7 @@ class KeyRoutingMixin:
         return False
 
 
-    def _handle_tgdb_mode_key(self: TGDBApp, key: str, char: str) -> bool:
+    def _handle_tgdb_mode_key(self: "TGDBApp", key: str, char: str) -> bool:
         if self._mode != "TGDB":
             return False
 
@@ -143,7 +141,7 @@ class KeyRoutingMixin:
         return False
 
 
-    def _replay_key_sequence(self: TGDBApp, tokens: list[str]) -> None:
+    def _replay_key_sequence(self: "TGDBApp", tokens: list[str]) -> None:
         """Dispatch a list of key-name tokens as if the user typed them."""
         self._in_map_replay = True
         try:
@@ -157,7 +155,7 @@ class KeyRoutingMixin:
             self._in_map_replay = False
 
 
-    def _resume_pending_replay(self: TGDBApp) -> None:
+    def _resume_pending_replay(self: "TGDBApp") -> None:
         if not self._pending_replay_tokens:
             return
         tokens = self._pending_replay_tokens
@@ -168,7 +166,7 @@ class KeyRoutingMixin:
     # imap support — GDB-mode key mapper
     # ------------------------------------------------------------------
 
-    def _imap_feed(self: TGDBApp, key: str) -> "list[str] | None":
+    def _imap_feed(self: "TGDBApp", key: str) -> "list[str] | None":
         """Feed one key token to the GDB-mode mapper.
 
         Returns:
@@ -184,7 +182,7 @@ class KeyRoutingMixin:
         return result
 
 
-    def _replay_gdb_key_sequence(self: TGDBApp, tokens: list[str]) -> None:
+    def _replay_gdb_key_sequence(self: "TGDBApp", tokens: list[str]) -> None:
         """Replay an imap expansion directly into the GDB PTY."""
         gdb_w = self._get_gdb_widget(mounted_only=True)
         for token in tokens:
@@ -217,7 +215,7 @@ class KeyRoutingMixin:
                     self.gdb.send_input(char.encode())
 
 
-    def _dispatch_key_internal(self: TGDBApp, key: str) -> bool:
+    def _dispatch_key_internal(self: "TGDBApp", key: str) -> bool:
         """Route a key-name token through the mode-aware dispatch stack.
 
         Used when replaying a key-map expansion.  Returns True when replay
@@ -256,7 +254,7 @@ class KeyRoutingMixin:
         return False
 
 
-    def _dispatch_ml_message_key(self: TGDBApp, key: str, char: str) -> bool:
+    def _dispatch_ml_message_key(self: "TGDBApp", key: str, char: str) -> bool:
         """Forward a key to the CommandLineBar while in ML_MESSAGE mode."""
         try:
             bar = self.query_one("#cmdline", CommandLineBar)
@@ -270,7 +268,7 @@ class KeyRoutingMixin:
         return False
 
 
-    def _dispatch_cmd_mode_key(self: TGDBApp, key: str, char: str) -> bool:
+    def _dispatch_cmd_mode_key(self: "TGDBApp", key: str, char: str) -> bool:
         """Route a key while in CMD mode.  Returns True if replay should pause."""
         try:
             bar = self.query_one("#cmdline", CommandLineBar)
@@ -295,7 +293,7 @@ class KeyRoutingMixin:
         return False
 
 
-    def _dispatch_tgdb_replay_key(self: TGDBApp, key: str, char: str) -> bool:
+    def _dispatch_tgdb_replay_key(self: "TGDBApp", key: str, char: str) -> bool:
         """Route a key while in TGDB mode (replay path)."""
         src = self._get_source_view(mounted_only=True)
         if src is not None and src.handle_tgdb_key(key, char):
@@ -315,7 +313,7 @@ class KeyRoutingMixin:
         return False
 
 
-    def _handle_non_gdb_focus_key(self: TGDBApp, key: str, char: str) -> bool:
+    def _handle_non_gdb_focus_key(self: "TGDBApp", key: str, char: str) -> bool:
         """Absorb keys that arrive at GDB during focus handoff to CGDB/STATUS."""
         if self._handle_pending_mark_key(char):
             return True
@@ -347,7 +345,7 @@ class KeyRoutingMixin:
     # Global key handling
     # ------------------------------------------------------------------
 
-    def _point_in_widget(self: TGDBApp, widget, screen_x: int, screen_y: int) -> bool:
+    def _point_in_widget(self: "TGDBApp", widget, screen_x: int, screen_y: int) -> bool:
         try:
             region = widget.region
         except Exception:
@@ -358,7 +356,7 @@ class KeyRoutingMixin:
         )
 
 
-    def on_key(self: TGDBApp, event: events.Key) -> None:
+    def on_key(self: "TGDBApp", event: events.Key) -> None:
         key = event.key
         char = event.character or ""
         menu = self._get_context_menu()
@@ -422,7 +420,7 @@ class KeyRoutingMixin:
             return
 
 
-    def on_mouse_down(self: TGDBApp, event: events.MouseDown) -> None:
+    def on_mouse_down(self: "TGDBApp", event: events.MouseDown) -> None:
         menu = self._get_context_menu()
         screen_x = int(event.screen_x)
         screen_y = int(event.screen_y)

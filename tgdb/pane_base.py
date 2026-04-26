@@ -21,10 +21,7 @@ Module-level helpers
     Return a short human-readable location string for a GDB frame.
 """
 
-from __future__ import annotations
-
 import os
-from typing import Optional
 
 from rich.cells import cell_len, split_graphemes
 from rich.text import Text
@@ -195,14 +192,14 @@ class PaneBase(Widget):
     }
     """
 
-    def __init__(self, hl: Optional[HighlightGroups] = None, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
         self.can_focus = False
-        self._title_bar: Optional[_TitleBar] = None
+        self._title_bar: _TitleBar | None = None
 
 
-    def title(self) -> Optional[str]:
+    def title(self) -> str | None:
         """Text shown in the title bar.  None renders a blank bar."""
         return None
 

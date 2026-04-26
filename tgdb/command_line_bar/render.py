@@ -1,7 +1,5 @@
 """Rendering mixin for CommandLineBar."""
 
-from __future__ import annotations
-
 from rich.text import Text
 
 

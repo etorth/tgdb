@@ -6,8 +6,6 @@ Construct it with the shared highlight palette, then push debugger snapshots
 through ``set_frames(...)`` whenever the active frame changes.
 """
 
-from __future__ import annotations
-
 from rich.text import Text
 from textual.widget import Widget
 

@@ -9,9 +9,7 @@ The heavy-lifting terminal widget lives in ``content.py`` so this module can
 stay focused on the public pane interface.
 """
 
-from __future__ import annotations
-
-from typing import Callable, Optional
+from typing import Callable
 
 from textual import events
 
@@ -70,7 +68,7 @@ class GDBWidget(PaneBase):
         self.can_focus = True
 
 
-    def title(self) -> Optional[str]:
+    def title(self) -> str | None:
         return None
 
 

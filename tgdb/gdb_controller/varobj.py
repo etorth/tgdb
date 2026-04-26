@@ -6,8 +6,6 @@ get_locals helper that drives ``LocalVariablePane``. Mixed into
 ``GDBController``.
 """
 
-from __future__ import annotations
-
 import base64
 import json
 import logging

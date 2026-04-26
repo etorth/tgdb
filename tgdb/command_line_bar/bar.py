@@ -6,10 +6,8 @@ Normally renders as one row.  Expands vertically during:
 - Multi-line command output / error display (dismiss phase)
 """
 
-from __future__ import annotations
-
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 from textual.widget import Widget
 
@@ -75,8 +73,8 @@ class CommandLineBar(
     def __init__(
         self,
         hl: HighlightGroups,
-        completion_provider: Optional[Callable] = None,
-        history_file: Optional[Path] = None,
+        completion_provider: Callable | None = None,
+        history_file: Path | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -126,7 +124,7 @@ class CommandLineBar(
         self._history: list[str] = []  # all recorded commands (oldest first)
         self._history_idx: int = -1  # -1 = not browsing; 0 = oldest
         self._history_prefix: str = ""  # prefix typed before Up was pressed
-        self._history_file: Optional[Path] = history_file
+        self._history_file: Path | None = history_file
 
         # ── Cursor position (within _input_buf) ──────────────────────
         self._cursor_pos: int = 0  # 0 = before first char; len(buf) = after last

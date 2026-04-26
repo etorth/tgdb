@@ -7,11 +7,9 @@ directly with ``set_disasm(...)`` or asks the pane to refresh itself from a
 source location with ``refresh_disasm(...)``.
 """
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable
 
 from rich.text import Text
 from textual import events
@@ -158,7 +156,7 @@ class DisasmPane(PaneBase):
         """Create an empty disassembly pane."""
         super().__init__(hl, **kwargs)
         self._content = _DisasmContent(hl)
-        self._disasm_fn: Optional[Callable] = None
+        self._disasm_fn: Callable | None = None
 
 
     def title(self) -> str:

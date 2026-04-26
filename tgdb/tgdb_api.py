@@ -35,10 +35,8 @@ container tree starting from the root PaneContainer:
   [1, 1, 2]   → second child of first child of second child of root
 """
 
-from __future__ import annotations
-
 import enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .app import TGDBApp
@@ -121,7 +119,7 @@ class TGDBScreen:
     """
 
     def __init__(self) -> None:
-        self._app: Optional["TGDBApp"] = None
+        self._app: "TGDBApp" | None = None
 
 
     def _set_app(self, app: "TGDBApp") -> None:

@@ -10,9 +10,6 @@ The heavy-lifting content widget lives in ``content.py`` so this module can stay
 focused on the public pane interface.
 """
 
-from __future__ import annotations
-
-from typing import Optional
 
 from textual import events
 
@@ -73,7 +70,7 @@ class SourceView(PaneBase):
         self._content._pane = self  # so _content.post_message bubbles through us
 
 
-    def title(self) -> Optional[str]:
+    def title(self) -> str | None:
         content = self.__dict__.get("_content")
         if content is not None:
             sf = getattr(content, "source_file", None)

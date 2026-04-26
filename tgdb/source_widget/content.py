@@ -7,9 +7,7 @@ the public interface while the content widget owns file loading, navigation,
 search, marks, rendering, and key handling.
 """
 
-from __future__ import annotations
-
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from textual.widget import Widget
 
@@ -55,8 +53,8 @@ class _SourceContent(
         # SourceView; messages created here would therefore have _sender ==
         # SourceView == _SourceContent._parent, which causes Textual to stop
         # propagation at SourceView and never reach TGDBApp handlers.
-        self._pane: Optional["SourceView"] = None
-        self.source_file: Optional[SourceFile] = None
+        self._pane: "SourceView" | None = None
+        self.source_file: SourceFile | None = None
         self.exe_line: int = 0  # 1-based; 0 = none
         self.sel_line: int = 1  # 1-based cursor
         self._scroll_top: int = 0  # 0-based first visible line
@@ -80,7 +78,7 @@ class _SourceContent(
         self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)
         self._show_logo: bool = False  # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}
-        self._pending_search: Optional[tuple[str, bool]] = None
+        self._pending_search: tuple[str, bool] | None = None
         self.can_focus = False
 
 

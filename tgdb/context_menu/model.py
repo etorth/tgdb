@@ -1,9 +1,6 @@
 """Shared data model for the cascading context-menu package."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Optional
 
 from rich.cells import cell_len
 
@@ -13,7 +10,7 @@ class ContextMenuItem:
     """Immutable menu entry used to build the cascading context menu tree."""
 
     label: str
-    action: Optional[str] = None
+    action: str | None = None
     children: tuple["ContextMenuItem", ...] = ()
     separator_before: bool = False
 
@@ -25,7 +22,7 @@ class ContextMenuItem:
 @dataclass(frozen=True)
 class _PanelRow:
     kind: str
-    item_index: Optional[int] = None
+    item_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -47,7 +44,7 @@ class _PanelLayout:
         return len(self.rows) + 2
 
 
-    def row_for_item(self, item_index: int) -> Optional[int]:
+    def row_for_item(self, item_index: int) -> int | None:
         for row_index, row in enumerate(self.rows):
             if row.kind == "item" and row.item_index == item_index:
                 return row_index

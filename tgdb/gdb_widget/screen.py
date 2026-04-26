@@ -6,9 +6,7 @@ pyte.Screen subclass that captures lines scrolling off the top into a
 scrollback buffer.
 """
 
-from __future__ import annotations
-
-from typing import Callable, Optional
+from typing import Callable
 
 import pyte
 from rich.text import Text
@@ -39,7 +37,7 @@ _PYTE_NAMED = {
 }
 
 
-def _pyte_color(c: str) -> Optional[str]:
+def _pyte_color(c: str) -> str | None:
     if not c or c == "default":
         return None
     if c in _PYTE_NAMED:
@@ -131,7 +129,7 @@ class _GDBScreen(pyte.Screen):
         self,
         columns: int,
         lines: int,
-        push_fn: "Callable[[Text, Optional[dict]], None]",
+        push_fn: "Callable[[Text, dict | None], None]",
     ) -> None:
         super().__init__(columns, lines)
         self._push_scrollback = push_fn

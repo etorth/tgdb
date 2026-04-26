@@ -13,8 +13,6 @@ data-driven table so they are easy to audit, extend, and maintain as
 C++ ABIs evolve.
 """
 
-from __future__ import annotations
-
 import re
 
 # ---------------------------------------------------------------------------

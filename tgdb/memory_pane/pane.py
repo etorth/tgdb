@@ -6,9 +6,7 @@ the widget, injects one async memory-read callback, and updates the requested
 address through ``set_address(...)``.
 """
 
-from __future__ import annotations
-
-from typing import Callable, Optional
+from typing import Callable
 
 from rich.text import Text
 from textual.widget import Widget
@@ -74,7 +72,7 @@ class _MemoryContent(Widget):
         self._rows: list[tuple[str, list[int], str]] = []
         self._address: str = ""
         self._byte_count: int = 64
-        self._read_fn: Optional[Callable] = None
+        self._read_fn: Callable | None = None
 
 
     def set_rows(self, rows: list[tuple[str, list[int], str]]) -> None:
@@ -141,7 +139,7 @@ class MemoryPane(PaneBase):
         self._content = _MemoryContent(hl)
         self._current_address: str = ""
         self._current_size: int = 64
-        self._read_fn: Optional[Callable] = None
+        self._read_fn: Callable | None = None
 
 
     def title(self) -> str:

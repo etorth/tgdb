@@ -1,10 +1,7 @@
 """History management and tab-completion mixin for CommandLineBar."""
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
-from typing import Optional
 
 from .messages import (
     CompletionPopupHide,
@@ -65,7 +62,7 @@ class HistoryMixin:
         self._history = entries
 
 
-    def save_history(self, path: Optional[Path] = None, *, max_size: int = 1024) -> Optional[str]:
+    def save_history(self, path: Path | None = None, *, max_size: int = 1024) -> str | None:
         """Save the current session history to *path* (default: history file).
 
         Multi-line (heredoc) entries are stored verbatim (header + body + marker).
@@ -100,7 +97,7 @@ class HistoryMixin:
         return None
 
 
-    def list_history(self) -> Optional[str]:
+    def list_history(self) -> str | None:
         """Return a numbered listing of all history entries for :history command."""
         if not self._history:
             return "No history entries."

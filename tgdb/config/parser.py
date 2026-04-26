@@ -6,10 +6,8 @@ as the initialization file, along with tgdb/cgdb-style ``:set``,
 ``:highlight``, ``:map``, ``:imap``, ``:unmap``, and ``:iunmap`` commands.
 """
 
-from __future__ import annotations
-
 import builtins
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..highlight_groups import HighlightGroups
@@ -68,7 +66,7 @@ class ConfigParser(
         self.config = config
         self.hl = highlight_groups
         self.km = key_mapper
-        self._handlers: dict[str, Callable[[list[str]], Optional[str]]] = {}
+        self._handlers: dict[str, Callable[[list[str]], str | None]] = {}
         self._py_namespace: dict = {
             "__builtins__": builtins,
             "config": self.config,
@@ -85,7 +83,7 @@ class ConfigParser(
         self._cmdline_bar = bar
 
 
-    def register_handler(self, name: str, fn: Callable[[list[str]], Optional[str]]) -> None:
+    def register_handler(self, name: str, fn: Callable[[list[str]], str | None]) -> None:
         """Register an extra command handler (e.g., GDB debug commands)."""
         self._handlers[name] = fn
 

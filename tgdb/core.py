@@ -1,11 +1,8 @@
 """Core lifecycle and focus helpers for the application package."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
 
 from textual.app import ComposeResult
 from textual.css.query import NoMatches
@@ -187,7 +184,7 @@ class AppCoreMixin:
     async def _load_rc_async(self) -> None:
         if self._rc_file == "NONE":
             return
-        path: Optional[str]
+        path: str | None
         if self._rc_file:
             path = self._rc_file
         else:
@@ -259,11 +256,11 @@ class AppCoreMixin:
 
 
     @staticmethod
-    def _widget_attached(widget: Optional[Widget]) -> bool:
+    def _widget_attached(widget: Widget | None) -> bool:
         return widget is not None and widget.parent is not None
 
 
-    def _get_source_view(self, *, mounted_only: bool = False) -> Optional[SourceView]:
+    def _get_source_view(self, *, mounted_only: bool = False) -> SourceView | None:
         if self._source_view is None:
             return None
         if mounted_only and not self._widget_attached(self._source_view):
@@ -271,7 +268,7 @@ class AppCoreMixin:
         return self._source_view
 
 
-    def _get_gdb_widget(self, *, mounted_only: bool = False) -> Optional[GDBWidget]:
+    def _get_gdb_widget(self, *, mounted_only: bool = False) -> GDBWidget | None:
         if self._gdb_widget is None:
             return None
         if mounted_only and not self._widget_attached(self._gdb_widget):
@@ -279,7 +276,7 @@ class AppCoreMixin:
         return self._gdb_widget
 
 
-    def _focus_widget(self, widget: Optional[Widget]) -> bool:
+    def _focus_widget(self, widget: Widget | None) -> bool:
         if not self._widget_attached(widget):
             return False
         try:
@@ -289,7 +286,7 @@ class AppCoreMixin:
         return True
 
 
-    def _first_workspace_leaf(self, widget: Optional[Widget] = None) -> Optional[Widget]:
+    def _first_workspace_leaf(self, widget: Widget | None = None) -> Widget | None:
         if widget is None:
             try:
                 widget = self.query_one("#split-container", PaneContainer)

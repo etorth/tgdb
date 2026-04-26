@@ -1,13 +1,11 @@
 """Command-dispatch helpers for the configuration package."""
 
-from __future__ import annotations
-
 import logging
 import os
 import re
 import shlex
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 from ..xdg_path import XDGPath
 
@@ -34,14 +32,14 @@ BUILTIN_COMMAND_NAMES: frozenset[str] = frozenset({
 class ConfigExecutionMixin:
     """Mixin providing file loading and command dispatch for ``ConfigParser``."""
 
-    def default_rc_path(self) -> Optional[Path]:
+    def default_rc_path(self) -> Path | None:
         path = XDGPath.config_home() / "tgdb" / "tgdbrc"
         if path.exists():
             return path
         return None
 
 
-    async def load_file_async(self, path: str, print_fn: Optional[Callable] = None) -> str | None:
+    async def load_file_async(self, path: str, print_fn: Callable | None = None) -> str | None:
         try:
             with open(path) as handle:
                 raw_lines = handle.readlines()
@@ -81,7 +79,7 @@ class ConfigExecutionMixin:
         return None
 
 
-    async def execute_async(self, line: str, print_fn: Optional[Callable] = None) -> str | None:
+    async def execute_async(self, line: str, print_fn: Callable | None = None) -> str | None:
         line = line.strip()
         if not line:
             return None
@@ -149,7 +147,7 @@ class ConfigExecutionMixin:
         return await self._dispatch_builtin_command(cmd, raw_cmd, args, print_fn, line)
 
 
-    async def _dispatch_python_command(self, match: re.Match, print_fn: Optional[Callable]) -> str | None:
+    async def _dispatch_python_command(self, match: re.Match, print_fn: Callable | None) -> str | None:
         cmd = match.group(1).lower()
         raw_arg = match.group(2)
         if cmd in ("python", "py"):
@@ -184,7 +182,7 @@ class ConfigExecutionMixin:
         cmd: str,
         raw_cmd: str,
         args: list[str],
-        print_fn: Optional[Callable],
+        print_fn: Callable | None,
         raw_line: str = "",
     ) -> str | None:
         if cmd == "set":

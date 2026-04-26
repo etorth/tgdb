@@ -1,7 +1,5 @@
 """Shared helpers and constants for the configuration package."""
 
-from __future__ import annotations
-
 import os
 import pyperclip
 

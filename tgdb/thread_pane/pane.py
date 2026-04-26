@@ -6,8 +6,6 @@ Construct it with the shared highlight palette, then publish parsed thread
 snapshots with ``set_threads(...)``.
 """
 
-from __future__ import annotations
-
 from rich.text import Text
 from textual.widget import Widget
 

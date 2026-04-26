@@ -6,9 +6,7 @@ match that panel's rectangle. This means there are no empty cells between
 panels, so underlying content remains visible through the gaps.
 """
 
-from __future__ import annotations
-
-from typing import Optional, Sequence
+from typing import Sequence
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -71,7 +69,7 @@ class ContextMenu(Widget):
     def __init__(
         self,
         hl: HighlightGroups,
-        items: Optional[Sequence[ContextMenuItem]] = None,
+        items: Sequence[ContextMenuItem] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -175,7 +173,7 @@ class ContextMenu(Widget):
         return items
 
 
-    def _selected_item(self, depth: Optional[int] = None) -> Optional[ContextMenuItem]:
+    def _selected_item(self, depth: int | None = None) -> ContextMenuItem | None:
         if not self._selection_path:
             return None
         if depth is None:

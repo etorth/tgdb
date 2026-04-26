@@ -5,10 +5,7 @@ These types are used across the tgdb package to represent debugger state
 (breakpoints, frames, local variables, threads, registers).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -52,7 +49,7 @@ class ThreadInfo:
     name: str = ""
     state: str = ""
     core: str = ""
-    frame: Optional[Frame] = None
+    frame: Frame | None = None
     is_current: bool = False
 
 

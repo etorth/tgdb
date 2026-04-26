@@ -40,20 +40,14 @@ need pygdbmi as a runtime dependency.  The logic is kept faithful to the
 original; only import paths and minor formatting have been adjusted.
 """
 
-from __future__ import annotations
-
 import functools
 import re
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterator,
     Match,
-    Optional,
     Pattern,
-    Tuple,
-    Union,
 )
 
 
@@ -105,7 +99,7 @@ def _split_n_chars(s: str, n: int) -> Iterator[str]:
         yield s[i : i + n]
 
 
-def _unescape_internal(escaped_str: str, *, expect_closing_quote: bool, start: int = 0) -> Tuple[str, int]:
+def _unescape_internal(escaped_str: str, *, expect_closing_quote: bool, start: int = 0) -> tuple[str, int]:
     """Core unescape logic for GDB MI strings.
 
     MI-mode escapes are similar to standard Python escapes but:
@@ -173,7 +167,7 @@ def _unescape(escaped_str: str) -> str:
     return unescaped
 
 
-def _advance_past_string_with_gdb_escapes(escaped_str: str, *, start: int = 0) -> Tuple[str, int]:
+def _advance_past_string_with_gdb_escapes(escaped_str: str, *, start: int = 0) -> tuple[str, int]:
     """Unescape a GDB MI string and find the closing double quote.
 
     Returns ``(unescaped_string, index_after_closing_quote)``.
@@ -245,9 +239,9 @@ _GDB_MI_VALUE_START_CHARS = [
 ]
 
 
-def _parse_dict(stream: _StringStream) -> Dict:
+def _parse_dict(stream: _StringStream) -> dict:
     """Parse a GDB MI dictionary (``{key=val,...}``)."""
-    obj: Dict[str, Union[str, list, dict]] = {}
+    obj: dict[str, str | list | dict] = {}
 
     while True:
         c = stream.read(1)
@@ -335,24 +329,24 @@ _GDB_MI_COMPONENT_TOKEN = r"(?P<token>\d+)?"
 _GDB_MI_COMPONENT_PAYLOAD = r"(?P<payload>,.*)?"
 _GDB_MI_RESPONSE_FINISHED_RE = re.compile(r"^\(gdb\)\s*$")
 
-_PARSER_FUNCTION = Callable[[Match, _StringStream], Dict]
+_PARSER_FUNCTION = Callable[[Match, _StringStream], dict]
 
 
-def _extract_token(match: Match) -> Optional[int]:
+def _extract_token(match: Match) -> int | None:
     token = match["token"]
     if token is not None:
         return int(token)
     return None
 
 
-def _extract_payload(match: Match, stream: _StringStream) -> Optional[Dict]:
+def _extract_payload(match: Match, stream: _StringStream) -> dict | None:
     if match["payload"] is None:
         return None
     stream.advance_past_chars([","])
     return _parse_dict(stream)
 
 
-def _parse_mi_notify(match: Match, stream: _StringStream) -> Dict:
+def _parse_mi_notify(match: Match, stream: _StringStream) -> dict:
     return {
         "type": "notify",
         "message": match["message"].strip(),
@@ -361,7 +355,7 @@ def _parse_mi_notify(match: Match, stream: _StringStream) -> Dict:
     }
 
 
-def _parse_mi_result(match: Match, stream: _StringStream) -> Dict:
+def _parse_mi_result(match: Match, stream: _StringStream) -> dict:
     return {
         "type": "result",
         "message": match["message"],
@@ -370,7 +364,7 @@ def _parse_mi_result(match: Match, stream: _StringStream) -> Dict:
     }
 
 
-def _parse_mi_output(match: Match, stream: _StringStream, output_type: str) -> Dict:
+def _parse_mi_output(match: Match, stream: _StringStream, output_type: str) -> dict:
     return {
         "type": output_type,
         "message": None,
@@ -378,7 +372,7 @@ def _parse_mi_output(match: Match, stream: _StringStream, output_type: str) -> D
     }
 
 
-def _parse_mi_finished(match: Match, stream: _StringStream) -> Dict:
+def _parse_mi_finished(match: Match, stream: _StringStream) -> dict:
     return {
         "type": "done",
         "message": None,
@@ -445,7 +439,7 @@ class GDBMIParser:
     """
 
     @staticmethod
-    def parse_response(gdb_mi_text: str) -> Dict:
+    def parse_response(gdb_mi_text: str) -> dict:
         """Parse a GDB MI text line and return a structured dictionary.
 
         Returns a dictionary with keys:

@@ -1,9 +1,7 @@
 """Rendering mixin for SourceView — render(), _build_line(), etc."""
 
-from __future__ import annotations
-
 import re
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from rich.cells import cell_len, split_graphemes
 from rich.text import Text
@@ -162,7 +160,7 @@ class SourceViewRendering:
             return None
 
 
-    def _build_line(self, line_idx: int, sf: Optional[SourceFile]) -> Text:
+    def _build_line(self, line_idx: int, sf: "SourceFile" | None) -> Text:
         """Build one visible line as Rich Text, matching cgdb's layout.
 
         Renders line number, gutter character, arrow (if any), syntax-

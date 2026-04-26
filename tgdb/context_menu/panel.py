@@ -1,8 +1,6 @@
 """Panel renderer used by the cascading context-menu package."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from rich.segment import Segment
 from rich.style import Style as RichStyle
@@ -88,7 +86,7 @@ class _PanelWidget(Widget):
         return Strip(segments, width)
 
 
-    def _item_at(self, lx: int, ly: int) -> Optional[tuple[int, int]]:
+    def _item_at(self, lx: int, ly: int) -> tuple[int, int] | None:
         panel = self._panel
         if not (1 <= lx < panel.width - 1 and 1 <= ly < panel.height - 1):
             return None

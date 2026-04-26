@@ -1,7 +1,5 @@
 """Option-oriented command handlers for the configuration package."""
 
-from __future__ import annotations
-
 import logging
 import os
 from pathlib import Path

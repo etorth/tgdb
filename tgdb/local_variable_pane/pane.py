@@ -14,9 +14,6 @@ shadowed-variable tracking, and reconciliation between successive debugger
 stops.
 """
 
-from __future__ import annotations
-
-from typing import Optional
 
 from textual.widgets.tree import TreeNode
 

@@ -2,8 +2,6 @@
 Reconciliation helpers for the local-variable pane.
 """
 
-from __future__ import annotations
-
 from textual.widgets import Tree
 
 from ..async_util import supervise

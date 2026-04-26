@@ -5,12 +5,10 @@ Provides ``:command`` registration, lookup, expansion, execution, and
 Tab-completion support.
 """
 
-from __future__ import annotations
-
 import json
 import re
 import shlex
-from typing import Callable, Optional
+from typing import Callable
 
 from .types import _CMD_NAME_RE, UserCommandDef
 from .execution import BUILTIN_COMMAND_NAMES
@@ -27,7 +25,7 @@ class UserCommandMixin:
     # :command — user-defined commands
     # ------------------------------------------------------------------
 
-    async def _cmd_command(self, raw: str) -> Optional[str]:
+    async def _cmd_command(self, raw: str) -> str | None:
         """Parse and handle a :command invocation.
 
         :command              → list all user commands
@@ -83,7 +81,7 @@ class UserCommandMixin:
         return None
 
 
-    def _list_user_commands(self, prefix: str) -> Optional[str]:
+    def _list_user_commands(self, prefix: str) -> str | None:
         matches = {}
         for n, c in self._user_commands.items():
             if n.startswith(prefix):
@@ -106,7 +104,7 @@ class UserCommandMixin:
 
     def _lookup_user_command(
         self, name: str
-    ) -> tuple[Optional[UserCommandDef], Optional[str]]:
+    ) -> tuple[UserCommandDef | None, str | None]:
         if name in self._user_commands:
             return self._user_commands[name], None
         matches = []
@@ -123,7 +121,7 @@ class UserCommandMixin:
         )
 
 
-    async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def _exec_user_command_async(self, ucmd: UserCommandDef, raw_args: str, print_fn: Callable | None = None) -> str | None:
         if self._exec_depth >= 20:
             return f"{ucmd.name}: maximum command recursion depth exceeded"
         try:
@@ -144,7 +142,7 @@ class UserCommandMixin:
             self._exec_depth -= 1
 
 
-    def _validate_nargs(self, nargs: str, shlex_args: list[str], raw_args: str) -> Optional[str]:
+    def _validate_nargs(self, nargs: str, shlex_args: list[str], raw_args: str) -> str | None:
         stripped = raw_args.strip()
         if nargs == "0":
             if stripped:

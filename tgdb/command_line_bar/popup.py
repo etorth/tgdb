@@ -24,8 +24,6 @@ not handle keystrokes — the command-line bar continues to drive Tab /
 Shift-Tab / Enter / Escape.
 """
 
-from __future__ import annotations
-
 from rich.segment import Segment
 from rich.style import Style as RichStyle
 from textual.strip import Strip

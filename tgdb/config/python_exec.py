@@ -5,8 +5,6 @@ Provides the async helpers that compile and run user-supplied Python
 code inside the persistent ``_py_namespace``.
 """
 
-from __future__ import annotations
-
 import asyncio
 import builtins
 import contextlib
@@ -15,7 +13,7 @@ import os
 import textwrap
 import traceback
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from .types import _TGDB_RESERVED_PREFIX
 
@@ -25,7 +23,7 @@ class PythonExecMixin:
 
     _py_namespace: dict
 
-    async def _exec_py_async(self, code: str, source_label: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def _exec_py_async(self, code: str, source_label: str, print_fn: Callable | None = None) -> str | None:
         """Compile *code* as ``async def _tgdb_RSVD_run_script()`` and await it.
 
         This lets scripts use ``await tgdb.screen.split(...)`` etc.
@@ -143,7 +141,7 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
         return None
 
 
-    async def _exec_pyfile_async(self, path: str, print_fn: Optional[Callable] = None) -> Optional[str]:
+    async def _exec_pyfile_async(self, path: str, print_fn: Callable | None = None) -> str | None:
         """Execute a Python file as an async coroutine."""
         if not path:
             return "pyfile: missing filename"

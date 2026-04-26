@@ -1,7 +1,5 @@
 """Messages emitted by the file dialog widget."""
 
-from __future__ import annotations
-
 from textual.message import Message
 
 

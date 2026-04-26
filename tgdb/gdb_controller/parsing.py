@@ -6,8 +6,6 @@ MI result parsing (frames, locals, threads, registers, breakpoints,
 source files), and the ``_safe_int`` utility. Mixed into ``GDBController``.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 

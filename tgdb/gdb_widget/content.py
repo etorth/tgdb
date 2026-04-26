@@ -7,10 +7,8 @@ public interface while the content widget owns VT100 emulation, resize logic,
 scrollback, scroll mode, and key forwarding.
 """
 
-from __future__ import annotations
-
 from collections import deque
-from typing import Callable, Optional
+from typing import Callable
 
 import pyte
 from textual.widget import Widget
@@ -45,8 +43,8 @@ class _GDBContent(ScrollMixin, Widget):
         self._scrollback: deque[Text] = deque(maxlen=max_scrollback)
         self._scrollback_raw: deque = deque(maxlen=max_scrollback)
         self.debugwincolor: bool = True
-        self._screen: Optional[_GDBScreen] = None
-        self._stream: Optional[pyte.ByteStream] = None
+        self._screen: _GDBScreen | None = None
+        self._stream: pyte.ByteStream | None = None
         self._pyte_rows: int = 24
         self._pyte_cols: int = 80
         self._init_pyte(24, 80)
@@ -157,7 +155,7 @@ class _GDBContent(ScrollMixin, Widget):
 
         # Pop from the RIGHT (most recently pushed = topmost row just before
         # the last shrink).  Reversed so the oldest restored row goes to row 0.
-        to_restore: list[Optional[dict]] = []
+        to_restore: list[dict | None] = []
         for _ in range(n_restore):
             self._scrollback.pop()  # keep display deque in sync
             to_restore.append(self._scrollback_raw.pop())
@@ -213,7 +211,7 @@ class _GDBContent(ScrollMixin, Widget):
         return before_cursor.endswith("(gdb) ")
 
 
-    def _maybe_escape_burst_key(self, key: str, char: str) -> Optional[tuple[str, str]]:
+    def _maybe_escape_burst_key(self, key: str, char: str) -> tuple[str, str] | None:
         if key.startswith("alt+") and char and char.isprintable():
             return char, char
 

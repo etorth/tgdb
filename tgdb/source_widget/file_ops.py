@@ -1,7 +1,5 @@
 """File-loading helpers for the internal source-pane content widget."""
 
-from __future__ import annotations
-
 import logging
 import os
 

@@ -1,7 +1,5 @@
 """Key-handling helpers for ``CommandLineBar``."""
 
-from __future__ import annotations
-
 import re
 
 from textual import events

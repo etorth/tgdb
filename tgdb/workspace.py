@@ -5,10 +5,8 @@ These classes now live inside the ``tgdb.app`` package so the main application
 layer and its workspace tree stay self-contained under one package boundary.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable
 
 from rich.text import Text
 from textual import events
@@ -26,7 +24,7 @@ class DragResize(Message):
         self,
         screen_x: int = 0,
         screen_y: int = 0,
-        splitter: Optional["Splitter"] = None,
+        splitter: "Splitter" | None = None,
     ) -> None:
         super().__init__()
         self.screen_x = screen_x
@@ -51,8 +49,8 @@ class TitleBarResized(Message):
 class PaneDescriptor:
     label: str
     create: Callable[[], Widget]
-    current: Callable[[], Optional[Widget]]
-    requester: Optional[Callable[[], None]] = None
+    current: Callable[[], Widget | None]
+    requester: Callable[[], None] | None = None
 
 
 class Splitter(Widget):
@@ -324,7 +322,7 @@ class PaneContainer(Widget):
                 self._apply_item_style(item, weight)
 
 
-    def _adjacent_items(self, splitter: "Splitter") -> Optional[tuple[Widget, Widget]]:
+    def _adjacent_items(self, splitter: "Splitter") -> tuple[Widget, Widget] | None:
         children = list(self.children)
         try:
             index = children.index(splitter)

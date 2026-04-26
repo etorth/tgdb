@@ -1,7 +1,5 @@
 """Key-handling helpers for the file dialog widget."""
 
-from __future__ import annotations
-
 from textual import events
 
 from .messages import FileDialogClosed, FileSelected

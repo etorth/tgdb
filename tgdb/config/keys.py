@@ -1,8 +1,5 @@
 """Key-sequence decoding helpers for the configuration package."""
 
-from __future__ import annotations
-
-
 class ConfigKeyMixin:
     """Mixin providing cgdb-style key sequence decoding."""
 

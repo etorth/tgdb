@@ -1,9 +1,6 @@
 """Data structures and helpers for source file handling."""
 
-from __future__ import annotations
-
 import os
-from typing import Optional
 
 from pygments.lexers import get_lexer_for_filename, TextLexer
 from pygments.token import Token
@@ -52,7 +49,7 @@ class SourceFile:
             pass
         self.bp_flags: list[int] = [BP_NONE] * len(lines)
         self.marks_local: dict[str, int] = {}  # 'a'-'z' → 1-based line
-        self._tokens: Optional[list[list[tuple]]] = None
+        self._tokens: list[list[tuple]] | None = None
 
 
     def tokenize(self, tabstop: int = 8) -> list[list[tuple]]:

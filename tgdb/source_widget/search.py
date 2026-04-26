@@ -1,9 +1,6 @@
 """Search helpers for the internal source-pane content widget."""
 
-from __future__ import annotations
-
 import re
-from typing import Optional
 
 from .data import _LOGO_LINES
 from .messages import SearchCancel, SearchCommit, SearchStart, SearchUpdate
@@ -12,7 +9,7 @@ from .messages import SearchCancel, SearchCommit, SearchStart, SearchUpdate
 class SourceSearchMixin:
     """Mixin providing search state and regex navigation for ``_SourceContent``."""
 
-    def search(self, pattern: str, forward: bool = True, start: Optional[int] = None) -> bool:
+    def search(self, pattern: str, forward: bool = True, start: int | None = None) -> bool:
         if self.source_file:
             lines = self.source_file.lines
         else:

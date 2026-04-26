@@ -1,7 +1,5 @@
 """Message classes emitted by the source view widget."""
 
-from __future__ import annotations
-
 from textual.message import Message
 
 

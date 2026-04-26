@@ -1,7 +1,5 @@
 """Result-handling helpers for ``GDBController``."""
 
-from __future__ import annotations
-
 import logging
 
 from ..async_util import supervise

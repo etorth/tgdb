@@ -2,9 +2,6 @@
 Tree expansion, loading, and rendering helpers shared by varobj-tree panes.
 """
 
-from __future__ import annotations
-
-from typing import Optional
 
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
@@ -151,7 +148,7 @@ class VarobjTreeMixin:
         supervise(self._load_children(node, varobj_name), name="varobj-load-children")
 
 
-    def _get_node_at_screen(self, screen_x: int, screen_y: int) -> Optional[TreeNode]:
+    def _get_node_at_screen(self, screen_x: int, screen_y: int) -> TreeNode | None:
         """Return the tree node whose row contains the given screen point."""
         try:
             tree = self.query_one(Tree)
@@ -362,7 +359,7 @@ class VarobjTreeMixin:
             self._add_load_more_node(parent, varobj_name, next_idx, parent_displayhint)
 
 
-    async def _add_children(self, node: TreeNode, children: list[dict], displayhint: str = "", flat_limit: Optional[int] = None) -> None:
+    async def _add_children(self, node: TreeNode, children: list[dict], displayhint: str = "", flat_limit: int | None = None) -> None:
         """Add child nodes to *node* using the parent's displayhint."""
         if displayhint == "map":
             await self._add_map_children(node, children)
@@ -402,7 +399,7 @@ class VarobjTreeMixin:
             self._remember_child_varobj(value_child, child_node)
 
 
-    async def _flatten_access_specifier_children(self, node: TreeNode, varobj_name: str, flat_limit: Optional[int]) -> None:
+    async def _flatten_access_specifier_children(self, node: TreeNode, varobj_name: str, flat_limit: int | None) -> None:
         if not self._var_list_children:
             return
 
@@ -421,7 +418,7 @@ class VarobjTreeMixin:
             self._add_load_more_node(node, varobj_name, len(grandchildren), "")
 
 
-    async def _add_regular_children(self, node: TreeNode, children: list[dict], flat_limit: Optional[int]) -> None:
+    async def _add_regular_children(self, node: TreeNode, children: list[dict], flat_limit: int | None) -> None:
         marker_active = True
         node_data = node.data
         if isinstance(node_data, dict):

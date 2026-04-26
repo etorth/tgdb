@@ -1,7 +1,5 @@
 """Geometry, navigation, and rendering helpers for the file dialog widget."""
 
-from __future__ import annotations
-
 import math
 
 from rich.text import Text

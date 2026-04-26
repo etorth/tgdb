@@ -7,9 +7,7 @@ constructs the pane, injects the varobj callbacks, then mutates the watch list
 through the public methods documented on the class below.
 """
 
-from __future__ import annotations
-
-from typing import Callable, Coroutine, Optional
+from typing import Callable, Coroutine
 
 from textual.widgets import Tree
 
@@ -59,7 +57,7 @@ class EvaluatePane(VarobjTreePane):
     }
     """
 
-    def __init__(self, hl: HighlightGroups, cfg: Optional[Config] = None, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, cfg: Config | None = None, **kwargs) -> None:
         """Create an empty evaluate pane.
 
         Args:
@@ -88,7 +86,7 @@ class EvaluatePane(VarobjTreePane):
         supervise(self._create_expression_node(idx, expr), name="watch-create-expr")
 
 
-    def remove_expression(self, index: int) -> Optional[str]:
+    def remove_expression(self, index: int) -> str | None:
         """Remove one watch expression by 0-based index and return it."""
         if not (0 <= index < len(self._expressions)):
             return None
@@ -110,7 +108,7 @@ class EvaluatePane(VarobjTreePane):
         return removed_expr
 
 
-    async def refresh_all(self, current_frame: Optional[object] = None) -> None:
+    async def refresh_all(self, current_frame: object | None = None) -> None:
         """Re-evaluate every watch expression varobj after the inferior stops."""
         if not self._varobj_names or not self._var_update:
             return

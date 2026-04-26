@@ -6,8 +6,6 @@ caller constructs it once, then pushes parsed register snapshots through
 ``set_registers(...)`` whenever the active frame changes.
 """
 
-from __future__ import annotations
-
 from rich.text import Text
 from textual.widget import Widget
 

@@ -1,7 +1,5 @@
 """Key-handling helpers for the internal source-pane content widget."""
 
-from __future__ import annotations
-
 from textual import events
 
 from .messages import (

@@ -1,8 +1,5 @@
 """Navigation helpers for the internal source-pane content widget."""
 
-from __future__ import annotations
-
-from typing import Optional
 
 from .data import _LOGO_LINES
 from .messages import JumpGlobalMark
@@ -102,7 +99,7 @@ class SourceNavigationMixin:
         self.move_to(1)
 
 
-    def goto_bottom(self, line: Optional[int] = None) -> None:
+    def goto_bottom(self, line: int | None = None) -> None:
         if line is not None:
             self.move_to(line)
         else:

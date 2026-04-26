@@ -1,14 +1,12 @@
 """Command handlers for the application package."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .source_widget import SourceFile
 
@@ -21,7 +19,7 @@ _log = logging.getLogger("tgdb.app")
 class CommandsMixin:
     """All :command handlers and their registration."""
 
-    def _register_commands(self: TGDBApp) -> None:
+    def _register_commands(self: "TGDBApp") -> None:
         def gdb_cmd(c):
             def handler(args):
                 self._send_gdb_cli(c)
@@ -75,13 +73,13 @@ class CommandsMixin:
             self.cp.register_handler(name, fn)
 
 
-    def _cmd_quit(self: TGDBApp, _: list) -> None:
+    def _cmd_quit(self: "TGDBApp", _: list) -> None:
         self._save_history_to_disk()
         self.gdb.terminate()
         self.exit(0)
 
 
-    def _cmd_goto_line(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_goto_line(self: "TGDBApp", args: list) -> str | None:
         """Handle :N line-jump: positive=goto, :+N=scroll down, :-N=scroll up."""
         if not args:
             return None
@@ -105,32 +103,32 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_help(self: TGDBApp, _: list) -> None:
+    def _cmd_help(self: "TGDBApp", _: list) -> None:
         self._show_help_in_source()
 
 
-    def _cmd_logo(self: TGDBApp, _: list) -> None:
+    def _cmd_logo(self: "TGDBApp", _: list) -> None:
         src = self._get_source_view()
         if src is not None:
             src.show_logo()
 
 
-    def _cmd_edit(self: TGDBApp, _: list) -> None:
+    def _cmd_edit(self: "TGDBApp", _: list) -> None:
         src = self._get_source_view()
         if src is not None and src.source_file:
             src.load_file(src.source_file.path)
 
 
-    def _cmd_bang(self: TGDBApp, _: list) -> None:
+    def _cmd_bang(self: "TGDBApp", _: list) -> None:
         # cgdb registers :bang, but command_do_bang() is currently a no-op.
         pass
 
 
-    def _cmd_insert(self: TGDBApp, _: list) -> None:
+    def _cmd_insert(self: "TGDBApp", _: list) -> None:
         self._switch_to_gdb()
 
 
-    def _cmd_focus(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_focus(self: "TGDBApp", args: list) -> str | None:
         if len(args) != 1:
             return "focus: requires tgdb or gdb"
         if args[0].lower() == "gdb":
@@ -142,7 +140,7 @@ class CommandsMixin:
         return "focus: requires tgdb or gdb"
 
 
-    def _cmd_noh(self: TGDBApp, _: list) -> None:
+    def _cmd_noh(self: "TGDBApp", _: list) -> None:
         self.cfg.hlsearch = False
         src = self._get_source_view()
         if src is not None:
@@ -150,7 +148,7 @@ class CommandsMixin:
             src.refresh()
 
 
-    def _cmd_syntax(self: TGDBApp, args: list) -> None:
+    def _cmd_syntax(self: "TGDBApp", args: list) -> None:
         """Mirror cgdb's :syntax [on|off|c|asm|…] command."""
         if args:
             value = args[0]
@@ -162,7 +160,7 @@ class CommandsMixin:
         self._sync_config()
 
 
-    def _cmd_shell(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_shell(self: "TGDBApp", args: list) -> str | None:
         import os
         import shlex
         import subprocess
@@ -183,7 +181,7 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_capturescreen(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_capturescreen(self: "TGDBApp", args: list) -> str | None:
         """Save an SVG screenshot of the current screen.
 
         :capturescreen            — saves to tgdb-<nanosecond-timestamp>.svg
@@ -205,7 +203,7 @@ class CommandsMixin:
         return None
 
 
-    def _send_gdb_cli(self: TGDBApp, cmd: str) -> None:
+    def _send_gdb_cli(self: "TGDBApp", cmd: str) -> None:
         _log.info(f"gdb cli: {cmd!r}")
         if self.cfg.showdebugcommands:
             # Mirror cgdb showdebugcommands: echo the command into the GDB window
@@ -226,7 +224,7 @@ class CommandsMixin:
         self._switch_to_gdb()
 
 
-    def _safe_request_location(self: TGDBApp) -> None:
+    def _safe_request_location(self: "TGDBApp") -> None:
         """Safely request the current source location; swallow any error."""
         try:
             self.gdb.request_current_location(report_error=False)
@@ -234,7 +232,7 @@ class CommandsMixin:
             pass
 
 
-    def _show_help_in_source(self: TGDBApp) -> None:
+    def _show_help_in_source(self: "TGDBApp") -> None:
         help_candidates = [
             Path("/usr/share/cgdb/cgdb.txt"),
             Path(sys.prefix) / "share" / "cgdb" / "cgdb.txt",
@@ -306,7 +304,7 @@ class CommandsMixin:
     # New feature commands
     # ------------------------------------------------------------------
 
-    def _cmd_signal(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_signal(self: "TGDBApp", args: list) -> str | None:
         """Send a signal to the inferior: :signal SIGNAME (e.g. SIGTERM, 9)."""
         if not args:
             return "signal: requires a signal name or number (e.g. :signal SIGTERM)"
@@ -314,7 +312,7 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_evaluate(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_evaluate(self: "TGDBApp", args: list) -> str | None:
         """Add an expression to the Evaluations pane: :evaluate expr."""
         if not args:
             return "evaluate: requires an expression (e.g. :evaluate myvar)"
@@ -327,7 +325,7 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_unevaluate(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_unevaluate(self: "TGDBApp", args: list) -> str | None:
         """Remove an expression by 1-based index: :unevaluate N."""
         if not args:
             return "unevaluate: requires an index (e.g. :unevaluate 1)"
@@ -346,7 +344,7 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_memory(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_memory(self: "TGDBApp", args: list) -> str | None:
         """Inspect memory in the Memory pane: :memory addr [size].
 
         addr may be a hex literal (0x...), decimal, or a GDB expression.
@@ -366,7 +364,7 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_disasm(self: TGDBApp, args: list) -> Optional[str]:
+    def _cmd_disasm(self: "TGDBApp", args: list) -> str | None:
         """Toggle inline disassembly in the source pane: :disasm [on|off]."""
         src = self._get_source_view()
         if src is None:

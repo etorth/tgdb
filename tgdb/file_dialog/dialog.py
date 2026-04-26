@@ -11,10 +11,7 @@ Layout (matches cgdb filedlg_display()):
   Row h:        [blank, used as ncurses border equivalent]
 """
 
-from __future__ import annotations
-
 import os
-from typing import Optional
 
 from textual.widget import Widget
 
@@ -82,7 +79,7 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
         self._num_buf: str = ""
         self._await_g: bool = False
         self._query_pending: bool = False
-        self._body_message: Optional[str] = None
+        self._body_message: str | None = None
         self.can_focus = True
 
     # ------------------------------------------------------------------

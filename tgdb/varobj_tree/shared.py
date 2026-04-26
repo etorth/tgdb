@@ -2,8 +2,6 @@
 Shared helpers for varobj-tree pane modules.
 """
 
-from __future__ import annotations
-
 import logging
 
 _log = logging.getLogger("tgdb.varobj_tree")
