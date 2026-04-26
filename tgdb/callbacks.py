@@ -36,6 +36,10 @@ from .command_line_bar import (
     CommandLineBar,
     CommandSubmit,
     CommandCancel,
+    CompletionPopup,
+    CompletionPopupHide,
+    CompletionPopupShow,
+    CompletionPopupUpdate,
     MessageDismissed,
 )
 from .file_dialog import FileDialog, FileSelected, FileDialogClosed
@@ -200,6 +204,8 @@ class CallbacksMixin:
 
     def on_command_submit(self, msg: CommandSubmit) -> None:
         _log.info(f"command: {msg.command!r}")
+        # Close any lingering completion popup.
+        self._close_completion_popup()
         # If a command task is already running, reject new submissions.
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
@@ -285,6 +291,7 @@ class CallbacksMixin:
 
 
     def on_command_cancel(self, msg: CommandCancel) -> None:
+        self._close_completion_popup()
         self._switch_to_tgdb()
 
 
@@ -294,6 +301,50 @@ class CallbacksMixin:
         # this handler becomes a no-op so it can't kill a subsequent CMD entry.
         if self._mode == "ML_MESSAGE":
             self._switch_to_tgdb()
+
+
+    def on_completion_popup_show(self, msg: CompletionPopupShow) -> None:
+        popup = self._get_completion_popup()
+        cmdline = self._get_cmdline()
+        if popup is None or cmdline is None:
+            return
+        bar_region = cmdline.region
+        if bar_region.width <= 0:
+            return
+        anchor_x = bar_region.x + max(0, msg.anchor_col)
+        anchor_y = bar_region.y
+        popup.open(msg.items, msg.selected_idx, anchor_x, anchor_y)
+
+
+    def on_completion_popup_update(self, msg: CompletionPopupUpdate) -> None:
+        popup = self._get_completion_popup()
+        if popup is None:
+            return
+        popup.set_selection(msg.selected_idx)
+
+
+    def on_completion_popup_hide(self, msg: CompletionPopupHide) -> None:
+        self._close_completion_popup()
+
+
+    def _get_cmdline(self) -> Optional[CommandLineBar]:
+        try:
+            return self.query_one("#cmdline", CommandLineBar)
+        except NoMatches:
+            return None
+
+
+    def _get_completion_popup(self) -> Optional[CompletionPopup]:
+        try:
+            return self.query_one("#completion-popup", CompletionPopup)
+        except NoMatches:
+            return None
+
+
+    def _close_completion_popup(self) -> None:
+        popup = self._get_completion_popup()
+        if popup is not None:
+            popup.close()
 
 
     def on_file_selected(self, msg: FileSelected) -> None:

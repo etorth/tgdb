@@ -6,6 +6,12 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from .messages import (
+    CompletionPopupHide,
+    CompletionPopupShow,
+    CompletionPopupUpdate,
+)
+
 
 class HistoryMixin:
     """Mixin providing command history and tab-completion for CommandLineBar.
@@ -238,7 +244,8 @@ class HistoryMixin:
                 self._completion_idx = (self._completion_idx - 1) % n
             else:
                 self._completion_idx = (self._completion_idx + 1) % n
-            self._update_popup_scroll()
+            if self._popup_active:
+                self.post_message(CompletionPopupUpdate(self._completion_idx))
             self._apply_completion()
         else:
             self._trigger_completion(reverse=reverse)
@@ -276,29 +283,17 @@ class HistoryMixin:
             self._popup_active = True
             self._popup_orig_buf = self._input_buf
             self._popup_orig_cursor = self._cursor_pos
-            self._popup_scroll = 0
-            self._update_popup_scroll()
-            self._resize_for_popup()
+            # Anchor the popup at the column of ":" + arg_lead_start so it
+            # lines up with the start of the current argument.
+            anchor_col = 1 + arg_lead_start  # +1 for the ":" prefix
+            self.post_message(
+                CompletionPopupShow(
+                    list(candidates),
+                    self._completion_idx,
+                    anchor_col,
+                )
+            )
         self._apply_completion()
-
-
-    def _update_popup_scroll(self) -> None:
-        if not self._popup_active or not self._completions:
-            return
-        max_rows = max(1, min(self._popup_max_rows, len(self._completions)))
-        idx = self._completion_idx
-        if idx < self._popup_scroll:
-            self._popup_scroll = idx
-        elif idx >= self._popup_scroll + max_rows:
-            self._popup_scroll = idx - max_rows + 1
-
-
-    def _resize_for_popup(self) -> None:
-        if not self._popup_active:
-            return
-        rows = max(1, min(self._popup_max_rows, len(self._completions)))
-        # +1 for the input line itself
-        self._set_height(rows + 1)
 
 
     def _apply_completion(self) -> None:
@@ -323,11 +318,12 @@ class HistoryMixin:
         if revert and self._popup_active:
             self._input_buf = self._popup_orig_buf
             self._cursor_pos = min(self._popup_orig_cursor, len(self._input_buf))
+        was_active = self._popup_active
         self._popup_active = False
         self._popup_orig_buf = ""
         self._popup_orig_cursor = 0
-        self._popup_scroll = 0
         self._completions = []
         self._completion_idx = 0
-        self._collapse_to_single_line()
+        if was_active:
+            self.post_message(CompletionPopupHide())
         self.refresh()

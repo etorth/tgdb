@@ -103,6 +103,12 @@ class TGDBApp(
     #context-menu.visible {
         display: block;
     }
+    #completion-popup {
+        display: none;
+    }
+    #completion-popup.visible {
+        display: block;
+    }
     #file-dlg {
         layer: dialog;
         width: 1fr;

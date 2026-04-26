@@ -8,11 +8,24 @@ messages it emits.
 """
 
 from .bar import CommandLineBar
-from .messages import CommandCancel, CommandSubmit, MessageDismissed
+from .messages import (
+    CommandCancel,
+    CommandSubmit,
+    CompletionPopupHide,
+    CompletionPopupShow,
+    CompletionPopupUpdate,
+    MessageDismissed,
+)
+from .popup import CompletionPopup
 
 __all__ = [
     "CommandCancel",
     "CommandLineBar",
     "CommandSubmit",
+    "CompletionPopup",
+    "CompletionPopupHide",
+    "CompletionPopupShow",
+    "CompletionPopupUpdate",
     "MessageDismissed",
 ]
+

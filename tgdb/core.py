@@ -12,7 +12,7 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 
 from .async_util import supervise
-from .command_line_bar import CommandLineBar
+from .command_line_bar import CommandLineBar, CompletionPopup
 from .context_menu import ContextMenu
 from .file_dialog import FileDialog
 from .gdb_widget import GDBWidget
@@ -46,6 +46,7 @@ class AppCoreMixin:
             )
         yield FileDialog(self.hl, id="file-dlg")
         yield ContextMenu(self.hl, id="context-menu")
+        yield CompletionPopup(self.hl, id="completion-popup")
 
 
     async def on_mount(self) -> None:

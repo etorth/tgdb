@@ -72,7 +72,7 @@ class LocalVariablePaneReconcileMixin:
         stack_value = variable.value or ""
 
         if "<error reading variable:" in stack_value:
-            label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
+            label = self._build_value_label(variable.name, "<uninitialized>", False, marker_active=marker_active)
             self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
             _log.debug(f"Skipping var_create for {variable.name}: uninitialized memory in bvar.value ({stack_value[:80]!r})")
             return True
