@@ -9,6 +9,7 @@ from typing import Optional
 
 from textual.css.query import NoMatches
 
+from .async_util import supervise
 from .source_widget import (
     ToggleBreakpoint,
     OpenFileDialog,
@@ -213,6 +214,7 @@ class CallbacksMixin:
         try:
             cmdline = self.query_one("#cmdline", CommandLineBar)
         except NoMatches:
+            self._cmd_task = None
             return
 
         # Record in history before execution.
@@ -229,18 +231,21 @@ class CallbacksMixin:
             cmdline.append_output(chunk, task_gen=task_lock_gen)
 
         try:
-            result = await self.cp.execute_async(cmd, print_fn=_print_fn)
-            if result:
-                error_output = result
-        except asyncio.CancelledError:
-            cancelled = True
-        except Exception as exc:
-            error_output = f"Internal error: {exc}"
-
-        # Retrieve all lines collected during task execution (sync-print-op)
-        collected = cmdline.get_collected_output()
-        cmdline.finish_task()
-        self._cmd_task = None
+            try:
+                result = await self.cp.execute_async(cmd, print_fn=_print_fn)
+                if result:
+                    error_output = result
+            except asyncio.CancelledError:
+                cancelled = True
+            except Exception as exc:
+                error_output = f"Internal error: {exc}"
+        finally:
+            # Always release the bar lock and clear the task slot, even if a
+            # BaseException (KeyboardInterrupt, SystemExit) escapes the inner
+            # try.  Otherwise the command line stays locked forever.
+            collected = cmdline.get_collected_output()
+            cmdline.finish_task()
+            self._cmd_task = None
 
         if cancelled:
             text = (
@@ -329,15 +334,20 @@ class CallbacksMixin:
         # long enough to make the console look hung after commands like `start`.
         if self._file_dialog_pending:
             self.gdb.request_source_files()
-        asyncio.create_task(self._refresh_breakpoints_async())
+        supervise(
+            self._refresh_breakpoints_async(),
+            name="refresh-breakpoints",
+        )
         # Refresh watch and disasm panes when stopped
         if self._evaluate_pane is not None:
-            asyncio.create_task(self._evaluate_pane.refresh_all())
+            supervise(
+                self._evaluate_pane.refresh_all(),
+                name="evaluate-pane-refresh",
+            )
         if self._disasm_pane is not None:
-            asyncio.create_task(
-                self._disasm_pane.refresh_disasm(
-                    path or "", frame.line
-                )
+            supervise(
+                self._disasm_pane.refresh_disasm(path or "", frame.line),
+                name="disasm-pane-refresh",
             )
 
 
@@ -435,7 +445,9 @@ class CallbacksMixin:
         # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
         # cgdb calls cgdb_cleanup_and_exit(0) in tgdb_process() on size<=0.
         _log.info("GDB exited")
+        self._shutting_down = True
         self._save_history_to_disk()
+        self._close_inferior_tty()
         self.exit(0)
 
 

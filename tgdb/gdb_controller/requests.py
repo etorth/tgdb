@@ -8,6 +8,8 @@ import logging
 import os
 from pathlib import Path
 
+from ..async_util import supervise
+
 _log = logging.getLogger("tgdb.gdb_controller")
 
 
@@ -175,24 +177,27 @@ class GDBRequestMixin:
         if temporary:
             flag = "-t "
         self.mi_command(f"-break-insert {flag}{location}")
-        asyncio.create_task(self._delayed_break_list())
+        # Coalesce rapid set_breakpoint() calls into a single -break-list
+        # refresh.  Cancel any pending refresh so only the latest debounce
+        # window survives; the new task starts a fresh sleep+refresh.
+        if self._break_list_task is not None and not self._break_list_task.done():
+            self._break_list_task.cancel()
+        self._break_list_task = supervise(
+            self._delayed_break_list(),
+            name="refresh-breakpoints-debounced",
+        )
 
 
     async def _delayed_break_list(self) -> None:
-        await asyncio.sleep(0.1)
+        try:
+            await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            return
         self.mi_command("-break-list")
 
 
     def delete_breakpoint(self, number: int) -> None:
         self.mi_command(f"-break-delete {number}")
-
-
-    def enable_breakpoint(self, number: int) -> None:
-        self.mi_command(f"-break-enable {number}")
-
-
-    def disable_breakpoint(self, number: int) -> None:
-        self.mi_command(f"-break-disable {number}")
 
 
     def send_signal(self, signal_name: str) -> None:

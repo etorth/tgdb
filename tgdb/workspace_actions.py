@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import replace
 from typing import Optional, TYPE_CHECKING
 
@@ -416,9 +415,9 @@ class WorkspaceMixin:
         self._locals_context_node = None
         if node is not None and isinstance(target, LocalVariablePane):
             if sub == "expand_limited":
-                asyncio.create_task(target.do_expand_limited(node))
+                await target.do_expand_limited(node)
             elif sub == "expand_full":
-                asyncio.create_task(target.do_expand_full(node))
+                await target.do_expand_full(node)
             elif sub == "fold":
                 target.do_fold(node)
 

@@ -23,6 +23,7 @@ from typing import Optional
 from textual.app import App
 from textual.widget import Widget
 
+from .async_util import supervise
 from .command_line_bar import CommandLineBar
 from .config import Config, ConfigParser
 from .context_menu import ContextMenu
@@ -163,6 +164,7 @@ class TGDBApp(
         self._preserve_window_shift_once: bool = False
         self._file_dialog_pending: bool = False
         self._inf_tty_fd: Optional[int] = None
+        self._shutting_down: bool = False
         self._context_menu_target: Optional[Widget] = None
         self._locals_context_node: Optional[object] = None  # TreeNode | None
         self._source_view: Optional[SourceView] = None
@@ -188,7 +190,10 @@ class TGDBApp(
                 "Locals",
                 self._make_local_variable_pane,
                 lambda: self._locals_pane,
-                lambda: asyncio.ensure_future(self.gdb._publish_locals_async()),
+                lambda: supervise(
+                    self.gdb._publish_locals_async(),
+                    name="publish-locals-from-pane",
+                ),
             ),
             "registers": PaneDescriptor(
                 "Registers",

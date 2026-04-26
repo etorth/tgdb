@@ -8,12 +8,12 @@ address through ``set_address(...)``.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Callable, Optional
 
 from rich.text import Text
 from textual.widget import Widget
 
+from ..async_util import supervise
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
 from ..pane_base import fit_cells
@@ -163,7 +163,7 @@ class MemoryPane(PaneBase):
         """Request a new memory dump starting at *addr*."""
         self._current_address = addr
         self._current_size = size
-        asyncio.create_task(self._fetch(addr, size))
+        supervise(self._fetch(addr, size), name="memory-fetch")
 
 
     async def _fetch(self, addr: str, size: int) -> None:

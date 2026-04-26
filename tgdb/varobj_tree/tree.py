@@ -4,12 +4,12 @@ Tree expansion, loading, and rendering helpers shared by varobj-tree panes.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
 
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
+from ..async_util import supervise
 from .shared import _ACCESS_SPECIFIERS, _is_collection_displayhint, _log, _suppress_children
 
 
@@ -137,7 +137,7 @@ class VarobjTreeMixin:
             from_idx = data.get("from_idx", 0)
             parent_displayhint = data.get("displayhint", "")
             if varobj_name and self._var_list_children:
-                asyncio.create_task(self._load_more_children(node, varobj_name, from_idx, parent_displayhint))
+                supervise(self._load_more_children(node, varobj_name, from_idx, parent_displayhint), name="varobj-load-more")
                 return
 
             data["loaded"] = False
@@ -148,7 +148,7 @@ class VarobjTreeMixin:
             data["loaded"] = False
             return
 
-        asyncio.create_task(self._load_children(node, varobj_name))
+        supervise(self._load_children(node, varobj_name), name="varobj-load-children")
 
 
     def _get_node_at_screen(self, screen_x: int, screen_y: int) -> Optional[TreeNode]:

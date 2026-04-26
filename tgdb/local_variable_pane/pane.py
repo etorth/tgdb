@@ -16,11 +16,11 @@ stops.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
 
 from textual.widgets.tree import TreeNode
 
+from ..async_util import supervise
 from ..config import Config
 from ..gdb_controller import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
@@ -173,4 +173,7 @@ class LocalVariablePane(
         if not variables and frame is None:
             return
 
-        asyncio.create_task(self._update_variables(gen, frame, self._variables))
+        supervise(
+            self._update_variables(gen, frame, self._variables),
+            name="locals-update",
+        )

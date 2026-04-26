@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -10,6 +11,7 @@ from textual.app import ComposeResult
 from textual.css.query import NoMatches
 from textual.widget import Widget
 
+from .async_util import supervise
 from .command_line_bar import CommandLineBar
 from .context_menu import ContextMenu
 from .file_dialog import FileDialog
@@ -95,31 +97,36 @@ class AppCoreMixin:
         except NoMatches:
             pass
 
-        self.gdb.on_console = lambda data: self.call_later(gdb_widget.feed_bytes, data)
-        self.gdb.on_stopped = lambda frame: self.call_later(self._ui_on_stopped, frame)
-        self.gdb.on_running = lambda: self.call_later(self._ui_on_running)
-        self.gdb.on_breakpoints = lambda breakpoints: self.call_later(
+        def _safe_later(fn, *args):
+            if self._shutting_down:
+                return
+            self.call_later(fn, *args)
+
+        self.gdb.on_console = lambda data: _safe_later(gdb_widget.feed_bytes, data)
+        self.gdb.on_stopped = lambda frame: _safe_later(self._ui_on_stopped, frame)
+        self.gdb.on_running = lambda: _safe_later(self._ui_on_running)
+        self.gdb.on_breakpoints = lambda breakpoints: _safe_later(
             self._ui_set_breakpoints,
             breakpoints,
         )
-        self.gdb.on_source_files = lambda files: self.call_later(
+        self.gdb.on_source_files = lambda files: _safe_later(
             self._ui_set_source_files,
             files,
         )
-        self.gdb.on_source_file = lambda path, line: self.call_later(
+        self.gdb.on_source_file = lambda path, line: _safe_later(
             self._ui_load_source_file,
             path,
             line,
         )
-        self.gdb.on_locals = lambda variables: self.call_later(self._ui_set_locals, variables)
-        self.gdb.on_registers = lambda registers: self.call_later(
+        self.gdb.on_locals = lambda variables: _safe_later(self._ui_set_locals, variables)
+        self.gdb.on_registers = lambda registers: _safe_later(
             self._ui_set_registers,
             registers,
         )
-        self.gdb.on_stack = lambda frames: self.call_later(self._ui_set_stack, frames)
-        self.gdb.on_threads = lambda threads: self.call_later(self._ui_set_threads, threads)
-        self.gdb.on_exit = lambda: self.call_later(self._ui_gdb_exit)
-        self.gdb.on_error = lambda msg: self.call_later(self._show_status, f"Error: {msg}")
+        self.gdb.on_stack = lambda frames: _safe_later(self._ui_set_stack, frames)
+        self.gdb.on_threads = lambda threads: _safe_later(self._ui_set_threads, threads)
+        self.gdb.on_exit = lambda: _safe_later(self._ui_gdb_exit)
+        self.gdb.on_error = lambda msg: _safe_later(self._show_status, f"Error: {msg}")
 
         try:
             self.gdb.start(rows=40, cols=200)
@@ -128,7 +135,7 @@ class AppCoreMixin:
             return
 
         self._gdb_task = asyncio.create_task(self.gdb.run_async())
-        asyncio.create_task(self._request_initial_location())
+        supervise(self._request_initial_location(), name="request-initial-location")
 
         self._set_mode("GDB_PROMPT")
         gdb_widget.focus()
@@ -140,12 +147,34 @@ class AppCoreMixin:
         try:
             bar = self.query_one("#cmdline", CommandLineBar)
             bar.save_history(max_size=self.cfg.historysize)
-        except Exception:
-            pass
+        except NoMatches:
+            return
+        except Exception as exc:
+            logging.getLogger("tgdb.app").warning(
+                f"failed to persist command history: {exc!r}"
+            )
+
+
+    def _close_inferior_tty(self) -> None:
+        """Release the inferior-tty master fd allocated by Ctrl-T, if any."""
+        fd = self._inf_tty_fd
+        if fd is None:
+            return
+        self._inf_tty_fd = None
+        try:
+            import os
+
+            os.close(fd)
+        except OSError as exc:
+            logging.getLogger("tgdb.app").debug(
+                f"failed to close inferior-tty fd {fd}: {exc!r}"
+            )
 
 
     async def on_unmount(self) -> None:
+        self._shutting_down = True
         self._save_history_to_disk()
+        self._close_inferior_tty()
         if self._gdb_task and not self._gdb_task.done():
             self._gdb_task.cancel()
             try:

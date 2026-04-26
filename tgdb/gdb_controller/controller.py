@@ -25,6 +25,7 @@ import ptyprocess
 
 from .requests import GDBRequestMixin
 from .results import GDBResultMixin
+from ..async_util import supervise
 from .types import (  # noqa: F401 — re-exported
     Breakpoint,
     Frame,
@@ -40,6 +41,11 @@ from .parsing import ParsingMixin
 from .miparser import GDBMIParser
 
 _log = logging.getLogger("tgdb.gdb_controller")
+
+# Hard cap on the unparsed MI buffer.  If GDB ever emits a single line longer
+# than this without a trailing newline (e.g. a runaway pretty-printer), we
+# truncate it instead of letting memory grow without bound.
+_MI_BUF_MAX_BYTES = 16 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +112,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
         self._request_meta: dict[int, dict[str, object]] = {}
+        # Pending debounced -break-list refresh (replaces any in-flight task
+        # so rapid set_breakpoint() calls coalesce into one MI request).
+        self._break_list_task: Optional[asyncio.Task] = None
 
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
@@ -143,9 +152,13 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         Primary PTY  : GDB console (user sees + types here).
         Secondary PTY: GDB MI channel via 'new-ui mi <slave_device>'.
         """
-        # Create secondary PTY for MI channel
+        # Create secondary PTY for MI channel.
+        # Assign to self immediately so terminate() can clean up if anything below fails.
         mi_master_fd, mi_slave_fd = os.openpty()
+        self._mi_master_fd = mi_master_fd
+        self._mi_slave_fd = mi_slave_fd
 
+        cmd: list[str] = []
         try:
             # Disable echo on MI slave so our written commands don't echo back
             try:
@@ -154,8 +167,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                     termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ECHONL
                 )
                 termios.tcsetattr(mi_slave_fd, termios.TCSANOW, attrs)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.warning(f"failed to disable echo on MI slave: {exc!r}")
 
             mi_slave_name = os.ttyname(mi_slave_fd)
             # Keep slave fd open — if we close it before GDB opens it, the master
@@ -168,17 +181,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             cmd.extend(self.gdb_args)
             self._proc = ptyprocess.PtyProcess.spawn(cmd, dimensions=(rows, cols))
         except Exception:
-            # Clean up PTY fds if startup fails anywhere after openpty().
-            for fd in (mi_master_fd, mi_slave_fd):
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
             _log.error(f"GDB spawn failed, cmd={cmd!r}")
+            self.terminate()
             raise
         _log.info(f"GDB spawned, cmd={cmd!r}")
-        self._mi_master_fd = mi_master_fd
-        self._mi_slave_fd = mi_slave_fd
 
 
     def resize(self, rows: int, cols: int) -> None:
@@ -286,6 +292,19 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             if not data:
                 return
             self._mi_buf += data.decode("utf-8", errors="replace")
+            if len(self._mi_buf) > _MI_BUF_MAX_BYTES:
+                # Drop everything before the last newline so we resync on the
+                # next complete record.  If there's no newline at all, drop
+                # the whole buffer — the offending record cannot be parsed.
+                last_nl = self._mi_buf.rfind("\n")
+                dropped = (
+                    len(self._mi_buf) if last_nl < 0 else last_nl
+                )
+                self._mi_buf = "" if last_nl < 0 else self._mi_buf[last_nl + 1:]
+                _log.warning(
+                    f"MI buffer exceeded {_MI_BUF_MAX_BYTES} bytes; "
+                    f"discarded {dropped} bytes to resync"
+                )
             self._process_mi_buffer()
         except (BlockingIOError, OSError):
             pass
@@ -308,5 +327,5 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         if t == "result":
             self._handle_result(rec)
         elif t == "notify":
-            asyncio.ensure_future(self._handle_async(rec))
+            supervise(self._handle_async(rec), name="mi-handle-async")
         # console/target/log/done/output on MI channel are noise — ignore

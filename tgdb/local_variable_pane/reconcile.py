@@ -4,10 +4,9 @@ Reconciliation helpers for the local-variable pane.
 
 from __future__ import annotations
 
-import asyncio
-
 from textual.widgets import Tree
 
+from ..async_util import supervise
 from ..gdb_controller import Frame, LocalVariable
 from .shared import BindingEntry, BindingKey, ExpansionPath, _log, _suppress_children
 
@@ -313,7 +312,7 @@ class LocalVariablePaneReconcileMixin:
                 node_data["loaded"] = False
                 node.remove_children()
                 node.add_leaf("⏳ loading...")
-                asyncio.create_task(self._load_children(node, new_varobj))
+                supervise(self._load_children(node, new_varobj), name="locals-load-children")
             elif not has_children:
                 self._collapse_to_leaf_node(node, exp, value, marker_active=False)
 
@@ -402,6 +401,6 @@ class LocalVariablePaneReconcileMixin:
             data["loaded"] = False
             node.remove_children()
             if node.is_expanded:
-                asyncio.create_task(self._load_children(node, varobj_name))
+                supervise(self._load_children(node, varobj_name), name="locals-load-children")
             else:
                 node.add_leaf("⏳ loading...")

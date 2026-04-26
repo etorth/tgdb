@@ -9,11 +9,11 @@ through the public methods documented on the class below.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Callable, Coroutine, Optional
 
 from textual.widgets import Tree
 
+from ..async_util import supervise
 from ..config import Config
 from ..highlight_groups import HighlightGroups
 from ..varobj_tree import VarobjTreePane
@@ -85,7 +85,7 @@ class EvaluatePane(VarobjTreePane):
         idx = len(self._expressions)
         self._expressions.append(expr)
         self._expr_varobjs.append("")
-        asyncio.create_task(self._create_expression_node(idx, expr))
+        supervise(self._create_expression_node(idx, expr), name="watch-create-expr")
 
 
     def remove_expression(self, index: int) -> Optional[str]:
@@ -105,7 +105,7 @@ class EvaluatePane(VarobjTreePane):
             if removed_varobj in self._varobj_names:
                 self._varobj_names.remove(removed_varobj)
             if self._var_delete:
-                asyncio.create_task(self._delete_varobj_safe(removed_varobj))
+                supervise(self._delete_varobj_safe(removed_varobj), name="watch-delete-varobj")
 
         return removed_expr
 
@@ -146,7 +146,7 @@ class EvaluatePane(VarobjTreePane):
         if idx >= len(self._expressions) or self._expressions[idx] != expr:
             varobj_name = info.get("name", "")
             if varobj_name and self._var_delete:
-                asyncio.create_task(self._delete_varobj_safe(varobj_name))
+                supervise(self._delete_varobj_safe(varobj_name), name="watch-delete-varobj")
             return
 
         varobj_name = info.get("name", "")
@@ -211,6 +211,6 @@ class EvaluatePane(VarobjTreePane):
             data["loaded"] = False
             node.remove_children()
             if node.is_expanded:
-                asyncio.create_task(self._load_children(node, varobj_name))
+                supervise(self._load_children(node, varobj_name), name="watch-load-children")
             else:
                 node.add_leaf("⏳ loading...")
