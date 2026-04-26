@@ -346,9 +346,17 @@ class KeyRoutingMixin:
     # ------------------------------------------------------------------
 
     def _point_in_widget(self: "TGDBApp", widget, screen_x: int, screen_y: int) -> bool:
+        if widget is None:
+            return False
+        if not getattr(widget, "is_mounted", False):
+            return False
+        if not getattr(widget, "display", True):
+            return False
         try:
             region = widget.region
         except Exception:
+            return False
+        if region.width <= 0 or region.height <= 0:
             return False
         return (
             region.x <= screen_x < region.x + region.width

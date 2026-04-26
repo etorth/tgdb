@@ -27,11 +27,6 @@ class GDBResultMixin:
         elif cls in ("done", "running"):
             self._handle_done_result(meta, results)
 
-        if token is not None and token in self._pending:
-            future = self._pending.pop(token)
-            if not future.done():
-                future.set_result({"message": cls, "payload": results})
-
 
     def _handle_error_result(self, meta: dict, results: dict) -> None:
         kind = meta.get("kind")

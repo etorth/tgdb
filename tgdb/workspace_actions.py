@@ -116,6 +116,9 @@ class WorkspaceMixin:
         if self._disasm_pane is None:
             self._disasm_pane = DisasmPane(self.hl)
             self._disasm_pane.set_disasm_fn(self.gdb.request_disassembly_async)
+            self._disasm_pane.set_disasm_pc_fn(
+                self.gdb.request_disassembly_around_pc_async
+            )
         return self._disasm_pane
 
     # ------------------------------------------------------------------

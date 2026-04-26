@@ -209,19 +209,22 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
 
 
     def terminate(self) -> None:
+        if self._proc is None:
+            _log.warning("terminate() called but GDB was never started")
+            return
         _log.info("GDB terminated")
-        if self._proc and self._proc.isalive():
+        if self._proc.isalive():
             try:
                 self._proc.terminate(force=True)
             except Exception:
-                pass
+                _log.debug("GDB terminate() raised", exc_info=True)
         for attr in ("_mi_master_fd", "_mi_slave_fd"):
             fd = getattr(self, attr, -1)
             if fd >= 0:
                 try:
                     os.close(fd)
                 except Exception:
-                    pass
+                    _log.debug(f"closing {attr} raised", exc_info=True)
                 setattr(self, attr, -1)
 
     # ------------------------------------------------------------------

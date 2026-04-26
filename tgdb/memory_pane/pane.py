@@ -128,17 +128,22 @@ class MemoryPane(PaneBase):
     ``set_read_fn(fn)``
         Inject the async callback used to read raw memory blocks from GDB.
 
-    ``set_address(addr, size=64)``
-        Request a new memory region. The pane asynchronously fetches the bytes
-        and refreshes itself when the request completes.
+    ``set_address(addr, size=None)``
+        Request a new memory region. Pass ``size=None`` (default) to size the
+        request to the visible pane height; pass an explicit byte count to
+        override that. The pane asynchronously fetches the bytes and refreshes
+        itself when the request completes.
     """
+
+    BYTES_PER_ROW = 16
+
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         """Create an empty memory pane."""
         super().__init__(hl, **kwargs)
         self._content = _MemoryContent(hl)
         self._current_address: str = ""
-        self._current_size: int = 64
+        self._explicit_size: int | None = None
         self._read_fn: Callable | None = None
 
 
@@ -157,11 +162,23 @@ class MemoryPane(PaneBase):
         self._content._read_fn = fn
 
 
-    def set_address(self, addr: str, size: int = 64) -> None:
+    def _request_size(self) -> int:
+        if self._explicit_size is not None:
+            return self._explicit_size
+        # Reserve one row for the header; default to 4 rows when the pane has
+        # not been laid out yet so the first fetch has something to show.
+        height = self._content.size.height or 0
+        rows = max(4, height - 1)
+        return rows * self.BYTES_PER_ROW
+
+
+    def set_address(self, addr: str, size: int | None = None) -> None:
         """Request a new memory dump starting at *addr*."""
         self._current_address = addr
-        self._current_size = size
-        supervise(self._fetch(addr, size), name="memory-fetch")
+        self._explicit_size = size
+        supervise(
+            self._fetch(addr, self._request_size()), name="memory-fetch",
+        )
 
 
     def refresh_memory(self) -> None:
@@ -169,9 +186,19 @@ class MemoryPane(PaneBase):
         if not self._current_address:
             return
         supervise(
-            self._fetch(self._current_address, self._current_size),
+            self._fetch(self._current_address, self._request_size()),
             name="memory-refresh",
         )
+
+
+    def on_resize(self, event) -> None:
+        # When the user grows the pane, refetch so newly-visible rows are
+        # populated with real data instead of blank padding.
+        if self._current_address and self._explicit_size is None:
+            supervise(
+                self._fetch(self._current_address, self._request_size()),
+                name="memory-resize",
+            )
 
 
     async def _fetch(self, addr: str, size: int) -> None:

@@ -34,7 +34,9 @@ class LocalVariablePaneReconcileMixin:
                 try:
                     await self._var_delete(varobj_name)
                 except Exception:
-                    pass
+                    _log.debug(
+                        f"-var-delete {varobj_name} failed", exc_info=True,
+                    )
 
             if self._rebuild_gen != gen:
                 return False
@@ -110,7 +112,9 @@ class LocalVariablePaneReconcileMixin:
                 try:
                     await self._var_delete(varobj_name)
                 except Exception:
-                    pass
+                    _log.debug(
+                        f"-var-delete {varobj_name} failed", exc_info=True,
+                    )
 
             label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
             self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)

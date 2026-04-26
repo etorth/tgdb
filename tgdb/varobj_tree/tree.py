@@ -4,6 +4,7 @@ Tree expansion, loading, and rendering helpers shared by varobj-tree panes.
 
 import logging
 
+from textual.css.query import NoMatches
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
@@ -52,7 +53,7 @@ class VarobjTreeMixin:
         """Return paths for every expanded node in the current tree."""
         try:
             tree = self.query_one(Tree)
-        except Exception:
+        except NoMatches:
             return set()
 
         paths: set[tuple[tuple[str, int], ...]] = set()
@@ -187,7 +188,7 @@ class VarobjTreeMixin:
         """Return the tree node whose row contains the given screen point."""
         try:
             tree = self.query_one(Tree)
-        except Exception:
+        except NoMatches:
             return None
 
         tree_region = tree.region

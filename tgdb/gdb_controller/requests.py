@@ -228,6 +228,29 @@ class GDBRequestMixin:
         return []
 
 
+    async def request_disassembly_around_pc_async(
+        self, start_addr: str, span_bytes: int = 256, mode: int = 0,
+    ) -> list[dict]:
+        """Disassemble [start_addr, start_addr + span_bytes).
+
+        Used when the current frame has no source file (libc, JIT, signal
+        handlers) and the source-line based query cannot be issued.
+        """
+        if not start_addr:
+            return []
+        end_expr = f"{start_addr}+{span_bytes}"
+        result = await self.mi_command_async(
+            f"-data-disassemble -s {start_addr} -e {end_expr} -- {mode}"
+        )
+        payload = result.get("payload") or {}
+        asm = payload.get("asm_insns") or []
+        if isinstance(asm, dict):
+            asm = [asm]
+        if isinstance(asm, list):
+            return asm
+        return []
+
+
     async def eval_expr(self, expr: str) -> str:
         escaped = expr.replace("\\", "\\\\").replace('"', '\\"')
         result = await self.mi_command_async(f'-data-evaluate-expression "{escaped}"')

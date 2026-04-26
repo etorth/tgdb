@@ -132,7 +132,7 @@ class AppCoreMixin:
             self._show_status(f"Failed to start GDB: {exc}")
             return
 
-        self._gdb_task = asyncio.create_task(self.gdb.run_async())
+        self._gdb_task = supervise(self.gdb.run_async(), name="gdb-run")
         supervise(self._request_initial_location(), name="request-initial-location")
 
         self._set_mode("GDB_PROMPT")

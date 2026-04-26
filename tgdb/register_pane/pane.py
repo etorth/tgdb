@@ -44,12 +44,22 @@ _CATEGORY_RULES: list[tuple[str, re.Pattern[str]]] = [
         re.IGNORECASE)),
     ("SSE/AVX", re.compile(
         r"^(xmm[0-9]+|ymm[0-9]+|zmm[0-9]+|mxcsr)$", re.IGNORECASE)),
+    ("Vector", re.compile(
+        # AArch64 SIMD/FP registers (Neon): v0..v31, q0..q31, d0..d31, s0..s31,
+        # plus the FP control/status registers fpcr/fpsr.
+        r"^(v[0-9]+|q[0-9]+|d[0-9]+|s[0-9]+|fpcr|fpsr)$", re.IGNORECASE)),
+    ("SVE", re.compile(
+        # AArch64 Scalable Vector Extension: z0..z31, p0..p15, ffr.
+        r"^(z[0-9]+|p[0-9]+|ffr)$", re.IGNORECASE)),
     ("MMX", re.compile(r"^mm[0-9]+$", re.IGNORECASE)),
     ("Mask", re.compile(r"^k[0-7]$", re.IGNORECASE)),
 ]
 
 
-_CATEGORY_ORDER = ["General", "Segment", "FPU", "SSE/AVX", "MMX", "Mask", "Other"]
+_CATEGORY_ORDER = [
+    "General", "Segment", "FPU", "SSE/AVX", "Vector", "SVE", "MMX", "Mask",
+    "Other",
+]
 
 
 _DEFAULT_EXPANDED = {"General"}

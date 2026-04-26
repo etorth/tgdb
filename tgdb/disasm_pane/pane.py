@@ -103,6 +103,7 @@ class _DisasmContent(Widget):
         self._scroll_top: int = 0
         self._selected: int = 0
         self._await_g: bool = False
+        self._user_moved: bool = False
 
 
     def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
@@ -113,13 +114,40 @@ class _DisasmContent(Widget):
             if (current_addr and line.addr == current_addr) or line.is_current:
                 pc_index = i
                 break
-        if pc_index >= 0:
-            self._selected = pc_index
-            self._center_on(pc_index)
-        else:
+        if pc_index < 0:
+            self._user_moved = False
             self._selected = 0
             self._scroll_top = 0
+        elif self._user_moved and 0 <= self._selected < len(self._lines):
+            # Keep the user's cursor where they put it; only re-center if
+            # the PC is no longer visible in the current viewport.
+            height = max(1, self.size.height or 1)
+            if not (self._scroll_top <= pc_index < self._scroll_top + height):
+                self._center_on(pc_index)
+        else:
+            self._selected = pc_index
+            self._center_on(pc_index)
         self.refresh()
+
+
+    def update_pc(self, current_addr: str) -> bool:
+        """Move just the PC marker without replacing the line list.
+
+        Returns True when ``current_addr`` is found inside the cached lines,
+        False otherwise (caller should fall back to a full refresh).
+        """
+        if not current_addr:
+            return False
+        for line in self._lines:
+            if line.addr == current_addr:
+                self._current_addr = current_addr
+                if not self._user_moved:
+                    pc_index = self._lines.index(line)
+                    self._selected = pc_index
+                    self._center_on(pc_index)
+                self.refresh()
+                return True
+        return False
 
 
     def _center_on(self, index: int) -> None:
@@ -264,6 +292,7 @@ class _DisasmContent(Widget):
             return
         self._ensure_visible()
         if self._selected != previous:
+            self._user_moved = True
             self._pane.refresh_title()
         self.refresh()
         event.stop()
@@ -298,6 +327,7 @@ class DisasmPane(PaneBase):
         super().__init__(hl, **kwargs)
         self._content = _DisasmContent(hl, self)
         self._disasm_fn: Callable | None = None
+        self._disasm_pc_fn: Callable | None = None
         self._thread_id: str = ""
         self._func: str = ""
 
@@ -363,6 +393,20 @@ class DisasmPane(PaneBase):
         self._disasm_fn = fn
 
 
+    def set_disasm_pc_fn(self, fn: Callable) -> None:
+        """Install the async callback used to disassemble around an address.
+
+        Used as a fallback when the current frame has no source file (libc,
+        signal handlers, JIT) so the source-line based query is not usable.
+        """
+        self._disasm_pc_fn = fn
+
+
+    def reset_user_cursor(self) -> None:
+        """Forget any user-driven cursor movement so the next snapshot recenters."""
+        self._content._user_moved = False
+
+
     async def refresh_disasm(
         self,
         filename: str,
@@ -372,15 +416,36 @@ class DisasmPane(PaneBase):
         func: str = "",
     ) -> None:
         """Fetch and display disassembly near a source location."""
-        if not self._disasm_fn:
+        if thread_id:
+            self._thread_id = thread_id
+        if func:
+            self._func = func
+
+        # Fast path: PC moved within the cached function — just shift the
+        # marker without re-issuing the MI request. This avoids a round-trip
+        # per ``nexti`` in tight loops.
+        if (
+            current_addr
+            and (not func or func == self._func)
+            and self._content.update_pc(current_addr)
+        ):
+            self.refresh_title()
             return
-        try:
-            raw = await self._disasm_fn(filename, line)
-        except Exception:
+
+        if filename and self._disasm_fn is not None:
+            try:
+                raw = await self._disasm_fn(filename, line)
+            except Exception:
+                raw = []
+        elif current_addr and self._disasm_pc_fn is not None:
+            try:
+                raw = await self._disasm_pc_fn(current_addr)
+            except Exception:
+                raw = []
+        else:
             return
+
         lines = _parse_disasm(raw, current_addr)
-        # Derive function name from the disasm payload when the caller did
-        # not supply one explicitly.
         if not func and lines:
             for entry in lines:
                 if entry.func_name:

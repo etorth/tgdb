@@ -2,17 +2,14 @@
 
 The most important entry point is :func:`supervise`. It wraps an
 ``asyncio.create_task`` with a done-callback that logs any unhandled
-exception via :mod:`tgdb.log`. Use it whenever a coroutine has to be
-launched from synchronous code (the most common case is callbacks driven
-by ``loop.add_reader`` on the GDB MI fd) — the returned task is otherwise
-a perfectly normal ``asyncio.Task`` so it can also be stored, awaited, or
-cancelled by the caller.
-
-Plain ``asyncio.create_task(coro)`` is still appropriate when the result
-is stored in an attribute *and* the caller eventually awaits or cancels
-it (for example ``self._gdb_task`` in :class:`AppCoreMixin`). The point
-of :func:`supervise` is to make sure that "fire-and-forget" coroutines
-never silently swallow exceptions.
+exception via :mod:`tgdb.log`. Use it for *every* coroutine launched from
+synchronous code, including the cases where the resulting task is stored
+on ``self`` and later cancelled — wrapping in :func:`supervise` is still
+correct because cancellation is a no-op for the supervisor (the
+done-callback skips cancelled tasks). Plain ``asyncio.create_task`` is
+discouraged because it lets exceptions surface only as Python's "Task
+exception was never retrieved" warning at GC time, which is easy to miss
+in a long debugging session.
 """
 
 import asyncio

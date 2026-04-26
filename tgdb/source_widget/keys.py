@@ -1,5 +1,7 @@
 """Key-handling helpers for the internal source-pane content widget."""
 
+import logging
+
 from textual import events
 
 from .messages import (
@@ -14,6 +16,9 @@ from .messages import (
     ToggleBreakpoint,
     ToggleOrientation,
 )
+
+
+_log = logging.getLogger("tgdb.source_widget")
 
 
 class SourceKeyMixin:
@@ -174,7 +179,7 @@ class SourceKeyMixin:
                 status = self.app.query_one("#cmdline", CommandLineBar)
                 status.feed_key(key, char)
             except Exception:
-                pass
+                _log.debug("feed_key to cmdline failed", exc_info=True)
             event.stop()
             return
 

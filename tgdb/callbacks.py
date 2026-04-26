@@ -207,8 +207,9 @@ class CallbacksMixin:
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
             return
-        self._cmd_task = asyncio.create_task(
-            self._run_cmd_task(msg.command, history_text=msg.history_text)
+        self._cmd_task = supervise(
+            self._run_cmd_task(msg.command, history_text=msg.history_text),
+            name="cmd-task",
         )
 
 

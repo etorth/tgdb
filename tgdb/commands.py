@@ -348,7 +348,7 @@ class CommandsMixin:
         """Inspect memory in the Memory pane: :memory addr [size].
 
         addr may be a hex literal (0x...), decimal, or a GDB expression.
-        size defaults to 64 bytes.
+        When *size* is omitted the dump is sized to fit the visible pane.
         """
         if not args:
             return "memory: requires an address (e.g. :memory 0x7fffffffd000)"
@@ -356,10 +356,12 @@ class CommandsMixin:
         if memory_pane is None:
             return "memory: Memory pane is not open (add it from context menu first)"
         addr = args[0]
-        try:
-            size = int(args[1]) if len(args) > 1 else 64
-        except ValueError:
-            return f"memory: invalid size {args[1]!r}"
+        size: int | None = None
+        if len(args) > 1:
+            try:
+                size = int(args[1])
+            except ValueError:
+                return f"memory: invalid size {args[1]!r}"
         memory_pane.set_address(addr, size)
         return None
 
