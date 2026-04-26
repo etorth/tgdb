@@ -109,6 +109,13 @@ class _DisasmContent(Widget):
     def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
         self._lines = list(lines)
         self._current_addr = current_addr
+        # Use ``current_addr`` (when provided) as the single source of truth
+        # for the PC marker; clear any per-line ``is_current`` flags the
+        # parser may have set so two different lines can never light up at
+        # the same time.
+        if current_addr:
+            for line in self._lines:
+                line.is_current = (line.addr == current_addr)
         pc_index = -1
         for i, line in enumerate(self._lines):
             if (current_addr and line.addr == current_addr) or line.is_current:
@@ -138,16 +145,25 @@ class _DisasmContent(Widget):
         """
         if not current_addr:
             return False
-        for line in self._lines:
+        target_index = -1
+        for i, line in enumerate(self._lines):
             if line.addr == current_addr:
-                self._current_addr = current_addr
-                if not self._user_moved:
-                    pc_index = self._lines.index(line)
-                    self._selected = pc_index
-                    self._center_on(pc_index)
-                self.refresh()
-                return True
-        return False
+                target_index = i
+                break
+        if target_index < 0:
+            return False
+        # Clear any stale per-line is_current marks left over from earlier
+        # parses; the active PC is tracked solely via ``_current_addr`` from
+        # this point on.
+        for line in self._lines:
+            line.is_current = False
+        self._lines[target_index].is_current = True
+        self._current_addr = current_addr
+        if not self._user_moved:
+            self._selected = target_index
+            self._center_on(target_index)
+        self.refresh()
+        return True
 
 
     def _center_on(self, index: int) -> None:
