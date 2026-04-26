@@ -108,13 +108,36 @@ class _DisasmContent(Widget):
     def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
         self._lines = list(lines)
         self._current_addr = current_addr
-        self._selected = 0
+        pc_index = -1
         for i, line in enumerate(self._lines):
             if (current_addr and line.addr == current_addr) or line.is_current:
-                self._selected = i
+                pc_index = i
                 break
-        self._ensure_visible()
+        if pc_index >= 0:
+            self._selected = pc_index
+            self._center_on(pc_index)
+        else:
+            self._selected = 0
+            self._scroll_top = 0
         self.refresh()
+
+
+    def _center_on(self, index: int) -> None:
+        height = max(1, self.size.height or 1)
+        target = index - height // 2
+        max_top = max(0, len(self._lines) - height)
+        self._scroll_top = max(0, min(target, max_top))
+
+
+    def on_resize(self, event: events.Resize) -> None:
+        # Keep the PC line centered when the pane is first sized or resized
+        # so the layout doesn't show the PC at the top after a stop.
+        if self._current_addr:
+            for i, line in enumerate(self._lines):
+                if line.addr == self._current_addr or line.is_current:
+                    self._center_on(i)
+                    break
+            self.refresh()
 
 
     def _ensure_visible(self) -> None:
