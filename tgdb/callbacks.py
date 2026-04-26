@@ -393,8 +393,17 @@ class CallbacksMixin:
                 name="evaluate-pane-refresh",
             )
         if self._disasm_pane is not None:
+            current_addr = ""
+            if self.gdb.current_frame is not None:
+                current_addr = self.gdb.current_frame.addr
             supervise(
-                self._disasm_pane.refresh_disasm(path or "", frame.line),
+                self._disasm_pane.refresh_disasm(
+                    path or "",
+                    frame.line,
+                    current_addr=current_addr,
+                    thread_id=self.gdb.current_thread_id,
+                    func=frame.func,
+                ),
                 name="disasm-pane-refresh",
             )
 

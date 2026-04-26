@@ -1,10 +1,19 @@
 """
 Public implementation of the disassembly-pane package.
 
-``DisasmPane`` is a black-box disassembly viewer. The caller constructs the
-widget, injects one async disassembly callback, and either pushes parsed lines
-directly with ``set_disasm(...)`` or asks the pane to refresh itself from a
-source location with ``refresh_disasm(...)``.
+``DisasmPane`` is a black-box disassembly viewer that mirrors GDB's
+``layout asm`` window:
+
+- The title bar shows ``Thread <id> (asm) In: <func>`` on the left and
+  ``Lxx  PC: 0x...`` on the right, all in the StatusLine palette (tgdb
+  puts pane status at the top, while plain gdb puts it at the bottom).
+- Each line is formatted as ``ADDR  <func+offset>  INST`` with the columns
+  aligned across the visible block.
+- The currently-executing instruction is marked with a leading ``>`` and
+  rendered in the ``ExecutingLineBlock`` highlight group, so it stands
+  out the same way the source pane marks the current line.
+- Vi-style ``j``/``k``/``gg``/``G`` navigation moves the keyboard cursor
+  through the listing.
 """
 
 import asyncio
@@ -42,9 +51,10 @@ class _DisasmContent(Widget):
     }
     """
 
-    def __init__(self, hl: HighlightGroups, **kwargs) -> None:
+    def __init__(self, hl: HighlightGroups, pane: "DisasmPane", **kwargs) -> None:
         super().__init__(**kwargs)
         self.hl = hl
+        self._pane = pane
         self.can_focus = True
         self._lines: list[DisasmLine] = []
         self._current_addr: str = ""
@@ -56,9 +66,9 @@ class _DisasmContent(Widget):
     def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
         self._lines = list(lines)
         self._current_addr = current_addr
-        # Scroll to current PC
+        self._selected = 0
         for i, line in enumerate(self._lines):
-            if line.addr == current_addr or line.is_current:
+            if (current_addr and line.addr == current_addr) or line.is_current:
                 self._selected = i
                 break
         self._ensure_visible()
@@ -73,13 +83,18 @@ class _DisasmContent(Widget):
             self._scroll_top = self._selected - height + 1
 
 
-    def _format_line(self, line: DisasmLine) -> str:
-        func_part = f"<{line.func_name}+{line.offset}>" if line.func_name else ""
-        parts = [line.addr]
-        if func_part:
-            parts.append(func_part)
-        parts.append(line.inst)
-        return "  ".join(p for p in parts if p)
+    def _format_line(self, line: DisasmLine, is_pc: bool, addr_w: int, func_w: int) -> str:
+        if is_pc:
+            marker = ">"
+        else:
+            marker = " "
+        if line.func_name:
+            func_part = f"<{line.func_name}+{line.offset}>"
+        else:
+            func_part = ""
+        addr = line.addr.ljust(addr_w)
+        func_col = func_part.ljust(func_w)
+        return f"{marker}{addr}  {func_col}  {line.inst}"
 
 
     def render(self) -> Text:
@@ -87,12 +102,29 @@ class _DisasmContent(Widget):
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
         visible = self._lines[self._scroll_top:self._scroll_top + height]
+        addr_w = 0
+        func_w = 0
+        for line in visible:
+            if len(line.addr) > addr_w:
+                addr_w = len(line.addr)
+            if line.func_name:
+                func_part = f"<{line.func_name}+{line.offset}>"
+                if len(func_part) > func_w:
+                    func_w = len(func_part)
         for i, line in enumerate(visible):
             if i > 0:
                 result.append("\n")
-            is_pc = line.addr == self._current_addr or line.is_current
-            style = self.hl.style("ExecutingLineBlock") if is_pc else self.hl.style("Normal")
-            result.append(fit_cells(self._format_line(line), width), style=style)
+            is_pc = (
+                self._current_addr != "" and line.addr == self._current_addr
+            ) or line.is_current
+            if is_pc:
+                style = self.hl.style("ExecutingLineBlock")
+            elif (self._scroll_top + i) == self._selected:
+                style = self.hl.style("SelectedLineHighlight")
+            else:
+                style = self.hl.style("Normal")
+            text = self._format_line(line, is_pc, addr_w, func_w)
+            result.append(fit_cells(text, width), style=style)
         remaining = height - len(visible)
         for _ in range(max(0, remaining)):
             result.append("\n")
@@ -102,35 +134,46 @@ class _DisasmContent(Widget):
 
     def on_key(self, event: events.Key) -> None:
         key = event.key
+        previous = self._selected
         if key in ("j", "down"):
-            self._selected = min(len(self._lines) - 1, self._selected + 1) if self._lines else 0
-            self._ensure_visible()
+            if self._lines:
+                self._selected = min(len(self._lines) - 1, self._selected + 1)
             self._await_g = False
-            self.refresh()
-            event.stop()
         elif key in ("k", "up"):
             self._selected = max(0, self._selected - 1)
-            self._ensure_visible()
             self._await_g = False
-            self.refresh()
-            event.stop()
         elif key == "G":
             self._selected = max(0, len(self._lines) - 1)
-            self._ensure_visible()
             self._await_g = False
-            self.refresh()
-            event.stop()
         elif key == "g":
             if self._await_g:
                 self._selected = 0
                 self._scroll_top = 0
                 self._await_g = False
-                self.refresh()
             else:
                 self._await_g = True
             event.stop()
+            self.refresh()
+            return
+        elif key in ("ctrl+f", "pagedown"):
+            self._selected = min(
+                max(0, len(self._lines) - 1),
+                self._selected + max(1, self.size.height - 1),
+            )
+            self._await_g = False
+        elif key in ("ctrl+b", "pageup"):
+            self._selected = max(
+                0, self._selected - max(1, self.size.height - 1)
+            )
+            self._await_g = False
         else:
             self._await_g = False
+            return
+        self._ensure_visible()
+        if self._selected != previous:
+            self._pane.refresh_title()
+        self.refresh()
+        event.stop()
 
 
 class DisasmPane(PaneBase):
@@ -141,26 +184,64 @@ class DisasmPane(PaneBase):
     ``DisasmPane(hl, **kwargs)``
         Create the widget.
 
-    ``set_disasm(lines, current_addr="")``
-        Replace the visible disassembly with already-parsed lines.
+    ``set_disasm(lines, current_addr="", thread_id="", func="")``
+        Replace the visible disassembly with already-parsed lines and the
+        current PC / thread / function used in the title bar.
 
     ``set_disasm_fn(fn)``
         Inject the async callback that asks GDB for disassembly data.
 
-    ``refresh_disasm(filename, line, current_addr="")``
-        Query GDB for disassembly near the given source location and redraw the
-        pane when the result arrives.
+    ``refresh_disasm(filename, line, current_addr="", thread_id="", func="")``
+        Query GDB for disassembly near the given source location and redraw
+        the pane when the result arrives.
     """
+
+    def align(self) -> str:
+        return "left"
+
 
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         """Create an empty disassembly pane."""
         super().__init__(hl, **kwargs)
-        self._content = _DisasmContent(hl)
+        self._content = _DisasmContent(hl, self)
         self._disasm_fn: Callable | None = None
+        self._thread_id: str = ""
+        self._func: str = ""
 
 
     def title(self) -> str:
-        return "DISASM"
+        thread_part = "Thread"
+        if self._thread_id:
+            thread_part = f"Thread {self._thread_id}"
+        if self._func:
+            left = f"{thread_part} (asm) In: {self._func}"
+        else:
+            left = f"{thread_part} (asm)"
+
+        if self._content._lines:
+            line_index = self._content._selected + 1
+            line_part = f"L{line_index}"
+        else:
+            line_part = ""
+
+        pc = self._content._current_addr
+        if pc:
+            pc_part = f"PC: {pc}"
+        else:
+            pc_part = ""
+
+        right_parts = [p for p in (line_part, pc_part) if p]
+        right = "  ".join(right_parts)
+
+        width = self._title_bar.size.width if self._title_bar else 0
+        if not width:
+            return left + ("  " + right if right else "")
+
+        gap = max(2, width - len(left) - len(right))
+        text = left + (" " * gap) + right
+        if len(text) > width:
+            text = text[:width]
+        return text
 
 
     def compose(self):
@@ -168,9 +249,20 @@ class DisasmPane(PaneBase):
         yield self._content
 
 
-    def set_disasm(self, lines: list[DisasmLine], current_addr: str = "") -> None:
+    def set_disasm(
+        self,
+        lines: list[DisasmLine],
+        current_addr: str = "",
+        thread_id: str = "",
+        func: str = "",
+    ) -> None:
         """Publish a parsed disassembly snapshot."""
+        if thread_id:
+            self._thread_id = thread_id
+        if func:
+            self._func = func
         self._content.set_disasm(lines, current_addr)
+        self.refresh_title()
 
 
     def set_disasm_fn(self, fn: Callable) -> None:
@@ -178,7 +270,14 @@ class DisasmPane(PaneBase):
         self._disasm_fn = fn
 
 
-    async def refresh_disasm(self, filename: str, line: int, current_addr: str = "") -> None:
+    async def refresh_disasm(
+        self,
+        filename: str,
+        line: int,
+        current_addr: str = "",
+        thread_id: str = "",
+        func: str = "",
+    ) -> None:
         """Fetch and display disassembly near a source location."""
         if not self._disasm_fn:
             return
@@ -187,7 +286,16 @@ class DisasmPane(PaneBase):
         except Exception:
             return
         lines = _parse_disasm(raw, current_addr)
-        self.set_disasm(lines, current_addr)
+        # Derive function name from the disasm payload when the caller did
+        # not supply one explicitly.
+        if not func and lines:
+            for entry in lines:
+                if entry.func_name:
+                    func = entry.func_name
+                    break
+        self.set_disasm(
+            lines, current_addr=current_addr, thread_id=thread_id, func=func,
+        )
 
 
 def _parse_disasm(raw: list[dict], current_addr: str = "") -> list[DisasmLine]:
