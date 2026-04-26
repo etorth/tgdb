@@ -164,6 +164,16 @@ class MemoryPane(PaneBase):
         supervise(self._fetch(addr, size), name="memory-fetch")
 
 
+    def refresh_memory(self) -> None:
+        """Re-fetch the current region (used after each GDB stop)."""
+        if not self._current_address:
+            return
+        supervise(
+            self._fetch(self._current_address, self._current_size),
+            name="memory-refresh",
+        )
+
+
     async def _fetch(self, addr: str, size: int) -> None:
         if self._read_fn:
             try:
