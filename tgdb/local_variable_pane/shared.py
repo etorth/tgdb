@@ -6,7 +6,7 @@ import logging
 from typing import TypeAlias
 
 from ..gdb_controller import LocalVariable
-from ..varobj_tree.shared import (
+from ..varobj_tree.tree import (
     _ACCESS_SPECIFIERS,
     _is_child_of_any,
     _is_collection_displayhint,

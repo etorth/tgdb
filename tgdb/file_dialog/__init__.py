@@ -8,7 +8,6 @@ treats the dialog as a black box that owns selection, search, and open/close
 signaling.
 """
 
-from .dialog import FileDialog
-from .messages import FileDialogClosed, FileSelected
+from .dialog import FileDialog, FileDialogClosed, FileSelected
 
 __all__ = ["FileDialog", "FileDialogClosed", "FileSelected"]

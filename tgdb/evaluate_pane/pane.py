@@ -15,7 +15,7 @@ from ..async_util import supervise
 from ..config import Config
 from ..highlight_groups import HighlightGroups
 from ..varobj_tree import VarobjTreePane
-from ..varobj_tree.shared import _suppress_children
+from ..varobj_tree.tree import _suppress_children
 
 
 class EvaluatePane(VarobjTreePane):

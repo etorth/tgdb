@@ -2,7 +2,7 @@
 
 from textual import events
 
-from .messages import FileDialogClosed, FileSelected
+from .dialog import FileDialogClosed, FileSelected
 
 
 class FileDialogKeyMixin:
