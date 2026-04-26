@@ -20,13 +20,55 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Callable
 
+from pygments.lexers.asm import GasLexer
+from pygments.token import Token
 from rich.text import Text
 from textual import events
 from textual.widget import Widget
 
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
-from ..pane_base import fit_cells
+
+
+_ASM_TOKEN_GROUPS: list[tuple] = [
+    (Token.Comment, "Comment"),
+    (Token.Name.Function, "Statement"),
+    (Token.Name.Builtin, "Statement"),
+    (Token.Keyword, "Statement"),
+    (Token.Name.Variable, "Type"),
+    (Token.Name.Constant, "PreProc"),
+    (Token.Name.Label, "PreProc"),
+    (Token.Literal.Number, "Constant"),
+    (Token.Literal.String, "Constant"),
+    (Token.Literal, "Constant"),
+    (Token.Punctuation, "Normal"),
+]
+
+
+def _asm_token_group(ttype) -> str:
+    for tok, group in _ASM_TOKEN_GROUPS:
+        if ttype in tok:
+            return group
+    return "Normal"
+
+
+_ASM_LEXER = GasLexer(stripnl=False)
+
+
+def _tokenize_inst(inst: str) -> list[tuple[str, str]]:
+    """Return [(text, hl_group), ...] for an instruction string."""
+    if not inst:
+        return []
+    spans: list[tuple[str, str]] = []
+    for ttype, val in _ASM_LEXER.get_tokens(inst):
+        if not val:
+            continue
+        if val.endswith("\n"):
+            val = val[:-1]
+            if not val:
+                continue
+        spans.append((val, _asm_token_group(ttype)))
+    return spans
 
 
 @dataclass
@@ -83,18 +125,50 @@ class _DisasmContent(Widget):
             self._scroll_top = self._selected - height + 1
 
 
-    def _format_line(self, line: DisasmLine, is_pc: bool, addr_w: int, func_w: int) -> str:
+    def _render_line(
+        self,
+        line: DisasmLine,
+        is_pc: bool,
+        is_selected: bool,
+        addr_w: int,
+        func_w: int,
+        width: int,
+    ) -> Text:
         if is_pc:
-            marker = ">"
+            row_style = self.hl.style("ExecutingLineBlock")
+            colorize = False
+        elif is_selected:
+            row_style = self.hl.style("SelectedLineHighlight")
+            colorize = False
         else:
-            marker = " "
+            row_style = self.hl.style("Normal")
+            colorize = True
+
+        text = Text(no_wrap=True, overflow="crop", style=row_style)
+        marker = ">" if is_pc else " "
+        text.append(marker)
+        text.append(line.addr.ljust(addr_w))
+        text.append("  ")
         if line.func_name:
             func_part = f"<{line.func_name}+{line.offset}>"
         else:
             func_part = ""
-        addr = line.addr.ljust(addr_w)
-        func_col = func_part.ljust(func_w)
-        return f"{marker}{addr}  {func_col}  {line.inst}"
+        if func_part and colorize:
+            text.append(func_part.ljust(func_w), style=self.hl.style("PreProc"))
+        else:
+            text.append(func_part.ljust(func_w))
+        text.append("  ")
+        if colorize:
+            for span_text, group in _tokenize_inst(line.inst):
+                text.append(span_text, style=self.hl.style(group))
+        else:
+            text.append(line.inst)
+
+        if text.cell_len < width:
+            text.append(" " * (width - text.cell_len))
+        else:
+            text.truncate(width, overflow="crop")
+        return text
 
 
     def render(self) -> Text:
@@ -117,14 +191,10 @@ class _DisasmContent(Widget):
             is_pc = (
                 self._current_addr != "" and line.addr == self._current_addr
             ) or line.is_current
-            if is_pc:
-                style = self.hl.style("ExecutingLineBlock")
-            elif (self._scroll_top + i) == self._selected:
-                style = self.hl.style("SelectedLineHighlight")
-            else:
-                style = self.hl.style("Normal")
-            text = self._format_line(line, is_pc, addr_w, func_w)
-            result.append(fit_cells(text, width), style=style)
+            is_selected = (self._scroll_top + i) == self._selected
+            result.append(
+                self._render_line(line, is_pc, is_selected, addr_w, func_w, width)
+            )
         remaining = height - len(visible)
         for _ in range(max(0, remaining)):
             result.append("\n")
