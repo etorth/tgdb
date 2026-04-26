@@ -210,8 +210,8 @@ class WorkspaceMixin:
             # full load for array/map) is handled inside do_expand_limited.
             locals_items: list[ContextMenuItem] = [
                 ContextMenuItem("Expand", children=(
-                    ContextMenuItem("Limited", action="locals:expand_limited"),
                     ContextMenuItem("Full", action="locals:expand_full"),
+                    ContextMenuItem("Limited", action="locals:expand_limited"),
                 )),
                 ContextMenuItem("Fold", action="locals:fold"),
             ]
