@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pyperclip
 
 
 _ALIASES: dict[str, str] = {
@@ -41,8 +42,6 @@ def _apply_clipboard_path(path: str) -> None:
             os.environ["PATH"] = dirname + os.pathsep + current
     if basename:
         try:
-            import pyperclip
-
             pyperclip.set_clipboard(basename)
         except Exception:
             pass

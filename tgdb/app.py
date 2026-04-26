@@ -71,6 +71,10 @@ class TGDBApp(
         layers: base dialog;
         layout: vertical;
     }
+    .screen--selection {
+        background: yellow;
+        color: black;
+    }
     #global-container {
         layer: base;
         layout: vertical;

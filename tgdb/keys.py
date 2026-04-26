@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from textual import events
@@ -14,33 +15,63 @@ if TYPE_CHECKING:
     from .main import TGDBApp
 
 
+_log = logging.getLogger("tgdb.clipboard")
+_clipboard_warned: set[str] = set()
+
+
+def _warn_clipboard_once(app: "TGDBApp", op: str, exc: BaseException) -> None:
+    """Log a clipboard error the first time each (op,kind) combination occurs.
+
+    *op* is "copy" or "paste".  Errors are silenced after the first report so
+    the log is not spammed when the user repeats the operation, but the user
+    still gets a single hint about why their clipboard request did nothing.
+    """
+    kind = type(exc).__name__
+    key = f"{op}:{kind}"
+    if key in _clipboard_warned:
+        return
+    _clipboard_warned.add(key)
+    if isinstance(exc, ImportError):
+        hint = "pyperclip is not installed; run `pip install pyperclip`"
+    else:
+        hint = f"pyperclip {op} failed: {exc}"
+    _log.warning(hint)
+    try:
+        app.notify(hint, severity="warning", timeout=4.0)
+    except Exception:
+        pass
+
+
 def _copy_clipboard(app: "TGDBApp", text: str) -> None:
     """Copy *text* to the system clipboard.
 
-    Tries pyperclip first; falls back to Textual's OSC 52 mechanism.
+    Tries pyperclip first; falls back to Textual's OSC 52 mechanism.  A
+    one-shot warning is surfaced if pyperclip is missing or unusable so the
+    user knows why nothing landed in the system clipboard.
     """
     try:
         import pyperclip
 
         pyperclip.copy(text)
         return
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_clipboard_once(app, "copy", exc)
     app.copy_to_clipboard(text)
 
 
 def _read_clipboard(app: "TGDBApp") -> str:
     """Read text from the system clipboard.
 
-    Tries pyperclip first; falls back to Textual's local clipboard
-    (holds whatever was last copied within the app via OSC 52).
+    Tries pyperclip first; falls back to Textual's local clipboard (holds
+    whatever was last copied within the app via OSC 52).  A one-shot warning
+    is surfaced if pyperclip is missing or unusable.
     """
     try:
         import pyperclip
 
         return pyperclip.paste()
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_clipboard_once(app, "paste", exc)
     return app.clipboard
 
 
@@ -316,6 +347,17 @@ class KeyRoutingMixin:
     # Global key handling
     # ------------------------------------------------------------------
 
+    def _point_in_widget(self: TGDBApp, widget, screen_x: int, screen_y: int) -> bool:
+        try:
+            region = widget.region
+        except Exception:
+            return False
+        return (
+            region.x <= screen_x < region.x + region.width
+            and region.y <= screen_y < region.y + region.height
+        )
+
+
     def on_key(self: TGDBApp, event: events.Key) -> None:
         key = event.key
         char = event.character or ""
@@ -416,6 +458,20 @@ class KeyRoutingMixin:
                 text = _read_clipboard(self)
                 if text:
                     self.gdb.send_input(text)
+                event.stop()
+                return
+
+            cmdline = self._get_cmdline()
+            if (
+                cmdline is not None
+                and self._mode in ("CMD", "ML_MESSAGE")
+                and self._point_in_widget(cmdline, screen_x, screen_y)
+            ):
+                # No selection + right-click on the command line bar in input
+                # mode → paste from system clipboard into the bar.
+                text = _read_clipboard(self)
+                if text:
+                    cmdline.feed_paste(text)
                 event.stop()
                 return
 

@@ -245,3 +245,69 @@ class CommandLineKeyMixin:
     def on_key(self, event: events.Key) -> None:
         if self.feed_key(event.key, event.character or ""):
             event.stop()
+
+
+    def feed_paste(self, text: str) -> bool:
+        """Insert pasted text into the active input buffer.
+
+        Returns True when the paste was consumed by the bar (input or
+        heredoc-multiline mode), False otherwise so the caller can fall
+        back to other handling.
+        """
+        if self._task_running or self._msg_lines:
+            return False
+
+        text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+        if not text:
+            return False
+
+        if self._ml_active:
+            self._paste_into_multiline(text)
+            return True
+        if self._input_active:
+            self._paste_into_input(text)
+            return True
+        return False
+
+
+    def _paste_into_input(self, text: str) -> None:
+        """Insert pasted text at the cursor of the ``:`` command-line input.
+
+        Newlines collapse to spaces (the command line is a single row); any
+        other non-printable characters are dropped.
+        """
+        flat = text.replace("\n", " ")
+        cleaned = "".join(ch for ch in flat if ch.isprintable())
+        if not cleaned:
+            return
+        self._commit_history_browse()
+        self._input_buf = (
+            self._input_buf[: self._cursor_pos]
+            + cleaned
+            + self._input_buf[self._cursor_pos :]
+        )
+        self._cursor_pos += len(cleaned)
+        self._dismiss_popup()
+        self.refresh()
+
+
+    def _paste_into_multiline(self, text: str) -> None:
+        """Append pasted text to the active heredoc buffer.
+
+        Internal newlines split the paste across multiple buffer lines so the
+        result looks identical to typing them.
+        """
+        lines = text.split("\n")
+        cleaned_lines: list[str] = []
+        for line in lines:
+            cleaned_lines.append(
+                "".join(ch for ch in line if ch.isprintable() or ch == "\t")
+            )
+        if not any(cleaned_lines):
+            return
+        self._input_buf += cleaned_lines[0]
+        for extra in cleaned_lines[1:]:
+            self._ml_buf.append(self._input_buf)
+            self._input_buf = extra
+        self._set_height(2 + len(self._ml_buf))
+        self.refresh()
