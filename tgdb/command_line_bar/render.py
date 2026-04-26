@@ -38,6 +38,8 @@ class RenderMixin:
 
         # ── Single-line modes ─────────────────────────────────────────
         if self._input_active:
+            if self._popup_active:
+                return self._render_input_with_popup(w, style)
             return self._render_input(w, style)
 
         if self._search_active:
@@ -187,4 +189,45 @@ class RenderMixin:
 
         t = Text("\n".join(lines))
         t.stylize(style)
+        return t
+
+
+    def _render_input_with_popup(self, w: int, style: str) -> Text:
+        """Render the input row with a wildmenu-style completion popup above it.
+
+        The popup occupies the rows above the input line.  When more
+        candidates exist than fit in ``self._popup_max_rows`` only a sliding
+        window covering the current selection is shown.
+        """
+        items = self._completions
+        if not items:
+            return self._render_input(w, style)
+
+        max_item_w = max(len(item) for item in items)
+        popup_w = min(max_item_w + 2, w)
+        rows = max(1, min(self._popup_max_rows, len(items)))
+        scroll = max(0, min(self._popup_scroll, len(items) - rows))
+
+        item_style = self.hl.style("Pmenu")
+        sel_style = self.hl.style("PmenuSel")
+
+        t = Text(no_wrap=True, overflow="crop")
+        for row in range(rows):
+            idx = scroll + row
+            item = items[idx]
+            cell = " " + item
+            if len(cell) < popup_w:
+                cell += " " * (popup_w - len(cell))
+            else:
+                cell = cell[:popup_w]
+            if idx == self._completion_idx:
+                t.append(cell, sel_style)
+            else:
+                t.append(cell, item_style)
+            remaining = w - popup_w
+            if remaining > 0:
+                t.append(" " * remaining, style)
+            t.append("\n")
+
+        t.append_text(self._render_input(w, style))
         return t

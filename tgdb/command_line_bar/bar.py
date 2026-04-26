@@ -112,6 +112,17 @@ class CommandLineBar(
         self._completion_idx: int = 0
         self._completion_arg_start: int = 0
 
+        # ── Tab-completion popup (wildmenu) state ────────────────────
+        # When more than one candidate is available the popup list is
+        # shown above the input row. While ``_popup_active`` is True the
+        # bar intercepts Tab/Shift-Tab/Enter/Escape to drive the popup
+        # instead of normal command-line editing.
+        self._popup_active: bool = False
+        self._popup_orig_buf: str = ""  # input text before popup opened
+        self._popup_orig_cursor: int = 0  # cursor position before popup
+        self._popup_max_rows: int = 10  # max visible rows in popup
+        self._popup_scroll: int = 0  # index of first visible row
+
         # ── Command history ───────────────────────────────────────────
         self._history: list[str] = []  # all recorded commands (oldest first)
         self._history_idx: int = -1  # -1 = not browsing; 0 = oldest

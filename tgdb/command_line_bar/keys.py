@@ -103,8 +103,30 @@ class CommandLineKeyMixin:
         if not self._input_active:
             return False
 
+        if self._popup_active:
+            if key == "tab":
+                self._handle_tab()
+                return True
+            if key in ("shift+tab", "btab"):
+                self._handle_tab(reverse=True)
+                return True
+            if key in ("enter", "return"):
+                self._dismiss_popup()
+                return True
+            if key == "escape":
+                self._dismiss_popup(revert=True)
+                return True
+            # Any other keystroke closes the popup but is then processed
+            # as if the popup had never been there (so e.g. typing more
+            # characters or backspace continues to edit the input line).
+            self._dismiss_popup()
+            # fall through to normal handling below
+
         if key == "tab":
             self._handle_tab()
+            return True
+        if key in ("shift+tab", "btab"):
+            self._handle_tab(reverse=True)
             return True
 
         if key in ("left", "ctrl+b"):

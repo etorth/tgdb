@@ -231,15 +231,20 @@ class HistoryMixin:
     # Tab completion
     # ------------------------------------------------------------------
 
-    def _handle_tab(self) -> None:
+    def _handle_tab(self, *, reverse: bool = False) -> None:
         if self._completions:
-            self._completion_idx = (self._completion_idx + 1) % len(self._completions)
+            n = len(self._completions)
+            if reverse:
+                self._completion_idx = (self._completion_idx - 1) % n
+            else:
+                self._completion_idx = (self._completion_idx + 1) % n
+            self._update_popup_scroll()
             self._apply_completion()
         else:
-            self._trigger_completion()
+            self._trigger_completion(reverse=reverse)
 
 
-    def _trigger_completion(self) -> None:
+    def _trigger_completion(self, *, reverse: bool = False) -> None:
         if not self._completion_provider:
             return
         buf = self._input_buf
@@ -262,9 +267,38 @@ class HistoryMixin:
         if not candidates:
             return
         self._completions = candidates
-        self._completion_idx = 0
+        if reverse:
+            self._completion_idx = len(candidates) - 1
+        else:
+            self._completion_idx = 0
         self._completion_arg_start = arg_lead_start
+        if len(candidates) > 1:
+            self._popup_active = True
+            self._popup_orig_buf = self._input_buf
+            self._popup_orig_cursor = self._cursor_pos
+            self._popup_scroll = 0
+            self._update_popup_scroll()
+            self._resize_for_popup()
         self._apply_completion()
+
+
+    def _update_popup_scroll(self) -> None:
+        if not self._popup_active or not self._completions:
+            return
+        max_rows = max(1, min(self._popup_max_rows, len(self._completions)))
+        idx = self._completion_idx
+        if idx < self._popup_scroll:
+            self._popup_scroll = idx
+        elif idx >= self._popup_scroll + max_rows:
+            self._popup_scroll = idx - max_rows + 1
+
+
+    def _resize_for_popup(self) -> None:
+        if not self._popup_active:
+            return
+        rows = max(1, min(self._popup_max_rows, len(self._completions)))
+        # +1 for the input line itself
+        self._set_height(rows + 1)
 
 
     def _apply_completion(self) -> None:
@@ -273,4 +307,27 @@ class HistoryMixin:
         cand = self._completions[self._completion_idx]
         self._input_buf = self._input_buf[: self._completion_arg_start] + cand
         self._cursor_pos = len(self._input_buf)
+        self.refresh()
+
+
+    def _dismiss_popup(self, *, revert: bool = False) -> None:
+        """Close the completion popup.
+
+        When ``revert`` is True the input is restored to what the user had
+        typed before opening the popup (used by Escape).  Otherwise the
+        currently-applied candidate is kept (used by Enter or by typing
+        another key).
+        """
+        if not self._popup_active and not self._completions:
+            return
+        if revert and self._popup_active:
+            self._input_buf = self._popup_orig_buf
+            self._cursor_pos = min(self._popup_orig_cursor, len(self._input_buf))
+        self._popup_active = False
+        self._popup_orig_buf = ""
+        self._popup_orig_cursor = 0
+        self._popup_scroll = 0
+        self._completions = []
+        self._completion_idx = 0
+        self._collapse_to_single_line()
         self.refresh()

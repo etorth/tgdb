@@ -137,6 +137,11 @@ DEFAULT_GROUPS: dict[str, HighlightStyle] = {
     "ScrollModeStatus": HighlightStyle(bold=True),
     # tgdb-only (cgdb doesn't have a separate LineNumber group)
     "LineNumber": HighlightStyle(fg="bright_black"),
+    # Tab-completion popup (vim-style wildmenu / Pmenu):
+    #   Pmenu     — non-selected popup items
+    #   PmenuSel  — selected popup item
+    "Pmenu": HighlightStyle(fg="bright_white", bg="color(238)"),
+    "PmenuSel": HighlightStyle(fg="black", bg="bright_white", bold=True),
 }
 
 

@@ -71,6 +71,9 @@ class CommandLineStateMixin:
         self._cursor_pos = 0
         self._history_idx = -1
         self._history_prefix = ""
+        self._popup_active = False
+        self._completions = []
+        self._completion_idx = 0
         self._collapse_to_single_line()
         self.refresh()
 
@@ -94,6 +97,9 @@ class CommandLineStateMixin:
         self._search_active = False
         self._ml_active = False
         self._ml_buf = []
+        self._popup_active = False
+        self._completions = []
+        self._completion_idx = 0
         self._clear_message_state()
         self._collapse_to_single_line()
         self.refresh()
