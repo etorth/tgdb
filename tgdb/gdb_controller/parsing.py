@@ -78,6 +78,12 @@ class ParsingMixin:
             if isinstance(thread_id, str):
                 self.current_thread_id = thread_id
             self.request_current_location(report_error=False)
+        elif cls == "memory-changed":
+            _log.info(
+                f"memory-changed addr={results.get('addr', '?')} "
+                f"len={results.get('len', '?')}"
+            )
+            self.on_memory_changed()
         elif cls == "breakpoint-modified":
             bkpt = results.get("bkpt", {})
             if bkpt:

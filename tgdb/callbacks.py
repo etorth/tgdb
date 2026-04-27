@@ -413,6 +413,36 @@ class CallbacksMixin:
                     pane.refresh_memory()
 
 
+    def _ui_on_memory_changed(self) -> None:
+        """GDB reported =memory-changed (e.g. console-side ``print x = 2``).
+
+        Coalesce bursts of notifications into a single refresh and re-pull
+        anything that may have gone stale: locals, evaluations, and every
+        mounted Memory pane. We deliberately do not touch stack / threads
+        / registers — those don't depend on inferior memory contents.
+        """
+        if getattr(self, "_memory_changed_pending", False):
+            return
+        self._memory_changed_pending = True
+        self.set_timer(0.05, self._flush_memory_changed)
+
+
+    def _flush_memory_changed(self) -> None:
+        self._memory_changed_pending = False
+        supervise(
+            self.gdb._publish_locals_async(),
+            name="locals-after-memory-changed",
+        )
+        if self._evaluate_pane is not None:
+            supervise(
+                self._evaluate_pane.refresh_all(),
+                name="evaluate-after-memory-changed",
+            )
+        for pane in self._memory_panes:
+            if pane.parent is not None:
+                pane.refresh_memory()
+
+
     async def _refresh_breakpoints_async(self) -> None:
         await asyncio.sleep(0.15)
         self.gdb.mi_command("-break-list")

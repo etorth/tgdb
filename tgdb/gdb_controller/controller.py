@@ -137,6 +137,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self.on_stack: Callable[[list[Frame]], None] = lambda v: None
         self.on_threads: Callable[[list[ThreadInfo]], None] = lambda v: None
         self.on_registers: Callable[[list[RegisterInfo]], None] = lambda v: None
+        self.on_memory_changed: Callable[[], None] = lambda: None
         self.on_exit: Callable[[], None] = lambda: None
         self.on_error: Callable[[str], None] = lambda m: None
 
