@@ -55,12 +55,18 @@ class _MemoryContent(Widget):
         height = max(1, self.size.height or 1)
         formatter = self._formatter
         result = Text(no_wrap=True, overflow="crop")
+        # When the user is mouse-selecting in this pane, suppress the
+        # MemoryGroup background tint so Textual's selection highlight
+        # is visible. Restored as soon as the selection is cleared.
+        hl = self.hl
+        if self.text_selection is not None:
+            hl = _NoMemoryGroupHL(self.hl)
 
         header_text = None
         header_fn = getattr(formatter, "header", None)
         if callable(header_fn):
             try:
-                header_text = header_fn(width, height, self.hl)
+                header_text = header_fn(width, height, hl)
             except Exception:
                 header_text = None
 
@@ -72,7 +78,7 @@ class _MemoryContent(Widget):
         elif isinstance(header_text, str) and header_text:
             result.append(
                 header_text,
-                style=self.hl.style("SelectedLineHighlight"),
+                style=hl.style("SelectedLineHighlight"),
             )
             result.append("\n")
             header_lines = header_text.count("\n") + 1
@@ -82,14 +88,36 @@ class _MemoryContent(Widget):
 
         body: Text | str | None = None
         try:
-            body = formatter.format(width, body_height, self._blocks, self.hl)
+            body = formatter.format(width, body_height, self._blocks, hl)
         except Exception:
             body = None
         if isinstance(body, Text):
             result.append_text(body)
         elif isinstance(body, str) and body:
-            result.append(body, style=self.hl.style("Normal"))
+            result.append(body, style=hl.style("Normal"))
         return result
+
+
+class _NoMemoryGroupHL:
+    """Proxy around HighlightGroups that hides the MemoryGroup tint.
+
+    Only ``style()`` is overridden — every other attribute access is
+    forwarded so formatters that read other groups still see the real
+    palette.
+    """
+
+    def __init__(self, inner: HighlightGroups) -> None:
+        self._inner = inner
+
+
+    def style(self, name: str) -> str:
+        if name == "MemoryGroup":
+            return ""
+        return self._inner.style(name)
+
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
 
 
 class MemoryPane(PaneBase):
