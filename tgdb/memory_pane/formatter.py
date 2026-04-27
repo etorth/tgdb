@@ -121,7 +121,6 @@ class MemoryFormatter:
         reverse_bytes: bool = False,
         reverse_bits: bool = False,
         byte_format: str = "hex",
-        group_bg: bool = True,
     ) -> None:
         self.show_header = bool(show_header)
         self.show_address = bool(show_address)
@@ -138,12 +137,9 @@ class MemoryFormatter:
             )
         self.byte_format = fmt
         self._cell_w, self._cell_fmt = _BYTE_FORMATS[fmt]
-        self.group_bg = bool(group_bg)
 
 
     def _group_style(self, base: str, hl: HighlightGroups) -> str:
-        if not self.group_bg:
-            return base
         gs = hl.style(_GROUP_HL)
         if not gs:
             return base

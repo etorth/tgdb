@@ -1229,10 +1229,6 @@ numeric column.  ASCII is unaffected.</p></dd>
 (2 / 8 / 3 / 3).  Decimal uses space padding (so <code>1</code> renders
 as <code>&nbsp;&nbsp;1</code>); the bit/octal formats use zero padding.
 </p></dd>
-<dt><code>group_bg=True</code></dt>
-<dd><p>Tint every byte-group cell with the <code>MemoryGroup</code> highlight
-group (a low-contrast background by default) so adjacent groups are
-visually distinguishable.  Set to <code>False</code> to disable.</p></dd>
 </dl>
 </dd>
 <dt><kbd>:c</kbd></dt>
@@ -1791,9 +1787,8 @@ See the <code>showmarks</code> option for more detail.
 default <code>MemoryFormatter</code> in the <em>Memory</em> pane, so that
 adjacent groups are visually distinguishable without harsh contrast.
 The header row is intentionally <em>not</em> tinted.  Override with
-<code>:highlight MemoryGroup ctermbg=...</code> or disable group
-striping entirely with
-<code>:set memoryformatter='MemoryFormatter(group_bg=False)'</code>.
+<code>:highlight MemoryGroup ctermbg=...</code> (use
+<code>ctermbg=none</code> to disable the tint entirely).
 </p></dd>
 </dl>
 
