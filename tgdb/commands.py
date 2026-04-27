@@ -375,13 +375,38 @@ class CommandsMixin:
         if empty is not None:
             empty.set_address(addr, size)
             return None
-        if not mounted:
-            return "memory: Memory pane is not open (add it from context menu first)"
-        target = mounted[-1]
+        if mounted:
+            target = mounted[-1]
+        else:
+            target = self._memory_spawn_target()
+        if target is None:
+            return "memory: no pane available to host a new Memory pane"
         supervise(
             self._spawn_memory_pane(target, addr, size),
             name="cmd-memory-spawn",
         )
+        return None
+
+
+    def _memory_spawn_target(self: "TGDBApp") -> "Widget | None":
+        """Pick a workspace pane next to which a new Memory pane can spawn.
+
+        Preference order: currently focused widget, GDB pane, source pane.
+        Only widgets that live inside a ``PaneContainer`` are eligible.
+        """
+        from .workspace import PaneContainer
+        candidates: list["Widget | None"] = [
+            getattr(self, "focused", None),
+            self._gdb_widget,
+            self._source_view,
+        ]
+        for cand in candidates:
+            if cand is None:
+                continue
+            if cand.parent is None:
+                continue
+            if isinstance(cand.parent, PaneContainer):
+                return cand
         return None
 
 
