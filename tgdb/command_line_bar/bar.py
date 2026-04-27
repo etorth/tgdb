@@ -7,7 +7,7 @@ Normally renders as one row.  Expands vertically during:
 """
 
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from textual.widget import Widget
 

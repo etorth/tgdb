@@ -6,7 +6,7 @@ the widget, injects one async memory-read callback, and updates the requested
 address through ``set_address(...)``.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 from rich.text import Text
 from textual.widget import Widget

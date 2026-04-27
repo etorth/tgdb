@@ -13,7 +13,8 @@ import os
 import textwrap
 import traceback
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .types import _TGDB_RESERVED_PREFIX
 

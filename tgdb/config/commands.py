@@ -8,7 +8,7 @@ Tab-completion support.
 import json
 import re
 import shlex
-from typing import Callable
+from collections.abc import Callable
 
 from .types import _CMD_NAME_RE, UserCommandDef
 from .execution import BUILTIN_COMMAND_NAMES

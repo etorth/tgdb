@@ -1,6 +1,6 @@
 """Async task helpers for ``CommandLineBar``."""
 
-from typing import Callable
+from collections.abc import Callable
 
 
 class CommandLineTaskMixin:

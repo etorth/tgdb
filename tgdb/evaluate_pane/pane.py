@@ -7,7 +7,7 @@ constructs the pane, injects the varobj callbacks, then mutates the watch list
 through the public methods documented on the class below.
 """
 
-from typing import Callable, Coroutine
+from collections.abc import Callable, Coroutine
 
 from textual.widgets import Tree
 

@@ -9,7 +9,7 @@ The heavy-lifting terminal widget lives in ``content.py`` so this module can
 stay focused on the public pane interface.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 from textual import events
 

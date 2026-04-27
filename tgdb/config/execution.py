@@ -5,7 +5,7 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from ..xdg_path import XDGPath
 

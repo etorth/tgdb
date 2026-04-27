@@ -17,7 +17,7 @@ import logging
 import os
 import signal
 import termios
-from typing import Callable
+from collections.abc import Callable
 
 import ptyprocess
 

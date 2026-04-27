@@ -6,7 +6,7 @@ pyte.Screen subclass that captures lines scrolling off the top into a
 scrollback buffer.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import pyte
 from rich.text import Text

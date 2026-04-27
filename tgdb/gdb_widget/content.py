@@ -8,7 +8,7 @@ scrollback, scroll mode, and key forwarding.
 """
 
 from collections import deque
-from typing import Callable
+from collections.abc import Callable
 
 import pyte
 from textual.widget import Widget

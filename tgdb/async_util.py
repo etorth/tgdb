@@ -14,7 +14,8 @@ in a long debugging session.
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Coroutine
+from collections.abc import Awaitable, Coroutine
+from typing import Any
 
 _log = logging.getLogger("tgdb.async")
 

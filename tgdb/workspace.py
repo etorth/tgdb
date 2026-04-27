@@ -6,7 +6,7 @@ layer and its workspace tree stay self-contained under one package boundary.
 """
 
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 
 from rich.text import Text
 from textual import events

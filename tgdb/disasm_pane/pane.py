@@ -18,7 +18,7 @@ Public implementation of the disassembly-pane package.
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
 
 from pygments.lexers.asm import GasLexer
 from pygments.token import Token

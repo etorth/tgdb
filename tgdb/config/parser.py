@@ -7,7 +7,8 @@ as the initialization file, along with tgdb/cgdb-style ``:set``,
 """
 
 import builtins
-from typing import Callable, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..highlight_groups import HighlightGroups

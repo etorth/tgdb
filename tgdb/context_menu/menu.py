@@ -6,7 +6,7 @@ match that panel's rectangle. This means there are no empty cells between
 panels, so underlying content remains visible through the gaps.
 """
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from rich.cells import cell_len
 from rich.text import Text

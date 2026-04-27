@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from typing import Callable, Coroutine
+from collections.abc import Callable, Coroutine
 
 from rich.text import Text
 from textual.widgets import Tree
