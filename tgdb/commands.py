@@ -376,7 +376,7 @@ class CommandsMixin:
             empty.set_address(addr, size)
             return None
         if not mounted:
-            return "memory: Memory pane is not open (add it from context menu first)"
+            return "memory: Add one memory pane from context menu first"
         target = mounted[-1]
         supervise(
             self._spawn_memory_pane(target, addr, size),
