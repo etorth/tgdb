@@ -110,7 +110,7 @@ class WorkspaceMixin:
         """Always return a fresh MemoryPane; multi-instance pane."""
         import weakref
         from .memory_pane import MemoryFormatter
-        formatter = self.config._memoryformatter_obj or MemoryFormatter()
+        formatter = self.cfg._memoryformatter_obj or MemoryFormatter()
         pane = MemoryPane(self.hl, formatter=formatter)
         pane.set_read_fn(self.gdb.read_memory_bytes_async)
         # Subscribe via weak method so pane GC is not blocked.
@@ -123,7 +123,7 @@ class WorkspaceMixin:
                     raise ReferenceError
                 method(obj)
 
-            self.config.add_memoryformatter_listener(_on_formatter_change)
+            self.cfg.add_memoryformatter_listener(_on_formatter_change)
         except TypeError:
             # set_formatter not bound (extremely unlikely) — skip subscription.
             pass
