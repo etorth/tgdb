@@ -59,8 +59,26 @@ def blocks_to_bytes(blocks: list[dict]) -> tuple[int, list[int]]:
     return base_addr, out
 
 
+_BYTE_FORMATS = {
+    "hex": (2, "{:02x}"),
+    "bin": (8, "{:08b}"),
+    "oct": (3, "{:03o}"),
+    "dec": (3, "{:03d}"),
+}
+
+
+def _reverse_bits(b: int) -> int:
+    """Bit-reverse a byte (0b1000_1000 -> 0b0001_0001)."""
+    b &= 0xff
+    r = 0
+    for _ in range(8):
+        r = (r << 1) | (b & 1)
+        b >>= 1
+    return r
+
+
 class MemoryFormatter:
-    """Default hex+ASCII memory formatter.
+    """Default memory formatter.
 
     Constructor arguments
     ---------------------
@@ -76,6 +94,18 @@ class MemoryFormatter:
     row_groups
         Number of groups per row. Total bytes per row is
         ``group_bytes * row_groups``.
+    reverse_groups
+        When True the group order in each row is mirrored — the right-most
+        group then holds the lowest-offset bytes.
+    reverse_bytes
+        When True the byte order inside each group is mirrored.
+    reverse_bits
+        When True every byte's bits are reversed (0x88 -> 0x11) before
+        rendering. Affects both the hex/bin/oct/dec column and the ASCII
+        column.
+    byte_format
+        ``'hex'`` | ``'bin'`` | ``'oct'`` | ``'dec'``. All bytes are
+        rendered with the format's fixed cell width (2/8/3/3 cells).
     """
 
     def __init__(
@@ -85,12 +115,26 @@ class MemoryFormatter:
         show_ascii: bool = True,
         group_bytes: int = 4,
         row_groups: int = 4,
+        reverse_groups: bool = False,
+        reverse_bytes: bool = False,
+        reverse_bits: bool = False,
+        byte_format: str = "hex",
     ) -> None:
         self.show_header = bool(show_header)
         self.show_address = bool(show_address)
         self.show_ascii = bool(show_ascii)
         self.group_bytes = max(1, int(group_bytes))
         self.row_groups = max(1, int(row_groups))
+        self.reverse_groups = bool(reverse_groups)
+        self.reverse_bytes = bool(reverse_bytes)
+        self.reverse_bits = bool(reverse_bits)
+        fmt = str(byte_format).lower()
+        if fmt not in _BYTE_FORMATS:
+            raise ValueError(
+                f"byte_format must be one of {sorted(_BYTE_FORMATS)}, got {byte_format!r}"
+            )
+        self.byte_format = fmt
+        self._cell_w, self._cell_fmt = _BYTE_FORMATS[fmt]
 
 
     @property
@@ -129,36 +173,56 @@ class MemoryFormatter:
         total_bytes = self.bytes_per_row
         if total_bytes <= 0:
             return 1
+        w = self._cell_w
         stride = 1
         while stride < total_bytes:
             last_offset = ((total_bytes - 1) // stride) * stride
             max_width = 1 + len(f"{last_offset:X}")
-            slot = 3 * stride - 1
+            slot = (w + 1) * stride - 1
             if max_width <= slot:
                 return stride
             stride *= 2
         return total_bytes
 
 
+    def _byte_col(self, g_disp: int, k_disp: int) -> int:
+        """Display column where the byte cell at (g_disp, k_disp) starts."""
+        gb = self.group_bytes
+        w = self._cell_w
+        group_width = gb * w + (gb - 1)
+        return g_disp * (group_width + 2) + k_disp * (w + 1)
+
+
+    def _logical_offset(self, g_disp: int, k_disp: int) -> int:
+        gb = self.group_bytes
+        rg = self.row_groups
+        g_log = (rg - 1 - g_disp) if self.reverse_groups else g_disp
+        k_log = (gb - 1 - k_disp) if self.reverse_bytes else k_disp
+        return g_log * gb + k_log
+
+
     def _build_offset_legend(self) -> str:
         """Render the per-byte legend using the chosen stride."""
         gb = self.group_bytes
         rg = self.row_groups
+        w = self._cell_w
         total_bytes = gb * rg
         if total_bytes <= 0:
             return ""
-        # Layout: byte k of group g starts at col g*(3*gb + 1) + k*3.
-        per_group = 3 * gb - 1
-        total_cols = rg * per_group + max(0, rg - 1) * 2
+        group_width = gb * w + (gb - 1)
+        total_cols = rg * group_width + max(0, rg - 1) * 2
         buf = [" "] * total_cols
         stride = self._pick_offset_stride()
-        for offset in range(0, total_bytes, stride):
-            g, k = divmod(offset, gb)
-            col = g * (3 * gb + 1) + k * 3
-            label = f"+{offset:X}"
-            for i, ch in enumerate(label):
-                if col + i < total_cols:
-                    buf[col + i] = ch
+        for g_disp in range(rg):
+            for k_disp in range(gb):
+                offset = self._logical_offset(g_disp, k_disp)
+                if offset % stride != 0:
+                    continue
+                col = self._byte_col(g_disp, k_disp)
+                label = f"+{offset:X}"
+                for i, ch in enumerate(label):
+                    if col + i < total_cols:
+                        buf[col + i] = ch
         return "".join(buf)
 
 
@@ -199,13 +263,22 @@ class MemoryFormatter:
         sections: list[str] = []
         if self.show_address:
             sections.append(f"0x{addr:016x}  ")
+        gb = self.group_bytes
+        rg = self.row_groups
+        w = self._cell_w
         groups: list[str] = []
-        for g in range(self.row_groups):
-            chunk = row_bytes[g * self.group_bytes:(g + 1) * self.group_bytes]
-            hex_part = " ".join(f"{b:02x}" for b in chunk)
-            if len(chunk) < self.group_bytes:
-                hex_part += "   " * (self.group_bytes - len(chunk))
-            groups.append(hex_part)
+        for g_disp in range(rg):
+            cells: list[str] = []
+            for k_disp in range(gb):
+                logical = self._logical_offset(g_disp, k_disp)
+                if logical < len(row_bytes):
+                    b = row_bytes[logical]
+                    if self.reverse_bits:
+                        b = _reverse_bits(b)
+                    cells.append(self._cell_fmt.format(b))
+                else:
+                    cells.append(" " * w)
+            groups.append(" ".join(cells))
         sections.append("  ".join(groups))
         if self.show_ascii:
             ascii_str = "".join(
