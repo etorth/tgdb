@@ -6,7 +6,7 @@ applyTo: "**/*.py"
 
 Apply these rules after every Python code change in this repository.
 
-- Keep Python modules around **500 lines** when practical. If a file grows much beyond that, split it by responsibility instead of extending the monolith.
+- Do not enforce any hard file-length limit. Split a Python module **only** when it has grown large *and* its contents naturally decompose into independent responsibilities that read better as separate files. A long but cohesive module (one type, one concern) should be left as a single file.
 - Follow **PEP 8** for naming, spacing, and structure, but **do not** treat line length as a hard rule. Break a line only when the broken form is genuinely easier to read.
 - For function and method signatures, avoid half-inline multiline forms. Either keep the full signature on one line, or if you wrap it, put each parameter on its own line.
 - For type annotations, do not split a single generic argument across multiple lines. Keep forms like `list[str]`, `tuple[int]`, and `Optional[Widget]` on one line unless the entire annotation is being wrapped in a genuinely clearer multiline layout.

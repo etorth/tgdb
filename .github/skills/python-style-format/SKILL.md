@@ -24,13 +24,13 @@ Keep Python code explicit, readable, and split by responsibility.
 5. Prefer f-strings over older string-formatting styles.
 6. Prefer explicit loops over dense comprehensions when the loop is clearer.
 7. Leave two blank lines between member functions in classes in this repository.
-8. Keep Python files around 500 lines when practical by splitting large modules.
+8. Do not enforce any hard file-length limit. Split a Python module **only** when it has grown large *and* its contents naturally decompose into independent responsibilities that read better as separate files. If an oversized module is already cohesive (one type, one concern), leave it alone.
 9. When a module exposes a reusable public type, document the clean interface at the module/class level: construction, injected dependencies, state-mutation methods, public API surface, and the black-box behavior callers can rely on.
 
 ## Checklist
 
-1. Check whether the touched Python file is too large.
-2. Split helpers, tree/UI logic, and state reconciliation into separate modules when that improves readability.
+1. Consider splitting a touched Python file only when it is both large *and* the contents fall into clearly separable responsibilities. Don't split a cohesive module just because it is long.
+2. When splitting is justified, peel helpers, tree/UI logic, and state reconciliation out into separate modules.
 3. Rewrite overly clever Python into direct control flow.
 4. Add or refresh module/class docstrings when the code defines a reusable public type.
 5. Re-run the repository Python syntax check after the refactor.
