@@ -246,7 +246,7 @@ class MemoryFormatter:
         base_addr, raw = blocks_to_bytes(blocks)
         bpr = self.bytes_per_row
         base = hl.style("Normal")
-        body_height = max(0, height - self._header_lines())
+        body_height = max(0, height)
         text = Text(no_wrap=True, overflow="crop")
         emitted = 0
         for off in range(0, len(raw), bpr):
