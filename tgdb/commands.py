@@ -375,38 +375,13 @@ class CommandsMixin:
         if empty is not None:
             empty.set_address(addr, size)
             return None
-        if mounted:
-            target = mounted[-1]
-        else:
-            target = self._memory_spawn_target()
-        if target is None:
-            return "memory: no pane available to host a new Memory pane"
+        if not mounted:
+            return "memory: Memory pane is not open (add it from context menu first)"
+        target = mounted[-1]
         supervise(
             self._spawn_memory_pane(target, addr, size),
             name="cmd-memory-spawn",
         )
-        return None
-
-
-    def _memory_spawn_target(self: "TGDBApp") -> "Widget | None":
-        """Pick a workspace pane next to which a new Memory pane can spawn.
-
-        Preference order: currently focused widget, GDB pane, source pane.
-        Only widgets that live inside a ``PaneContainer`` are eligible.
-        """
-        from .workspace import PaneContainer
-        candidates: list["Widget | None"] = [
-            getattr(self, "focused", None),
-            self._gdb_widget,
-            self._source_view,
-        ]
-        for cand in candidates:
-            if cand is None:
-                continue
-            if cand.parent is None:
-                continue
-            if isinstance(cand.parent, PaneContainer):
-                return cand
         return None
 
 
@@ -416,10 +391,22 @@ class CommandsMixin:
         addr: str,
         size: int | None,
     ) -> None:
-        """Insert a fresh Memory pane next to *target* and load *addr*."""
-        pane = await self._add_pane_to_workspace(target, "memory")
-        if isinstance(pane, MemoryPane):
-            pane.set_address(addr, size)
+        """Insert a fresh Memory pane directly below *target* and load *addr*."""
+        from .workspace import PaneContainer, EmptyPane
+        parent = target.parent
+        if not isinstance(parent, PaneContainer):
+            return
+        pane = self._create_pane("memory")
+        if not isinstance(pane, MemoryPane):
+            return
+        if parent.orientation == "vertical":
+            index = parent.index_of(target) + 1
+            await parent.insert_item(index, pane)
+        else:
+            new_container = PaneContainer(self.hl, orientation="vertical")
+            await parent.replace_item(target, new_container)
+            await new_container.set_items([target, pane])
+        pane.set_address(addr, size)
 
 
     def _cmd_disasm(self: "TGDBApp", args: list) -> str | None:
