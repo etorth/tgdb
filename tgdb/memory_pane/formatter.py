@@ -99,24 +99,20 @@ class MemoryFormatter:
 
 
     def header(self, width: int, height: int, hl: HighlightGroups) -> Text | None:
-        """Return the legend row, or None when ``show_header`` is False."""
+        """Return the legend row, or None when ``show_header`` is False.
+
+        Per-byte labels are used when they fit; if offsets grow too wide
+        the cadence is reduced (stride 2, 4, ..., up to one label per
+        group) so labels never overrun their column or merge with the
+        next group.
+        """
         if not self.show_header:
             return None
         parts: list[str] = []
         if self.show_address:
             parts.append(f"  {'Address':<18}")
-        # Each body group renders as group_bytes * 2 hex digits separated by
-        # single spaces (= group_bytes * 3 - 1 cells). Label each group with
-        # only its starting offset, left-padded to that group width so the
-        # legend stays aligned no matter how wide the offsets get.
-        group_width = self.group_bytes * 3 - 1
-        groups: list[str] = []
-        offset = 0
-        for _ in range(self.row_groups):
-            label = f"+{offset:X}"
-            groups.append(label.ljust(group_width))
-            offset += self.group_bytes
-        parts.append("  ".join(groups))
+        body_legend = self._build_offset_legend()
+        parts.append(body_legend)
         if self.show_ascii:
             parts.append("  ASCII")
         line = "".join(parts)
@@ -126,6 +122,44 @@ class MemoryFormatter:
             style=hl.style("SelectedLineHighlight"),
         )
         return text
+
+
+    def _pick_offset_stride(self) -> int:
+        """Choose the smallest power-of-two stride whose labels still fit."""
+        total_bytes = self.bytes_per_row
+        if total_bytes <= 0:
+            return 1
+        stride = 1
+        while stride < total_bytes:
+            last_offset = ((total_bytes - 1) // stride) * stride
+            max_width = 1 + len(f"{last_offset:X}")
+            slot = 3 * stride - 1
+            if max_width <= slot:
+                return stride
+            stride *= 2
+        return total_bytes
+
+
+    def _build_offset_legend(self) -> str:
+        """Render the per-byte legend using the chosen stride."""
+        gb = self.group_bytes
+        rg = self.row_groups
+        total_bytes = gb * rg
+        if total_bytes <= 0:
+            return ""
+        # Layout: byte k of group g starts at col g*(3*gb + 1) + k*3.
+        per_group = 3 * gb - 1
+        total_cols = rg * per_group + max(0, rg - 1) * 2
+        buf = [" "] * total_cols
+        stride = self._pick_offset_stride()
+        for offset in range(0, total_bytes, stride):
+            g, k = divmod(offset, gb)
+            col = g * (3 * gb + 1) + k * 3
+            label = f"+{offset:X}"
+            for i, ch in enumerate(label):
+                if col + i < total_cols:
+                    buf[col + i] = ch
+        return "".join(buf)
 
 
     def format(
