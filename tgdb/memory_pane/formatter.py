@@ -19,7 +19,6 @@ from typing import Any
 from rich.text import Text
 
 from ..highlight_groups import HighlightGroups
-from ..pane_base import fit_cells
 
 
 def is_valid_formatter(obj: Any) -> bool:
@@ -65,6 +64,9 @@ _BYTE_FORMATS = {
     "oct": (3, "{:03o}"),
     "dec": (3, "{:3d}"),
 }
+
+
+_GROUP_BGS = ("rgb(26,26,26)", "rgb(38,38,38)", "rgb(51,51,51)")
 
 
 def _reverse_bits(b: int) -> int:
@@ -119,6 +121,7 @@ class MemoryFormatter:
         reverse_bytes: bool = False,
         reverse_bits: bool = False,
         byte_format: str = "hex",
+        group_bg: bool = True,
     ) -> None:
         self.show_header = bool(show_header)
         self.show_address = bool(show_address)
@@ -135,6 +138,14 @@ class MemoryFormatter:
             )
         self.byte_format = fmt
         self._cell_w, self._cell_fmt = _BYTE_FORMATS[fmt]
+        self.group_bg = bool(group_bg)
+
+
+    def _group_style(self, base: str, g_disp: int) -> str:
+        if not self.group_bg:
+            return base
+        bg = _GROUP_BGS[g_disp % len(_GROUP_BGS)]
+        return f"{base} on {bg}" if base else f"on {bg}"
 
 
     @property
@@ -148,24 +159,36 @@ class MemoryFormatter:
         Per-byte labels are used when they fit; if offsets grow too wide
         the cadence is reduced (stride 2, 4, ..., up to one label per
         group) so labels never overrun their column or merge with the
-        next group.
+        next group. Each group region is tinted with a subtle alternating
+        background so columns line up with the body rows.
         """
         if not self.show_header:
             return None
-        parts: list[str] = []
+        base = hl.style("SelectedLineHighlight")
+        text = Text(no_wrap=True, overflow="crop", style=base)
         if self.show_address:
-            parts.append(f"{'Address':<18}  ")
-        body_legend = self._build_offset_legend()
-        parts.append(body_legend)
+            text.append(f"{'Address':<18}  ")
+        self._append_legend_groups(text, base)
         if self.show_ascii:
-            parts.append("  ASCII")
-        line = "".join(parts)
-        text = Text(no_wrap=True, overflow="crop")
-        text.append(
-            fit_cells(line, max(1, width)),
-            style=hl.style("SelectedLineHighlight"),
-        )
+            text.append("  ASCII")
+        text.truncate(max(1, width), pad=True)
         return text
+
+
+    def _append_legend_groups(self, text: Text, base: str) -> None:
+        gb = self.group_bytes
+        rg = self.row_groups
+        w = self._cell_w
+        group_width = gb * w + (gb - 1)
+        legend = self._build_offset_legend()
+        pos = 0
+        for g in range(rg):
+            chunk = legend[pos:pos + group_width]
+            text.append(chunk, style=self._group_style(base, g))
+            pos += group_width
+            if g < rg - 1:
+                text.append(legend[pos:pos + 2], style=base)
+                pos += 2
 
 
     def _pick_offset_stride(self) -> int:
@@ -236,37 +259,36 @@ class MemoryFormatter:
         """Render *blocks* as a hex+ASCII dump fitting the given size."""
         base_addr, raw = blocks_to_bytes(blocks)
         bpr = self.bytes_per_row
-        rows: list[str] = []
-        for off in range(0, len(raw), bpr):
-            row_bytes = raw[off:off + bpr]
-            rows.append(self._format_row(base_addr + off, row_bytes))
-
-        body_height = max(0, height - (1 if self.show_header else 0))
+        base = hl.style("Normal")
+        body_height = max(0, height - self._header_lines())
         text = Text(no_wrap=True, overflow="crop")
-        for i, line in enumerate(rows[:body_height]):
-            if i:
+        emitted = 0
+        for off in range(0, len(raw), bpr):
+            if emitted >= body_height:
+                break
+            if emitted:
                 text.append("\n")
-            text.append(
-                fit_cells(line, max(1, width)),
-                style=hl.style("Normal"),
-            )
-        # Pad the rest of the visible area with blank lines so the pane
-        # background stays consistent.
-        shown = min(body_height, len(rows))
-        for _ in range(max(0, body_height - shown)):
+            row = self._row_text(base_addr + off, raw[off:off + bpr], base)
+            row.truncate(max(1, width), pad=True)
+            text.append_text(row)
+            emitted += 1
+        for _ in range(max(0, body_height - emitted)):
             text.append("\n")
-            text.append(" " * max(1, width), style=hl.style("Normal"))
+            text.append(" " * max(1, width), style=base)
         return text
 
 
-    def _format_row(self, addr: int, row_bytes: list[int]) -> str:
-        sections: list[str] = []
+    def _header_lines(self) -> int:
+        return 1 if self.show_header else 0
+
+
+    def _row_text(self, addr: int, row_bytes: list[int], base: str) -> Text:
+        text = Text(no_wrap=True, overflow="crop", style=base)
         if self.show_address:
-            sections.append(f"0x{addr:016x}  ")
+            text.append(f"0x{addr:016x}  ")
         gb = self.group_bytes
         rg = self.row_groups
         w = self._cell_w
-        groups: list[str] = []
         for g_disp in range(rg):
             cells: list[str] = []
             for k_disp in range(gb):
@@ -278,14 +300,15 @@ class MemoryFormatter:
                     cells.append(self._cell_fmt.format(b))
                 else:
                     cells.append(" " * w)
-            groups.append(" ".join(cells))
-        sections.append("  ".join(groups))
+            text.append(" ".join(cells), style=self._group_style(base, g_disp))
+            if g_disp < rg - 1:
+                text.append("  ")
         if self.show_ascii:
             ascii_str = "".join(
                 chr(b) if 32 <= b < 127 else "." for b in row_bytes
             )
-            sections.append(f"  |{ascii_str}|")
-        return "".join(sections)
+            text.append(f"  |{ascii_str}|")
+        return text
 
 
 def build_formatter(expr: str, namespace: dict) -> tuple[Any, str | None]:
