@@ -107,10 +107,11 @@ class WorkspaceMixin:
 
 
     def _make_memory_pane(self: "TGDBApp") -> MemoryPane:
-        if self._memory_pane is None:
-            self._memory_pane = MemoryPane(self.hl)
-            self._memory_pane.set_read_fn(self.gdb.read_memory_bytes_async)
-        return self._memory_pane
+        """Always return a fresh MemoryPane; multi-instance pane."""
+        pane = MemoryPane(self.hl)
+        pane.set_read_fn(self.gdb.read_memory_bytes_async)
+        self._memory_panes.append(pane)
+        return pane
 
 
     def _make_disasm_pane(self: "TGDBApp") -> DisasmPane:
@@ -166,11 +167,19 @@ class WorkspaceMixin:
 
 
     def _pane_is_attached(self: "TGDBApp", pane_kind: str) -> bool:
+        descriptor = self._pane_descriptors.get(pane_kind)
+        if descriptor is not None and descriptor.multi_instance:
+            # Multi-instance panes can always be added a new copy from the menu.
+            return False
         return self._widget_attached(self._pane_widget(pane_kind))
 
 
     def _pane_kind_for_widget(self: "TGDBApp", widget: Widget) -> str | None:
+        if isinstance(widget, MemoryPane):
+            return "memory"
         for pane_kind, descriptor in self._pane_descriptors.items():
+            if descriptor.multi_instance:
+                continue
             if widget is descriptor.current():
                 return pane_kind
         return None

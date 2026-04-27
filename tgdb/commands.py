@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .source_widget import SourceFile
+from .memory_pane import MemoryPane
+from .async_util import supervise
 
 if TYPE_CHECKING:
     from .main import TGDBApp
@@ -345,16 +347,18 @@ class CommandsMixin:
 
 
     def _cmd_memory(self: "TGDBApp", args: list) -> str | None:
-        """Inspect memory in the Memory pane: :memory addr [size].
+        """Inspect memory in a Memory pane: :memory addr [size].
 
         addr may be a hex literal (0x...), decimal, or a GDB expression.
         When *size* is omitted the dump is sized to fit the visible pane.
+
+        Memory panes are multi-instance. The command first looks for an
+        already-mounted Memory pane that has no content yet and reuses it;
+        otherwise it spawns a fresh Memory pane next to the most recent
+        one and shows the requested address there.
         """
         if not args:
             return "memory: requires an address (e.g. :memory 0x7fffffffd000)"
-        memory_pane = getattr(self, "_memory_pane", None)
-        if memory_pane is None:
-            return "memory: Memory pane is not open (add it from context menu first)"
         addr = args[0]
         size: int | None = None
         if len(args) > 1:
@@ -362,8 +366,35 @@ class CommandsMixin:
                 size = int(args[1])
             except ValueError:
                 return f"memory: invalid size {args[1]!r}"
-        memory_pane.set_address(addr, size)
+
+        mounted = [p for p in self._memory_panes if p.parent is not None]
+        empty = next(
+            (p for p in mounted if not p._current_address),
+            None,
+        )
+        if empty is not None:
+            empty.set_address(addr, size)
+            return None
+        if not mounted:
+            return "memory: Memory pane is not open (add it from context menu first)"
+        target = mounted[-1]
+        supervise(
+            self._spawn_memory_pane(target, addr, size),
+            name="cmd-memory-spawn",
+        )
         return None
+
+
+    async def _spawn_memory_pane(
+        self: "TGDBApp",
+        target: "MemoryPane",
+        addr: str,
+        size: int | None,
+    ) -> None:
+        """Insert a fresh Memory pane next to *target* and load *addr*."""
+        pane = await self._add_pane_to_workspace(target, "memory")
+        if isinstance(pane, MemoryPane):
+            pane.set_address(addr, size)
 
 
     def _cmd_disasm(self: "TGDBApp", args: list) -> str | None:

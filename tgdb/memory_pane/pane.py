@@ -20,7 +20,8 @@ _HEADER = "  Address           +0 +1 +2 +3  +4 +5 +6 +7  +8 +9 +A +B  +C +D +E +
 
 
 def _format_memory_rows(
-    raw_blocks: list[dict], bytes_per_row: int = 16
+    raw_blocks: list[dict],
+    bytes_per_row: int = 16
 ) -> list[tuple[str, list[int], str]]:
     """Parse GDB MI memory blocks into (addr_str, bytes_list, ascii_str) rows."""
     all_bytes: list[int] = []

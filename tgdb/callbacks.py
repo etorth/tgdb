@@ -407,8 +407,10 @@ class CallbacksMixin:
                 ),
                 name="disasm-pane-refresh",
             )
-        if self._memory_pane is not None:
-            self._memory_pane.refresh_memory()
+        if self._memory_panes:
+            for pane in self._memory_panes:
+                if pane.parent is not None:
+                    pane.refresh_memory()
 
 
     async def _refresh_breakpoints_async(self) -> None:

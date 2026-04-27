@@ -185,7 +185,7 @@ class TGDBApp(
         self._register_pane: RegisterPane | None = None
         self._current_registers: list[RegisterInfo] = []
         self._evaluate_pane: EvaluatePane | None = None
-        self._memory_pane: MemoryPane | None = None
+        self._memory_panes: list[MemoryPane] = []
         self._disasm_pane: DisasmPane | None = None
         self._in_map_replay: bool = False
         self._pane_descriptors: dict[str, PaneDescriptor] = {
@@ -228,7 +228,8 @@ class TGDBApp(
             "memory": PaneDescriptor(
                 "Memory",
                 self._make_memory_pane,
-                lambda: self._memory_pane,
+                lambda: self._memory_panes[-1] if self._memory_panes else None,
+                multi_instance=True,
             ),
             "disasm": PaneDescriptor(
                 "Disasm",

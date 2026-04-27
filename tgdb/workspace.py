@@ -51,6 +51,7 @@ class PaneDescriptor:
     create: Callable[[], Widget]
     current: Callable[[], Widget | None]
     requester: Callable[[], None] | None = None
+    multi_instance: bool = False
 
 
 class Splitter(Widget):
