@@ -63,7 +63,7 @@ _BYTE_FORMATS = {
     "hex": (2, "{:02x}"),
     "bin": (8, "{:08b}"),
     "oct": (3, "{:03o}"),
-    "dec": (3, "{:03d}"),
+    "dec": (3, "{:3d}"),
 }
 
 
@@ -154,7 +154,7 @@ class MemoryFormatter:
             return None
         parts: list[str] = []
         if self.show_address:
-            parts.append(f"  {'Address':<18}")
+            parts.append(f"{'Address':<18}  ")
         body_legend = self._build_offset_legend()
         parts.append(body_legend)
         if self.show_ascii:
