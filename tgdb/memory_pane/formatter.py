@@ -105,13 +105,16 @@ class MemoryFormatter:
         parts: list[str] = []
         if self.show_address:
             parts.append(f"  {'Address':<18}")
+        # Each body group renders as group_bytes * 2 hex digits separated by
+        # single spaces (= group_bytes * 3 - 1 cells). Label each group with
+        # only its starting offset, left-padded to that group width so the
+        # legend stays aligned no matter how wide the offsets get.
+        group_width = self.group_bytes * 3 - 1
         groups: list[str] = []
         offset = 0
         for _ in range(self.row_groups):
-            cells: list[str] = []
-            for k in range(self.group_bytes):
-                cells.append(f"+{offset + k:X}".rjust(2))
-            groups.append(" ".join(cells))
+            label = f"+{offset:X}"
+            groups.append(label.ljust(group_width))
             offset += self.group_bytes
         parts.append("  ".join(groups))
         if self.show_ascii:
