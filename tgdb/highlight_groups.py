@@ -140,6 +140,9 @@ DEFAULT_GROUPS: dict[str, HighlightStyle] = {
     #   PmenuSel  — selected popup item
     "Pmenu": HighlightStyle(fg="bright_white", bg="color(238)"),
     "PmenuSel": HighlightStyle(fg="black", bg="bright_white", bold=True),
+    # Memory pane: subtle background tint for byte groups so adjacent
+    # groups are visually distinguishable without harsh contrast.
+    "MemoryGroup": HighlightStyle(bg="rgb(26,26,26)"),
 }
 
 

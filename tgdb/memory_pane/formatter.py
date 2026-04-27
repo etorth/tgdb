@@ -66,7 +66,7 @@ _BYTE_FORMATS = {
 }
 
 
-_GROUP_BGS = ("rgb(26,26,26)", "rgb(38,38,38)", "rgb(51,51,51)")
+_GROUP_HL = "MemoryGroup"
 
 
 def _reverse_bits(b: int) -> int:
@@ -141,11 +141,13 @@ class MemoryFormatter:
         self.group_bg = bool(group_bg)
 
 
-    def _group_style(self, base: str, g_disp: int) -> str:
+    def _group_style(self, base: str, hl: HighlightGroups) -> str:
         if not self.group_bg:
             return base
-        bg = _GROUP_BGS[g_disp % len(_GROUP_BGS)]
-        return f"{base} on {bg}" if base else f"on {bg}"
+        gs = hl.style(_GROUP_HL)
+        if not gs:
+            return base
+        return f"{base} {gs}" if base else gs
 
 
     @property
@@ -168,27 +170,11 @@ class MemoryFormatter:
         text = Text(no_wrap=True, overflow="crop", style=base)
         if self.show_address:
             text.append(f"{'Address':<18}  ")
-        self._append_legend_groups(text, base)
+        text.append(self._build_offset_legend())
         if self.show_ascii:
             text.append("  ASCII")
         text.truncate(max(1, width), pad=True)
         return text
-
-
-    def _append_legend_groups(self, text: Text, base: str) -> None:
-        gb = self.group_bytes
-        rg = self.row_groups
-        w = self._cell_w
-        group_width = gb * w + (gb - 1)
-        legend = self._build_offset_legend()
-        pos = 0
-        for g in range(rg):
-            chunk = legend[pos:pos + group_width]
-            text.append(chunk, style=self._group_style(base, g))
-            pos += group_width
-            if g < rg - 1:
-                text.append(legend[pos:pos + 2], style=base)
-                pos += 2
 
 
     def _pick_offset_stride(self) -> int:
@@ -268,7 +254,7 @@ class MemoryFormatter:
                 break
             if emitted:
                 text.append("\n")
-            row = self._row_text(base_addr + off, raw[off:off + bpr], base)
+            row = self._row_text(base_addr + off, raw[off:off + bpr], base, hl)
             row.truncate(max(1, width), pad=True)
             text.append_text(row)
             emitted += 1
@@ -282,13 +268,14 @@ class MemoryFormatter:
         return 1 if self.show_header else 0
 
 
-    def _row_text(self, addr: int, row_bytes: list[int], base: str) -> Text:
+    def _row_text(self, addr: int, row_bytes: list[int], base: str, hl: HighlightGroups) -> Text:
         text = Text(no_wrap=True, overflow="crop", style=base)
         if self.show_address:
             text.append(f"0x{addr:016x}  ")
         gb = self.group_bytes
         rg = self.row_groups
         w = self._cell_w
+        group_style = self._group_style(base, hl)
         for g_disp in range(rg):
             cells: list[str] = []
             for k_disp in range(gb):
@@ -300,7 +287,7 @@ class MemoryFormatter:
                     cells.append(self._cell_fmt.format(b))
                 else:
                     cells.append(" " * w)
-            text.append(" ".join(cells), style=self._group_style(base, g_disp))
+            text.append(" ".join(cells), style=group_style)
             if g_disp < rg - 1:
                 text.append("  ")
         if self.show_ascii:
