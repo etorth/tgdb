@@ -30,6 +30,7 @@ _GDB_DELEGATE_SET = frozenset(
         "on_switch_to_tgdb",
         "imap_feed",
         "imap_replay",
+        "on_cli_line",
         "gdb_focused",
         "debugwincolor",
         "ignorecase",

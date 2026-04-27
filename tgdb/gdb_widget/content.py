@@ -60,6 +60,14 @@ class _GDBContent(ScrollMixin, Widget):
         self.on_switch_to_tgdb: Callable[[], None] = lambda: None
         self.imap_feed: Callable[[str], "list[str] | None"] = lambda k: None
         self.imap_replay: Callable[["list[str]"], None] = lambda tokens: None
+        # Snoop the line being typed into GDB's primary PTY so the app can
+        # react to specific CLI commands (frame navigation, thread switch).
+        # The callback receives the finalized line text (no trailing newline)
+        # right before the carriage return is forwarded to GDB.  Lines edited
+        # via history (arrow keys), Ctrl-U, etc. clear the buffer instead of
+        # firing the callback, keeping false positives out.
+        self.on_cli_line: Callable[[str], None] = lambda line: None
+        self._cli_line: str = ""
         self.ignorecase: bool = False
         self.wrapscan: bool = True
         self._num_buf: str = ""
@@ -426,7 +434,44 @@ class _GDBContent(ScrollMixin, Widget):
         # No imap matched — forward key directly to GDB's PTY
         raw = self._KEY_BYTES.get(key)
         if raw:
-            self.send_to_gdb(raw)
+            self._send_with_snoop(raw)
         elif char and (char.isprintable() or char == "\t"):
-            self.send_to_gdb(char.encode())
+            self._send_with_snoop(char.encode())
         event.stop()
+
+
+    def _send_with_snoop(self, data: bytes) -> None:
+        """Forward bytes to GDB while snooping the typed line.
+
+        Tracks the user's input on the GDB primary PTY so that pressing Enter
+        on a recognizable CLI command (e.g. ``up``/``down``/``frame``) can
+        trigger a same-thread frame refresh in tgdb.  The buffer is cleared
+        whenever an editing/control sequence we cannot reliably interpret
+        (arrow keys, Ctrl-U, Ctrl-C, escape sequences) is forwarded, which
+        keeps false positives out at the cost of missing snoop opportunities
+        when the user navigates history.
+        """
+        for byte in data:
+            if byte in (0x0a, 0x0d):
+                line = self._cli_line.strip()
+                self._cli_line = ""
+                if line:
+                    try:
+                        self.on_cli_line(line)
+                    except Exception:
+                        pass
+            elif byte in (0x08, 0x7f):
+                if self._cli_line:
+                    self._cli_line = self._cli_line[:-1]
+            elif byte == 0x09:
+                # Tab — completion may rewrite the line; give up snooping.
+                self._cli_line = ""
+            elif byte < 0x20:
+                # Any other control byte (Ctrl-U, Ctrl-C, ESC, ...).
+                self._cli_line = ""
+            else:
+                try:
+                    self._cli_line += bytes([byte]).decode("utf-8", "ignore")
+                except Exception:
+                    self._cli_line = ""
+        self.send_to_gdb(data)

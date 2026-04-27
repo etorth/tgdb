@@ -67,6 +67,7 @@ class AppCoreMixin:
         gdb_widget.on_switch_to_tgdb = self._switch_to_tgdb
         gdb_widget.imap_feed = self._imap_feed
         gdb_widget.imap_replay = self._replay_gdb_key_sequence
+        gdb_widget.on_cli_line = self._on_gdb_console_line
 
         try:
             container = self.query_one("#split-container", PaneContainer)

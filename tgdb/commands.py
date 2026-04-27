@@ -234,6 +234,37 @@ class CommandsMixin:
             pass
 
 
+    # Commands typed into the GDB console pane that should refresh the source
+    # pane to reflect the new selected frame.  GDB does not emit an MI async
+    # record for same-thread frame changes (no =frame-selected), so the only
+    # reliable way to detect ``up``/``down``/``frame``/``thread`` typed
+    # directly into the GDB pane is to snoop the line as the user submits it.
+    # The set mirrors the one used by ``_send_gdb_cli`` (the ``:`` command-bar
+    # path) and adds the unambiguous GDB abbreviations.
+    _FRAME_REFRESH_COMMANDS: frozenset = frozenset({
+        "up", "u",
+        "down", "do",
+        "frame", "fr", "f",
+        "select-frame",
+        "thread",
+    })
+
+
+    def _on_gdb_console_line(self: "TGDBApp", line: str) -> None:
+        """Snoop a line submitted to GDB's primary PTY.
+
+        Called by ``GDBWidget`` right before the trailing newline is forwarded
+        to GDB.  If the first token is a recognized frame-navigation command,
+        schedule a ``-stack-info-frame`` request so the source pane updates.
+        """
+        token = line.lstrip().split(None, 1)[0].lower() if line.strip() else ""
+        if token in self._FRAME_REFRESH_COMMANDS:
+            asyncio.get_running_loop().call_later(
+                0.1,
+                self._safe_request_location,
+            )
+
+
     def _show_help_in_source(self: "TGDBApp") -> None:
         help_candidates = [
             Path("/usr/share/cgdb/cgdb.txt"),
