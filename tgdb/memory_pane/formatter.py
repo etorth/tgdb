@@ -222,6 +222,7 @@ class MemoryFormatter:
         total_cols = rg * group_width + max(0, rg - 1) * 2
         buf = [" "] * total_cols
         stride = self._pick_offset_stride()
+        slot_width = stride * w + (stride - 1)
         for g_disp in range(rg):
             for k_disp in range(gb):
                 offset = self._logical_offset(g_disp, k_disp)
@@ -229,8 +230,9 @@ class MemoryFormatter:
                     continue
                 col = self._byte_col(g_disp, k_disp)
                 label = f"+{offset:X}"
+                col += max(0, slot_width - len(label))
                 for i, ch in enumerate(label):
-                    if col + i < total_cols:
+                    if 0 <= col + i < total_cols:
                         buf[col + i] = ch
         return "".join(buf)
 
