@@ -68,6 +68,10 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
     def __init__(self, hl: HighlightGroups, cfg: Config | None = None, **kwargs) -> None:
         super().__init__(hl, **kwargs)
         self._cfg = cfg if cfg is not None else Config()
+        # Persist the Tree widget across compose() lifecycles so that a remount
+        # (e.g. after a workspace split that re-parents this pane) does not
+        # discard the populated TreeNodes built by reconciliation.
+        self._tree_widget: _VarobjTree = _VarobjTree("")
         self._varobj_to_node: dict[str, TreeNode] = {}
         self._varobj_names: list[str] = []
         self._dynamic_varobjs: set[str] = set()
@@ -103,7 +107,7 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
 
     def compose(self):
         yield from super().compose()
-        yield _VarobjTree("")
+        yield self._tree_widget
 
 
     def on_mount(self) -> None:
