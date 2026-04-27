@@ -7,5 +7,6 @@ caller creates the widget, injects one async memory-read callback through
 """
 
 from .pane import MemoryPane
+from .formatter import MemoryFormatter, is_valid_formatter, build_formatter
 
-__all__ = ["MemoryPane"]
+__all__ = ["MemoryPane", "MemoryFormatter", "is_valid_formatter", "build_formatter"]

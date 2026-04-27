@@ -108,8 +108,25 @@ class WorkspaceMixin:
 
     def _make_memory_pane(self: "TGDBApp") -> MemoryPane:
         """Always return a fresh MemoryPane; multi-instance pane."""
-        pane = MemoryPane(self.hl)
+        import weakref
+        from .memory_pane import MemoryFormatter
+        formatter = self.config._memoryformatter_obj or MemoryFormatter()
+        pane = MemoryPane(self.hl, formatter=formatter)
         pane.set_read_fn(self.gdb.read_memory_bytes_async)
+        # Subscribe via weak method so pane GC is not blocked.
+        try:
+            ref = weakref.WeakMethod(pane.set_formatter)
+
+            def _on_formatter_change(obj):
+                method = ref()
+                if method is None:
+                    raise ReferenceError
+                method(obj)
+
+            self.config.add_memoryformatter_listener(_on_formatter_change)
+        except TypeError:
+            # set_formatter not bound (extremely unlikely) — skip subscription.
+            pass
         self._memory_panes.append(pane)
         return pane
 

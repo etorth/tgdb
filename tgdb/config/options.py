@@ -119,6 +119,11 @@ class ConfigOptionMixin:
             _log.debug(f"set {name} = {getattr(self.config, name)!r}")
             return None
         if name in _PATH_OPTIONS:
+            if name == "memoryformatter":
+                err = self._apply_memoryformatter(value)
+                if err is not None:
+                    return err
+                return None
             setattr(self.config, name, value)
             _log.debug(f"set {name} = {value!r}")
             if value:
@@ -130,6 +135,32 @@ class ConfigOptionMixin:
 
     def _resolve_name(self, name: str) -> str:
         return _ALIASES.get(name.lower(), name.lower())
+
+
+    def _apply_memoryformatter(self, value: str) -> str | None:
+        """Evaluate *value* and install the resulting memory formatter.
+
+        Empty string resets to the default ``MemoryFormatter()``.
+        Returns an error string on failure; on success returns ``None``
+        and broadcasts the new formatter to all subscribers.
+        """
+        from ..memory_pane import build_formatter, MemoryFormatter
+
+        if not value.strip():
+            obj = MemoryFormatter()
+            err = None
+        else:
+            obj, err = build_formatter(value, self._py_namespace)
+        if err is not None or obj is None:
+            _log.warning(f"set memoryformatter: {err}")
+            self.config._memoryformatter_obj = MemoryFormatter()
+            self.config.notify_memoryformatter_changed()
+            return f"set memoryformatter: {err} (falling back to default)"
+        self.config.memoryformatter = value
+        self.config._memoryformatter_obj = obj
+        self.config.notify_memoryformatter_changed()
+        _log.debug(f"set memoryformatter = {value!r}")
+        return None
 
 
     async def _cmd_save(self, args: list[str]) -> str | None:

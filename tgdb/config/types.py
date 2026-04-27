@@ -6,7 +6,9 @@ the option/alias constants used internally by the configuration package.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
+from collections.abc import Callable
 
 # ---------------------------------------------------------------------------
 # Reserved namespace prefix — any name starting with this string is internal
@@ -59,6 +61,40 @@ class Config:
     # Path options (stored verbatim — no lowercasing)
     clipboardpath: str = ""  # e.g. /usr/local/bin/xclip
 
+    # Pluggable formatter expression for the memory pane. Empty means use
+    # the default ``MemoryFormatter()``. The resolved instance lives in
+    # ``_memoryformatter_obj``; subscribers in ``_memoryformatter_listeners``
+    # are called whenever the formatter changes.
+    memoryformatter: str = ""
+    _memoryformatter_obj: Any = field(default=None, repr=False, compare=False)
+    _memoryformatter_listeners: list[Callable[[Any], None]] = field(
+        default_factory=list, repr=False, compare=False,
+    )
+
+
+    def add_memoryformatter_listener(self, cb: Callable[[Any], None]) -> None:
+        """Register *cb* to be invoked whenever the memory formatter changes."""
+        self._memoryformatter_listeners.append(cb)
+
+
+    def notify_memoryformatter_changed(self) -> None:
+        """Fire every registered listener with the current formatter object."""
+        obj = self._memoryformatter_obj
+        dead: list[Callable[[Any], None]] = []
+        for cb in list(self._memoryformatter_listeners):
+            try:
+                cb(obj)
+            except ReferenceError:
+                dead.append(cb)
+            except Exception:
+                # Listener errors must not break the config command.
+                pass
+        for cb in dead:
+            try:
+                self._memoryformatter_listeners.remove(cb)
+            except ValueError:
+                pass
+
 
 _BOOL_OPTIONS = {
     "autosourcereload",
@@ -92,7 +128,7 @@ _STR_OPTIONS = {
     "syntax",
 }
 # Path options: stored verbatim (no lowercasing); setting one may have side-effects.
-_PATH_OPTIONS = {"clipboardpath"}
+_PATH_OPTIONS = {"clipboardpath", "memoryformatter"}
 
 # Valid -nargs values for :command
 _VALID_NARGS = {"0", "1", "*", "?", "+"}

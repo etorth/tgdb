@@ -143,7 +143,12 @@ class TGDBApp(
         import tgdb as _tgdb_pkg
 
         _tgdb_pkg.screen._set_app(self)
-        self.cp.set_py_globals({"app": self, "tgdb": _tgdb_pkg})
+        from .memory_pane import MemoryFormatter as _MF
+        self.cp.set_py_globals({
+            "app": self,
+            "tgdb": _tgdb_pkg,
+            "MemoryFormatter": _MF,
+        })
 
         self._rc_file: str | None = (
             rc_file  # resolved in on_mount after app is ready
