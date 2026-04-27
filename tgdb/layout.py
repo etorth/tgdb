@@ -216,34 +216,46 @@ class LayoutMixin:
                 return
             if orientation_changed:
                 container.set_orientation(self.cfg.winsplitorientation)
+            # Only apply absolute src/gdb sizes when both are direct children
+            # of the root #split-container.  Once the user has subdivided the
+            # source or gdb area via the context menu, src/gdb live inside a
+            # nested PaneContainer; that nested container owns its own
+            # per-item weights (updated by drag), so writing absolute pixel
+            # sizes on src/gdb here would clobber the user's drag-resized
+            # layout on the next on_resize / _apply_split tick.
+            src_is_root_child = src.parent is container
+            gdb_is_root_child = gdb.parent is container
+            apply_sizes = src_is_root_child and gdb_is_root_child
             if is_horizontal:
                 container.styles.layout = "horizontal"
-                if src_size <= 0:
-                    src.styles.display = "none"
-                else:
-                    src.styles.display = "block"
-                if gdb_size <= 0:
-                    gdb.styles.display = "none"
-                else:
-                    gdb.styles.display = "block"
-                src.styles.width = src_size
-                src.styles.height = "1fr"
-                gdb.styles.width = gdb_size
-                gdb.styles.height = "1fr"
+                if apply_sizes:
+                    if src_size <= 0:
+                        src.styles.display = "none"
+                    else:
+                        src.styles.display = "block"
+                    if gdb_size <= 0:
+                        gdb.styles.display = "none"
+                    else:
+                        gdb.styles.display = "block"
+                    src.styles.width = src_size
+                    src.styles.height = "1fr"
+                    gdb.styles.width = gdb_size
+                    gdb.styles.height = "1fr"
             else:
                 container.styles.layout = "vertical"
-                if src_size <= 0:
-                    src.styles.display = "none"
-                else:
-                    src.styles.display = "block"
-                if gdb_size <= 0:
-                    gdb.styles.display = "none"
-                else:
-                    gdb.styles.display = "block"
-                src.styles.width = "1fr"
-                src.styles.height = src_size
-                gdb.styles.width = "1fr"
-                gdb.styles.height = gdb_size
+                if apply_sizes:
+                    if src_size <= 0:
+                        src.styles.display = "none"
+                    else:
+                        src.styles.display = "block"
+                    if gdb_size <= 0:
+                        gdb.styles.display = "none"
+                    else:
+                        gdb.styles.display = "block"
+                    src.styles.width = "1fr"
+                    src.styles.height = src_size
+                    gdb.styles.width = "1fr"
+                    gdb.styles.height = gdb_size
         except NoMatches:
             pass
         finally:
