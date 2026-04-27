@@ -333,6 +333,44 @@ this search, which honors things like &lsquo;<samp>*</samp>&rsquo; or &lsquo;<sa
 <p>The full list of commands that are available in the source window is in
 <a href="#TGDB-Mode">TGDB Mode</a>.
 </p>
+<a name="index-auxiliary-panes"></a>
+<h4 class="subsubsection">Auxiliary panes and the workspace context menu</h4>
+
+<p>In addition to the source and GDB windows, TGDB&rsquo;s workspace can host
+several auxiliary panes:
+</p>
+<dl compact="compact">
+<dt><em>Locals</em></dt>
+<dd><p>Local variables of the current frame, expanded as a tree.</p></dd>
+<dt><em>Stack</em></dt>
+<dd><p>Call stack of the current thread.</p></dd>
+<dt><em>Threads</em></dt>
+<dd><p>List of threads in the inferior.</p></dd>
+<dt><em>Registers</em></dt>
+<dd><p>CPU registers, grouped by category.</p></dd>
+<dt><em>Evaluations</em></dt>
+<dd><p>User-supplied expressions added with <kbd>:evaluate</kbd>; each is
+re-evaluated automatically on every GDB stop.</p></dd>
+<dt><em>Memory</em></dt>
+<dd><p>Hex/ASCII (or binary / octal / decimal) dump of a region of memory,
+populated with <kbd>:memory <var>addr</var></kbd>.  The Memory pane is
+<em>multi-instance</em> &mdash; the workspace can hold any number of
+them simultaneously, and each is refreshed on every GDB stop.  Rendering
+is fully pluggable through the <code>:set memoryformatter=...</code>
+option (see <a href="#Configuring-TGDB">Configuring TGDB</a>).</p></dd>
+<dt><em>Disasm</em></dt>
+<dd><p>Disassembly of the current function, primed automatically on
+creation (<code>main</code> when the program has not started).
+Independent of the inline <kbd>:disasm</kbd> mode in the source pane.
+</p></dd>
+</dl>
+
+<p>Right-click anywhere in the workspace to open the cascading context menu.
+Its <em>Add</em> sub-menu lists all panes that can still be added (panes
+that are already mounted are hidden, except the multi-instance Memory
+pane which can always be added again).  <em>Split</em>, <em>Hide</em>,
+and orientation toggles operate on the pane under the cursor.
+</p>
 <hr>
 <a name="GDB-Window"></a>
 <div class="header">
@@ -1138,6 +1176,65 @@ or when pyperclip&rsquo;s auto-detection picks the wrong tool.  Example:
 this option; <code>xclip</code> often requires it.
 </p>
 </dd>
+<dt><kbd>:set memoryformatter=<var>expression</var></kbd></dt>
+<dd><p>Selects the formatter that every <em>Memory pane</em> uses to render its
+bytes.  <var>expression</var> is a Python constructor call evaluated in the
+same namespace used by <kbd>:python</kbd> blocks, so user-defined classes
+loaded via <kbd>:python</kbd> are visible here.  Setting an empty value
+restores the built-in default <code>MemoryFormatter()</code>.  Examples:
+</p>
+<pre class="example">:set memoryformatter=MemoryFormatter(group_bytes=4, row_groups=4)
+:set memoryformatter='MemoryFormatter(byte_format="bin", group_bytes=2, row_groups=2)'
+:set memoryformatter='MyFormatter(arg1=10, arg2="hello")'
+</pre>
+<p>A formatter is any object exposing a callable
+<code>format(width, height, blocks, hl)</code> that returns a
+<code>rich.text.Text</code> (or <code>None</code> to render nothing) plus
+an optional <code>header(width, height, hl)</code> with the same return
+type.  <var>blocks</var> is the raw list-of-dicts payload from GDB&rsquo;s
+<code>-data-read-memory-bytes</code> MI command.  When the expression
+fails to evaluate or the resulting object does not satisfy the contract
+TGDB falls back to the default formatter and reports the error.
+</p>
+<p>The built-in <code>MemoryFormatter</code> accepts these keyword
+arguments (all optional):
+</p>
+<dl compact="compact">
+<dt><code>show_header=True</code></dt>
+<dd><p>Render a column legend (<code>+0 +1 ... +F</code>) above the dump.
+Labels are right-aligned within their byte slot and the cadence is
+widened automatically (stride 2, 4, &hellip;) when offsets would
+otherwise overrun their column.</p></dd>
+<dt><code>show_address=True</code></dt>
+<dd><p>Prefix each row with its hex address.</p></dd>
+<dt><code>show_ascii=True</code></dt>
+<dd><p>Append an ASCII column.  ASCII is always rendered in the original
+byte order, regardless of any <code>reverse_*</code> flag.</p></dd>
+<dt><code>group_bytes=4</code></dt>
+<dd><p>Bytes per visual group (separated by a single space).</p></dd>
+<dt><code>row_groups=4</code></dt>
+<dd><p>Groups per row.  Total bytes per row is
+<code>group_bytes * row_groups</code>.</p></dd>
+<dt><code>reverse_groups=False</code></dt>
+<dd><p>Mirror group order so the right-most group holds the lowest-offset
+bytes; the header legend follows the same ordering.</p></dd>
+<dt><code>reverse_bytes=False</code></dt>
+<dd><p>Mirror byte order inside each group.</p></dd>
+<dt><code>reverse_bits=False</code></dt>
+<dd><p>Bit-reverse every byte (<code>0x88</code> &rarr; <code>0x11</code>) in the
+numeric column.  ASCII is unaffected.</p></dd>
+<dt><code>byte_format='hex'</code></dt>
+<dd><p>One of <code>'hex'</code>, <code>'bin'</code>, <code>'oct'</code>,
+<code>'dec'</code>.  All bytes use the format&rsquo;s fixed cell width
+(2 / 8 / 3 / 3).  Decimal uses space padding (so <code>1</code> renders
+as <code>&nbsp;&nbsp;1</code>); the bit/octal formats use zero padding.
+</p></dd>
+<dt><code>group_bg=True</code></dt>
+<dd><p>Tint every byte-group cell with the <code>MemoryGroup</code> highlight
+group (a low-contrast background by default) so adjacent groups are
+visually distinguishable.  Set to <code>False</code> to disable.</p></dd>
+</dl>
+</dd>
 <dt><kbd>:c</kbd></dt>
 <dt><kbd>:continue</kbd></dt>
 <dd><p>Send a continue command to GDB.
@@ -1270,6 +1367,30 @@ in the left hand side when the user created the mapping.  For example, if
 the user typed <code>:imap a&lt;Space&gt;b foo</code> then the user could delete the
 existing mapping with <code>:iunmap a&lt;Space&gt;b</code>.
 </p></dd>
+<dt><kbd>:evaluate <var>expression</var></kbd></dt>
+<dd><p>Add <var>expression</var> to the <em>Evaluations</em> pane.  The pane must
+already be open (use the workspace context menu &rarr; <em>Add &rarr;
+Evaluations</em>).  Each entry is re-evaluated automatically on every GDB
+stop.</p></dd>
+<dt><kbd>:unevaluate <var>N</var></kbd></dt>
+<dd><p>Remove the <var>N</var>-th entry from the <em>Evaluations</em> pane (1-based
+index).</p></dd>
+<dt><kbd>:memory <var>address</var> [<var>size</var>]</kbd></dt>
+<dd><p>Show the bytes at <var>address</var> (a hex literal, decimal, or any GDB
+expression) in a <em>Memory</em> pane.  When <var>size</var> is omitted the
+dump is sized to fit the visible pane and grows on resize.
+</p>
+<p>Memory panes are <em>multi-instance</em>.  The command first reuses any
+already-mounted Memory pane that has no content yet; otherwise it spawns
+a fresh Memory pane directly below the most recently opened one.
+At least one Memory pane must already be present in the workspace
+(add it from the context menu) so that TGDB knows where to anchor
+the new split.
+</p></dd>
+<dt><kbd>:disasm [on|off]</kbd></dt>
+<dd><p>Toggle inline disassembly in the source pane.  With no argument the
+current state is flipped.  Independent of the dedicated <em>Disasm</em>
+pane (which can be opened from the workspace context menu).</p></dd>
 </dl>
 
 <hr>
@@ -1664,6 +1785,15 @@ file can be auto detected.
 <dd><p>This is the group TGDB uses to display a mark in the source window.
 Marks are displayed when the <code>showmarks</code> option is enabled.
 See the <code>showmarks</code> option for more detail.
+</p></dd>
+<dt><code>MemoryGroup</code></dt>
+<dd><p>Background tint applied to every byte-group cell rendered by the
+default <code>MemoryFormatter</code> in the <em>Memory</em> pane, so that
+adjacent groups are visually distinguishable without harsh contrast.
+The header row is intentionally <em>not</em> tinted.  Override with
+<code>:highlight MemoryGroup ctermbg=...</code> or disable group
+striping entirely with
+<code>:set memoryformatter='MemoryFormatter(group_bg=False)'</code>.
 </p></dd>
 </dl>
 
