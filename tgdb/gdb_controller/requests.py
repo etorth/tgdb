@@ -251,6 +251,32 @@ class GDBRequestMixin:
         return []
 
 
+    async def request_disassembly_function_async(
+        self, spec: str, mode: int = 1,
+    ) -> list[dict]:
+        """Disassemble the entire function containing ``spec``.
+
+        ``spec`` may be a hex address (e.g. ``0x401120``) or a symbol name
+        (e.g. ``main``). Useful for priming the disassembly pane before the
+        program has been started, when no PC is available yet.
+        """
+        if not spec:
+            return []
+        result = await self.mi_command_async(
+            f"-data-disassemble -a {spec} -- {mode}"
+        )
+        message = result.get("message", "")
+        if message == "error":
+            return []
+        payload = result.get("payload") or {}
+        asm = payload.get("asm_insns") or []
+        if isinstance(asm, dict):
+            asm = [asm]
+        if isinstance(asm, list):
+            return asm
+        return []
+
+
     async def eval_expr(self, expr: str) -> str:
         escaped = expr.replace("\\", "\\\\").replace('"', '\\"')
         result = await self.mi_command_async(f'-data-evaluate-expression "{escaped}"')

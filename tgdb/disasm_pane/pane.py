@@ -344,6 +344,7 @@ class DisasmPane(PaneBase):
         self._content = _DisasmContent(hl, self)
         self._disasm_fn: Callable | None = None
         self._disasm_pc_fn: Callable | None = None
+        self._disasm_function_fn: Callable | None = None
         self._thread_id: str = ""
         self._func: str = ""
 
@@ -416,6 +417,42 @@ class DisasmPane(PaneBase):
         signal handlers, JIT) so the source-line based query is not usable.
         """
         self._disasm_pc_fn = fn
+
+
+    def set_disasm_function_fn(self, fn: Callable) -> None:
+        """Install the async callback used to disassemble a whole function.
+
+        Used to prime the pane with ``main`` before the program has started.
+        """
+        self._disasm_function_fn = fn
+
+
+    async def prime_function(self, spec: str) -> None:
+        """Fill the empty pane with the disassembly of ``spec``.
+
+        ``spec`` is anything GDB's ``-data-disassemble -a`` accepts: an
+        address (``0x401120``) or a symbol name (``main``). Has no effect
+        once the pane already shows something.
+        """
+        if self._content._lines:
+            return
+        if self._disasm_function_fn is None:
+            return
+        try:
+            raw = await self._disasm_function_fn(spec)
+        except Exception:
+            raw = []
+        if not raw:
+            return
+        if self._content._lines:
+            return
+        lines = _parse_disasm(raw, "")
+        func = ""
+        for entry in lines:
+            if entry.func_name:
+                func = entry.func_name
+                break
+        self.set_disasm(lines, current_addr="", func=func)
 
 
     def reset_user_cursor(self) -> None:

@@ -24,6 +24,7 @@ from .evaluate_pane import EvaluatePane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
 from .workspace import EmptyPane, PaneContainer, Splitter
+from .async_util import supervise
 
 if TYPE_CHECKING:
     from .main import TGDBApp
@@ -119,7 +120,32 @@ class WorkspaceMixin:
             self._disasm_pane.set_disasm_pc_fn(
                 self.gdb.request_disassembly_around_pc_async
             )
+            self._disasm_pane.set_disasm_function_fn(
+                self.gdb.request_disassembly_function_async
+            )
+            self._prime_disasm_pane()
         return self._disasm_pane
+
+
+    def _prime_disasm_pane(self: "TGDBApp") -> None:
+        """Fill a freshly-created disasm pane with the current PC or main."""
+        pane = self._disasm_pane
+        if pane is None:
+            return
+        frame = self.gdb.current_frame
+        if frame is not None and frame.addr:
+            supervise(
+                pane.refresh_disasm(
+                    frame.fullname or frame.file or "",
+                    frame.line,
+                    current_addr=frame.addr,
+                    thread_id=self.gdb.current_thread_id,
+                    func=frame.func,
+                ),
+                name="disasm-pane-prime",
+            )
+            return
+        supervise(pane.prime_function("main"), name="disasm-pane-prime-main")
 
     # ------------------------------------------------------------------
     # Pane queries
