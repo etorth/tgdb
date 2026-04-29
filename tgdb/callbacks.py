@@ -458,38 +458,22 @@ class CallbacksMixin:
     def _ui_on_objfiles_changed(self) -> None:
         """A shared library was loaded/unloaded or progspace was cleared.
 
-        Re-query ``-file-list-exec-source-files`` so the file dialog
-        reflects new/dropped translation units, and refresh the disasm
-        pane if it's visible (its instruction stream may have shifted).
-        Coalesced upstream so a burst of ``new_objfile`` events at startup
-        produces a single refresh.
+        We deliberately do **not** issue ``-file-list-exec-source-files``
+        from this hook.  The source file list is consumed only by the
+        file-dialog popup, which already re-queries lazily when it opens
+        (see ``on_open_file_dialog``).  Eagerly re-querying on every
+        library load was observed to trigger long debuginfod download
+        cascades on systems where the dynamic linker has separate
+        debuginfo (each ``=library-loaded`` could stall GDB for many
+        seconds while debuginfod times out for each referenced source
+        file).  Disasm is for the current frame and does not need to be
+        refreshed just because an unrelated library appeared.
+
+        The hook is kept (instead of being removed) so any future cached
+        state derived from objfiles can be invalidated here without
+        re-introducing the synchronous query.
         """
-        if self.gdb is None:
-            return
-        try:
-            self.gdb.request_source_files()
-        except Exception:
-            pass
-        if self._disasm_pane is not None and self._disasm_pane.parent is not None:
-            current_addr = ""
-            line = 0
-            path = ""
-            func = ""
-            if self.gdb.current_frame is not None:
-                current_addr = self.gdb.current_frame.addr
-                line = self.gdb.current_frame.line
-                path = self.gdb.current_frame.fullname or self.gdb.current_frame.file
-                func = self.gdb.current_frame.func
-            supervise(
-                self._disasm_pane.refresh_disasm(
-                    path or "",
-                    line,
-                    current_addr=current_addr,
-                    thread_id=self.gdb.current_thread_id,
-                    func=func,
-                ),
-                name="disasm-pane-refresh",
-            )
+        return
 
 
     def _ui_on_inferior_call_pre(self) -> None:
