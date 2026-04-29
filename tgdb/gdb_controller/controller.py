@@ -190,6 +190,12 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         Primary PTY  : GDB console (user sees + types here).
         Secondary PTY: GDB MI channel via 'new-ui mi <slave_device>'.
         """
+        # Refuse double-start so we don't leak the previous PTY/pipe fds.
+        # A caller that genuinely wants to restart GDB should terminate()
+        # first.
+        if self._proc is not None:
+            raise RuntimeError("GDBController.start() called twice")
+
         # Create secondary PTY for MI channel.
         # Assign to self immediately so terminate() can clean up if anything below fails.
         mi_master_fd, mi_slave_fd = os.openpty()
@@ -348,6 +354,13 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             self.on_exit()
 
 
+    # Cap the partial-line buffer so a runaway writer (or a peer that
+    # somehow stops emitting newlines) cannot grow it without bound.
+    # Notify lines are tiny (single tag plus a small int); 64 KiB is a
+    # comfortable ceiling that still lets us absorb very large bursts.
+    _NOTIFY_BUF_MAX_BYTES = 64 * 1024
+
+
     def _on_notify_pipe_readable(self) -> None:
         """Drain the event-notify pipe and dispatch tagged event lines.
 
@@ -361,18 +374,23 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             while True:
                 chunk = os.read(self._prompt_pipe_r, 4096)
                 if not chunk:
-                    try:
-                        asyncio.get_running_loop().remove_reader(self._prompt_pipe_r)
-                    except Exception:
-                        pass
-                    self._notify_buf = b""
+                    self._unregister_notify_pipe()
                     return
                 self._notify_buf += chunk
                 if len(chunk) < 4096:
                     break
         except BlockingIOError:
             pass
-        except OSError:
+        except OSError as exc:
+            _log.warning(f"notify pipe read failed: {exc!r}")
+            self._unregister_notify_pipe()
+            return
+
+        if len(self._notify_buf) > self._NOTIFY_BUF_MAX_BYTES:
+            _log.warning(
+                f"notify buffer exceeded {self._NOTIFY_BUF_MAX_BYTES} bytes; resetting"
+            )
+            self._notify_buf = b""
             return
 
         if b"\n" not in self._notify_buf:
@@ -388,6 +406,19 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         if not self._dispatch_scheduled:
             self._dispatch_scheduled = True
             asyncio.get_running_loop().call_soon(self._dispatch_pending_events)
+
+
+    def _unregister_notify_pipe(self) -> None:
+        """Remove the notify-pipe asyncio reader and drop any partial line.
+
+        Called on EOF (GDB closed its end) or on read errors that would
+        otherwise busy-loop the event loop by leaving a dead fd registered.
+        """
+        try:
+            asyncio.get_running_loop().remove_reader(self._prompt_pipe_r)
+        except Exception:
+            pass
+        self._notify_buf = b""
 
 
     def _consume_notify_line(self, raw: bytes) -> None:

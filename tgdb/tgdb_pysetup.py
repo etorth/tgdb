@@ -11,6 +11,7 @@ except gdb.error:
 
 
 _event_notify_fd = None
+_event_handlers_connected = False
 
 
 def register_event_notify_fd(fd):
@@ -38,19 +39,27 @@ def register_event_notify_fd(fd):
       ``X``         gdb_exiting — GDB's main loop is tearing down.  Lets
                     tgdb shut down promptly instead of waiting for PTY EOF.
 
-    Idempotent: a second call with the same fd is a no-op.  Handlers are
-    deliberately tiny — they run on GDB's main thread and a slow handler
-    would stall the next prompt.  Errors writing the pipe are swallowed
-    so a dead/closed reader can't kill GDB.
+    Calling this again with a different fd just retargets the existing
+    handlers (the new fd is what the next event writes to).  Handlers are
+    connected to GDB's event registries exactly once per Python process
+    so a re-call cannot accumulate duplicates.
+
+    Handlers are deliberately tiny — they run on GDB's main thread and a
+    slow handler would stall the next prompt.  Errors writing the pipe
+    are swallowed so a dead/closed reader can't kill GDB.
     """
-    global _event_notify_fd
-    if _event_notify_fd == fd:
-        return
+    global _event_notify_fd, _event_handlers_connected
     _event_notify_fd = fd
+    if _event_handlers_connected:
+        return
+    _event_handlers_connected = True
 
     def _emit(line_bytes):
+        active_fd = _event_notify_fd
+        if active_fd is None:
+            return
         try:
-            os.write(_event_notify_fd, line_bytes)
+            os.write(active_fd, line_bytes)
         except (BlockingIOError, OSError):
             pass
 
