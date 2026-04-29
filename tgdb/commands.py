@@ -218,7 +218,7 @@ class CommandsMixin:
             command_name = stripped.split(None, 1)[0].lower()
         else:
             command_name = ""
-        if command_name in {"up", "down", "frame", "f", "select-frame", "thread"}:
+        if command_name in self._FRAME_REFRESH_COMMANDS:
             asyncio.get_running_loop().call_later(
                 0.1,
                 self._safe_request_location,
@@ -256,6 +256,10 @@ class CommandsMixin:
         Called by ``GDBWidget`` right before the trailing newline is forwarded
         to GDB.  If the first token is a recognized frame-navigation command,
         schedule a ``-stack-info-frame`` request so the source pane updates.
+        The 100 ms delay gives GDB's event loop a chance to dispatch the
+        console command before our MI query lands; the two PTYs feed into a
+        single shared event loop, and without the delay the MI query can be
+        serviced before the user's ``up`` and return the old frame.
         """
         token = line.lstrip().split(None, 1)[0].lower() if line.strip() else ""
         if token in self._FRAME_REFRESH_COMMANDS:

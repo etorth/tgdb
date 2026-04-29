@@ -117,6 +117,10 @@ class AppCoreMixin:
             path,
             line,
         )
+        self.gdb.on_frame_changed = lambda frame: _safe_later(
+            self._ui_on_frame_changed,
+            frame,
+        )
         self.gdb.on_locals = lambda variables: _safe_later(self._ui_set_locals, variables)
         self.gdb.on_registers = lambda registers: _safe_later(
             self._ui_set_registers,

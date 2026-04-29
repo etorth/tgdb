@@ -413,6 +413,54 @@ class CallbacksMixin:
                     pane.refresh_memory()
 
 
+    def _ui_on_frame_changed(self, frame: Frame) -> None:
+        """User selected a different frame (CLI ``up``/``down``/``frame N``).
+
+        GDB does not emit an MI async record when the user changes frames via
+        the console, so tgdb snoops the input line and queries
+        ``-stack-info-frame`` once GDB has processed the command. The reply
+        lands here. Update the source pane to show the selected frame's
+        source location (loading a new file if needed), and refresh the
+        dependent panes (disasm, memory, evaluate). The stack and locals
+        panes are refreshed by the controller's follow-up MI queries.
+        """
+        path = frame.fullname or frame.file
+        if path and os.path.isfile(path):
+            src = self._get_source_view()
+            if src is not None:
+                if not src.source_file or src.source_file.path != path:
+                    src.load_file(path)
+                elif self.cfg.autosourcereload:
+                    src.reload_if_changed()
+                if frame.line > 0:
+                    src.exe_line = frame.line
+                    src.move_to(frame.line)
+                self._update_status_file_info()
+        if self._evaluate_pane is not None:
+            supervise(
+                self._evaluate_pane.refresh_all(),
+                name="evaluate-pane-refresh",
+            )
+        if self._disasm_pane is not None:
+            current_addr = ""
+            if self.gdb.current_frame is not None:
+                current_addr = self.gdb.current_frame.addr
+            supervise(
+                self._disasm_pane.refresh_disasm(
+                    path or "",
+                    frame.line,
+                    current_addr=current_addr,
+                    thread_id=self.gdb.current_thread_id,
+                    func=frame.func,
+                ),
+                name="disasm-pane-refresh",
+            )
+        if self._memory_panes:
+            for pane in self._memory_panes:
+                if pane.parent is not None:
+                    pane.refresh_memory()
+
+
     def _ui_on_memory_changed(self) -> None:
         """GDB reported =memory-changed (e.g. console-side ``print x = 2``).
 

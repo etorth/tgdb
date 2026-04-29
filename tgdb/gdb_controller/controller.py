@@ -81,6 +81,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
     - ``on_breakpoints(bps: list[Breakpoint])``
     - ``on_source_files(files: list[str])``
     - ``on_source_file(path: str, line: int)``
+    - ``on_frame_changed(frame: Frame)``
     - ``on_locals(vars: list[LocalVariable])``
     - ``on_stack(frames: list[Frame])``
     - ``on_threads(threads: list[ThreadInfo])``
@@ -133,6 +134,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self.on_breakpoints: Callable[[list[Breakpoint]], None] = lambda b: None
         self.on_source_files: Callable[[list[str]], None] = lambda f: None
         self.on_source_file: Callable[[str, int], None] = lambda f, ln: None
+        self.on_frame_changed: Callable[[Frame], None] = lambda f: None
         self.on_locals: Callable[[list[LocalVariable]], None] = lambda v: None
         self.on_stack: Callable[[list[Frame]], None] = lambda v: None
         self.on_threads: Callable[[list[ThreadInfo]], None] = lambda v: None

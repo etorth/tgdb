@@ -143,6 +143,8 @@ class GDBResultMixin:
         parsed = self._parse_frame(frame)
         self.current_frame = parsed
         path = parsed.fullname or parsed.file
+        if meta.get("kind") == "current-location":
+            self.on_frame_changed(parsed)
         if path:
             self.on_source_file(path, parsed.line)
         elif meta.get("kind") == "current-location":
