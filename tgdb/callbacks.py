@@ -539,12 +539,18 @@ class CallbacksMixin:
 
         Without this hook, tgdb only learns GDB is gone when the primary
         PTY hits EOF, which can lag behind the user typing ``quit``.  We
-        flag shutdown and let the existing PTY-EOF path (``_ui_gdb_exit``)
-        do the actual cleanup; calling ``self.exit()`` here would race
-        with the trailing console output GDB still emits before exit.
+        run the same teardown ``_ui_gdb_exit`` would run on EOF; it is
+        idempotent so the duplicate invocation that follows when EOF
+        actually arrives is a no-op.
+
+        We must NOT just set ``_shutting_down = True`` here: ``_safe_later``
+        in ``core.py`` uses that flag to drop further UI scheduling, and
+        the ``on_exit`` controller callback is itself routed through
+        ``_safe_later``.  Setting the flag without driving the exit would
+        deadlock tgdb (logged GDB exit but never reach ``self.exit(0)``).
         """
         _log.info("GDB signaled gdb_exiting")
-        self._shutting_down = True
+        self._ui_gdb_exit()
 
 
     def _ui_on_frame_changed(self, frame: Frame) -> None:
@@ -719,6 +725,10 @@ class CallbacksMixin:
     def _ui_gdb_exit(self) -> None:
         # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
         # cgdb calls cgdb_cleanup_and_exit(0) in tgdb_process() on size<=0.
+        # Idempotent — may be called twice when ``gdb_exiting`` event fires
+        # before the PTY EOF arrives (and again from the EOF path).
+        if self._shutting_down:
+            return
         _log.info("GDB exited")
         self._shutting_down = True
         self._save_history_to_disk()
