@@ -413,15 +413,38 @@ class CallbacksMixin:
                     pane.refresh_memory()
 
 
+    def _ui_on_cli_prompt(self) -> None:
+        """GDB is about to redisplay its CLI prompt — refresh selected frame.
+
+        Wired off the inheritable notify pipe written by
+        ``register_prompt_notify_fd`` in ``tgdb_pysetup.py``.  Most prompts
+        follow no-op user input, but typed CLI ``up``/``down``/``frame N``
+        and similar silently move the selected frame, and GDB has no MI
+        async record for that.  We issue ``-stack-info-frame`` on every
+        prompt; if the selected frame actually moved, ``_ui_on_frame_changed``
+        below will reload the source pane.  The MI request is cheap.
+
+        The inferior must not be running — querying frames during execution
+        is invalid.
+        """
+        if self.gdb is None or self.gdb._inferior_running:
+            return
+        try:
+            self.gdb.request_current_location(report_error=False)
+        except Exception:
+            pass
+
+
     def _ui_on_frame_changed(self, frame: Frame) -> None:
         """User selected a different frame (CLI ``up``/``down``/``frame N``).
 
         GDB does not emit an MI async record when the user changes frames via
-        the console, so tgdb snoops the input line and queries
-        ``-stack-info-frame`` once GDB has processed the command. The reply
-        lands here. Update the source pane to show the selected frame's
+        the console.  Instead, tgdb wires ``gdb.events.before_prompt`` (in
+        ``tgdb_pysetup.py``) to ping a pipe; the controller fires
+        ``on_cli_prompt`` which schedules ``-stack-info-frame``.  The reply
+        lands here.  Update the source pane to show the selected frame's
         source location (loading a new file if needed), and refresh the
-        dependent panes (disasm, memory, evaluate). The stack and locals
+        dependent panes (disasm, memory, evaluate).  The stack and locals
         panes are refreshed by the controller's follow-up MI queries.
         """
         path = frame.fullname or frame.file

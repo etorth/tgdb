@@ -1,12 +1,42 @@
 import gdb
 import json
 import base64
+import os
 
 # Lift GDB's memory read limit so str(val) never fails for large variables.
 try:
     gdb.execute("set max-value-size unlimited", to_string=True)
 except gdb.error:
     pass
+
+
+_prompt_notify_fd = None
+
+
+def register_prompt_notify_fd(fd):
+    """Wire ``gdb.events.before_prompt`` to write one byte to ``fd``.
+
+    tgdb opens an inheritable pipe before forking GDB and passes the write
+    end's fd number here. On every CLI prompt-about-to-show event, we push
+    a single sentinel byte. tgdb's asyncio loop watches the read end,
+    drains it, and issues ``-stack-info-frame`` to refresh the source pane
+    after frame-changing CLI commands (``up``/``down``/``frame N``) that
+    GDB never broadcasts on the MI channel.
+
+    Idempotent: a second call with the same fd is a no-op.
+    """
+    global _prompt_notify_fd
+    if _prompt_notify_fd == fd:
+        return
+    _prompt_notify_fd = fd
+
+    def _on_before_prompt():
+        try:
+            os.write(_prompt_notify_fd, b"p")
+        except (BlockingIOError, OSError):
+            pass
+
+    gdb.events.before_prompt.connect(_on_before_prompt)
 
 
 def _is_builtin_local_name(name):

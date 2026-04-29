@@ -67,7 +67,6 @@ class AppCoreMixin:
         gdb_widget.on_switch_to_tgdb = self._switch_to_tgdb
         gdb_widget.imap_feed = self._imap_feed
         gdb_widget.imap_replay = self._replay_gdb_key_sequence
-        gdb_widget.on_cli_line = self._on_gdb_console_line
 
         try:
             container = self.query_one("#split-container", PaneContainer)
@@ -129,6 +128,7 @@ class AppCoreMixin:
         self.gdb.on_stack = lambda frames: _safe_later(self._ui_set_stack, frames)
         self.gdb.on_threads = lambda threads: _safe_later(self._ui_set_threads, threads)
         self.gdb.on_memory_changed = lambda: _safe_later(self._ui_on_memory_changed)
+        self.gdb.on_cli_prompt = lambda: _safe_later(self._ui_on_cli_prompt)
         self.gdb.on_exit = lambda: _safe_later(self._ui_gdb_exit)
         self.gdb.on_error = lambda msg: _safe_later(self._show_status, f"Error: {msg}")
 

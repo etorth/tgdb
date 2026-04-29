@@ -13,6 +13,7 @@ Secondary PTY: GDB machine-interface channel opened via "new-ui mi <device>".
 """
 
 import asyncio
+import fcntl
 import logging
 import os
 import signal
@@ -86,6 +87,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
     - ``on_stack(frames: list[Frame])``
     - ``on_threads(threads: list[ThreadInfo])``
     - ``on_registers(registers: list[RegisterInfo])``
+    - ``on_cli_prompt()``
     - ``on_exit()``
     - ``on_error(msg: str)``
 
@@ -107,6 +109,14 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self._proc: ptyprocess.PtyProcess | None = None
         self._mi_master_fd: int = -1
         self._mi_slave_fd: int = -1  # kept open to prevent master EIO
+        # Inheritable pipe used by GDB-side Python (``tgdb_pysetup.py``)
+        # to notify tgdb whenever the GDB CLI is about to display a
+        # prompt. Lets us refresh the source pane after CLI ``up``/
+        # ``down``/``frame N``, which GDB does not broadcast over MI.
+        # The write end is inherited into GDB; the read end is watched
+        # by tgdb's asyncio loop.
+        self._prompt_pipe_r: int = -1
+        self._prompt_pipe_w: int = -1
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
@@ -142,6 +152,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self.on_memory_changed: Callable[[], None] = lambda: None
         self.on_exit: Callable[[], None] = lambda: None
         self.on_error: Callable[[str], None] = lambda m: None
+        # Fired (coalesced) whenever the GDB CLI is about to redisplay its
+        # prompt — wired off the inheritable notify pipe.  Used by tgdb to
+        # refresh the source pane after CLI frame navigation.
+        self.on_cli_prompt: Callable[[], None] = lambda: None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -158,6 +172,17 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         mi_master_fd, mi_slave_fd = os.openpty()
         self._mi_master_fd = mi_master_fd
         self._mi_slave_fd = mi_slave_fd
+
+        # Create the prompt-notify pipe. The write end is inherited by GDB
+        # (via pass_fds) and clear-on-exec is removed so it survives execv.
+        # Set O_NONBLOCK on the write end so a slow tgdb reader can never
+        # stall GDB on a single-byte write.
+        prompt_pipe_r, prompt_pipe_w = os.pipe()
+        self._prompt_pipe_r = prompt_pipe_r
+        self._prompt_pipe_w = prompt_pipe_w
+        os.set_inheritable(prompt_pipe_w, True)
+        flags = fcntl.fcntl(prompt_pipe_w, fcntl.F_GETFL)
+        fcntl.fcntl(prompt_pipe_w, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
         cmd: list[str] = []
         try:
@@ -180,7 +205,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             #   -ex "new-ui mi X" : open MI channel on secondary PTY
             cmd = [self.gdb_path, "--nw", "-ex", f"new-ui mi {mi_slave_name}"]
             cmd.extend(self.gdb_args)
-            self._proc = ptyprocess.PtyProcess.spawn(cmd, dimensions=(rows, cols))
+            self._proc = ptyprocess.PtyProcess.spawn(
+                cmd,
+                dimensions=(rows, cols),
+                pass_fds=[prompt_pipe_w],
+            )
         except Exception:
             _log.error(f"GDB spawn failed, cmd={cmd!r}")
             self.terminate()
@@ -221,7 +250,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                 self._proc.terminate(force=True)
             except Exception:
                 _log.debug("GDB terminate() raised", exc_info=True)
-        for attr in ("_mi_master_fd", "_mi_slave_fd"):
+        for attr in ("_mi_master_fd", "_mi_slave_fd", "_prompt_pipe_r", "_prompt_pipe_w"):
             fd = getattr(self, attr, -1)
             if fd >= 0:
                 try:
@@ -248,18 +277,30 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         # with zero polling delay (unlike asyncio.sleep(0.02)).
         loop.add_reader(self._proc.fd, self._on_console_readable, loop)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
+        # Watch the prompt-notify pipe written by ``register_prompt_notify_fd``
+        # inside GDB's embedded Python.
+        self._prompt_refresh_pending: bool = False
+        if self._prompt_pipe_r >= 0:
+            loop.add_reader(self._prompt_pipe_r, self._on_prompt_pipe_readable)
         _log.info("MI reader started")
 
         # Load tgdb's embedded GDB/Python helpers before stop handling needs
         # them, then enable pretty-printing for logical varobj children.
         self.load_tgdb_pysetup(report_error=False)
         self.mi_command("-enable-pretty-printing", report_error=False)
+        # Tell GDB which fd to ping on every CLI prompt. Sent after pysetup
+        # so the helper is defined; MI commands are FIFO so ordering holds.
+        if self._prompt_pipe_w >= 0:
+            self.mi_command(
+                f'-interpreter-exec console "python register_prompt_notify_fd({self._prompt_pipe_w})"',
+                report_error=False,
+            )
 
         # Wait for GDB's console PTY to close (GDB exited)
         try:
             await self._console_done
         finally:
-            # Clean up both readers
+            # Clean up readers
             try:
                 loop.remove_reader(self._proc.fd)
             except Exception:
@@ -268,8 +309,51 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                 loop.remove_reader(self._mi_master_fd)
             except Exception:
                 pass
+            if self._prompt_pipe_r >= 0:
+                try:
+                    loop.remove_reader(self._prompt_pipe_r)
+                except Exception:
+                    pass
             _log.info("GDB exited")
             self.on_exit()
+
+
+    def _on_prompt_pipe_readable(self) -> None:
+        """Drain the prompt-notify pipe and fire ``on_cli_prompt`` once.
+
+        GDB writes one byte per ``before_prompt`` event. Multiple events can
+        coalesce into a single wake-up; we drain everything and fire the
+        callback at most once per asyncio cycle.
+        """
+        try:
+            while True:
+                chunk = os.read(self._prompt_pipe_r, 4096)
+                if not chunk:
+                    # EOF — GDB closed its end (process gone).
+                    try:
+                        asyncio.get_running_loop().remove_reader(self._prompt_pipe_r)
+                    except Exception:
+                        pass
+                    return
+                if len(chunk) < 4096:
+                    break
+        except BlockingIOError:
+            pass
+        except OSError:
+            return
+
+        if self._prompt_refresh_pending:
+            return
+        self._prompt_refresh_pending = True
+        asyncio.get_running_loop().call_soon(self._fire_cli_prompt)
+
+
+    def _fire_cli_prompt(self) -> None:
+        self._prompt_refresh_pending = False
+        try:
+            self.on_cli_prompt()
+        except Exception:
+            _log.debug("on_cli_prompt callback raised", exc_info=True)
 
 
     def _on_console_readable(self, loop: asyncio.AbstractEventLoop) -> None:
