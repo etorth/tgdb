@@ -88,6 +88,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
     - ``on_threads(threads: list[ThreadInfo])``
     - ``on_registers(registers: list[RegisterInfo])``
     - ``on_cli_prompt()``
+    - ``on_register_changed(regnum: int)``
+    - ``on_objfiles_changed()``
+    - ``on_inferior_call_pre()``
+    - ``on_inferior_call_post()``
+    - ``on_gdb_exiting()``
     - ``on_exit()``
     - ``on_error(msg: str)``
 
@@ -156,6 +161,24 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         # prompt — wired off the inheritable notify pipe.  Used by tgdb to
         # refresh the source pane after CLI frame navigation.
         self.on_cli_prompt: Callable[[], None] = lambda: None
+        # User wrote a register from the CLI (``set $rax=...``).  GDB has
+        # no MI async record for this; the hook lets tgdb refresh the
+        # register pane immediately instead of waiting for ``*stopped``.
+        # ``regnum`` is -1 if GDB did not supply one.
+        self.on_register_changed: Callable[[int], None] = lambda n: None
+        # A shared library was loaded, unloaded, or the program space was
+        # cleared.  Coalesced into a single notification per asyncio cycle;
+        # callers should re-query ``-file-list-exec-source-files``.
+        self.on_objfiles_changed: Callable[[], None] = lambda: None
+        # User expression triggered an inferior call (``print foo()``).
+        # ``pre`` fires before the call, ``post`` after it returns.  Use
+        # ``post`` to refresh locals / registers / memory, since the
+        # inferior just executed arbitrary code.
+        self.on_inferior_call_pre: Callable[[], None] = lambda: None
+        self.on_inferior_call_post: Callable[[], None] = lambda: None
+        # GDB's main loop is shutting down (e.g. user typed ``quit``).
+        # Lets tgdb begin teardown without waiting for PTY EOF.
+        self.on_gdb_exiting: Callable[[], None] = lambda: None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -277,22 +300,29 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         # with zero polling delay (unlike asyncio.sleep(0.02)).
         loop.add_reader(self._proc.fd, self._on_console_readable, loop)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
-        # Watch the prompt-notify pipe written by ``register_prompt_notify_fd``
-        # inside GDB's embedded Python.
+        # Watch the event-notify pipe written by ``register_event_notify_fd``
+        # inside GDB's embedded Python.  Per-tag state for coalescing.
+        self._notify_buf: bytes = b""
         self._prompt_refresh_pending: bool = False
+        self._objfiles_refresh_pending: bool = False
+        self._dispatch_scheduled: bool = False
+        # Pending register-changed regnums.  -1 means "all registers" (e.g.
+        # the event lacked a regnum).
+        self._pending_regnums: set[int] = set()
         if self._prompt_pipe_r >= 0:
-            loop.add_reader(self._prompt_pipe_r, self._on_prompt_pipe_readable)
+            loop.add_reader(self._prompt_pipe_r, self._on_notify_pipe_readable)
         _log.info("MI reader started")
 
         # Load tgdb's embedded GDB/Python helpers before stop handling needs
         # them, then enable pretty-printing for logical varobj children.
         self.load_tgdb_pysetup(report_error=False)
         self.mi_command("-enable-pretty-printing", report_error=False)
-        # Tell GDB which fd to ping on every CLI prompt. Sent after pysetup
-        # so the helper is defined; MI commands are FIFO so ordering holds.
+        # Tell GDB which fd to ping on every event we care about. Sent after
+        # pysetup so the helper is defined; MI commands are FIFO so ordering
+        # holds.
         if self._prompt_pipe_w >= 0:
             self.mi_command(
-                f'-interpreter-exec console "python register_prompt_notify_fd({self._prompt_pipe_w})"',
+                f'-interpreter-exec console "python register_event_notify_fd({self._prompt_pipe_w})"',
                 report_error=False,
             )
 
@@ -318,23 +348,26 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             self.on_exit()
 
 
-    def _on_prompt_pipe_readable(self) -> None:
-        """Drain the prompt-notify pipe and fire ``on_cli_prompt`` once.
+    def _on_notify_pipe_readable(self) -> None:
+        """Drain the event-notify pipe and dispatch tagged event lines.
 
-        GDB writes one byte per ``before_prompt`` event. Multiple events can
-        coalesce into a single wake-up; we drain everything and fire the
-        callback at most once per asyncio cycle.
+        Each event from ``tgdb_pysetup.register_event_notify_fd`` is a
+        single ``\\n``-terminated line.  We read everything available,
+        accumulate a partial-line buffer between wake-ups, and then
+        coalesce (so a burst of N lines results in at most one dispatch
+        per tag per asyncio cycle).
         """
         try:
             while True:
                 chunk = os.read(self._prompt_pipe_r, 4096)
                 if not chunk:
-                    # EOF — GDB closed its end (process gone).
                     try:
                         asyncio.get_running_loop().remove_reader(self._prompt_pipe_r)
                     except Exception:
                         pass
+                    self._notify_buf = b""
                     return
+                self._notify_buf += chunk
                 if len(chunk) < 4096:
                     break
         except BlockingIOError:
@@ -342,18 +375,81 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         except OSError:
             return
 
-        if self._prompt_refresh_pending:
+        if b"\n" not in self._notify_buf:
             return
-        self._prompt_refresh_pending = True
-        asyncio.get_running_loop().call_soon(self._fire_cli_prompt)
+        lines = self._notify_buf.split(b"\n")
+        # Last element is whatever came after the final newline (possibly
+        # an incomplete line we keep for the next read).
+        self._notify_buf = lines[-1]
+        for raw in lines[:-1]:
+            if raw:
+                self._consume_notify_line(raw)
+
+        if not self._dispatch_scheduled:
+            self._dispatch_scheduled = True
+            asyncio.get_running_loop().call_soon(self._dispatch_pending_events)
 
 
-    def _fire_cli_prompt(self) -> None:
-        self._prompt_refresh_pending = False
-        try:
-            self.on_cli_prompt()
-        except Exception:
-            _log.debug("on_cli_prompt callback raised", exc_info=True)
+    def _consume_notify_line(self, raw: bytes) -> None:
+        """Update per-tag pending state for a single notify line."""
+        tag = raw[:1]
+        if tag == b"P":
+            self._prompt_refresh_pending = True
+        elif tag == b"R":
+            try:
+                self._pending_regnums.add(int(raw[1:]))
+            except ValueError:
+                self._pending_regnums.add(-1)
+        elif tag in (b"O", b"F", b"C"):
+            self._objfiles_refresh_pending = True
+        elif tag == b"I":
+            # Inferior calls aren't coalesced — pre/post are paired and
+            # callers care about both edges.  Fire synchronously here so
+            # ordering relative to other pending events is preserved.
+            try:
+                if raw == b"Ipre":
+                    self.on_inferior_call_pre()
+                elif raw == b"Ipost":
+                    self.on_inferior_call_post()
+            except Exception:
+                _log.debug("inferior_call callback raised", exc_info=True)
+        elif tag == b"X":
+            try:
+                self.on_gdb_exiting()
+            except Exception:
+                _log.debug("gdb_exiting callback raised", exc_info=True)
+
+
+    def _dispatch_pending_events(self) -> None:
+        """Fire one batch of coalesced callbacks per asyncio cycle."""
+        self._dispatch_scheduled = False
+
+        if self._objfiles_refresh_pending:
+            self._objfiles_refresh_pending = False
+            try:
+                self.on_objfiles_changed()
+            except Exception:
+                _log.debug("on_objfiles_changed callback raised", exc_info=True)
+
+        if self._pending_regnums:
+            regnums = self._pending_regnums
+            self._pending_regnums = set()
+            # If any event lacked a regnum, treat as "refresh all" and
+            # collapse to a single -1 dispatch.
+            if -1 in regnums:
+                regnums = {-1}
+            for regnum in regnums:
+                try:
+                    self.on_register_changed(regnum)
+                except Exception:
+                    _log.debug("on_register_changed callback raised", exc_info=True)
+
+        if self._prompt_refresh_pending:
+            self._prompt_refresh_pending = False
+            try:
+                self.on_cli_prompt()
+            except Exception:
+                _log.debug("on_cli_prompt callback raised", exc_info=True)
 
 
     def _on_console_readable(self, loop: asyncio.AbstractEventLoop) -> None:

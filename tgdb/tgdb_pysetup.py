@@ -10,33 +10,96 @@ except gdb.error:
     pass
 
 
-_prompt_notify_fd = None
+_event_notify_fd = None
 
 
-def register_prompt_notify_fd(fd):
-    """Wire ``gdb.events.before_prompt`` to write one byte to ``fd``.
+def register_event_notify_fd(fd):
+    """Wire GDB Python events to the inheritable notify pipe.
 
     tgdb opens an inheritable pipe before forking GDB and passes the write
-    end's fd number here. On every CLI prompt-about-to-show event, we push
-    a single sentinel byte. tgdb's asyncio loop watches the read end,
-    drains it, and issues ``-stack-info-frame`` to refresh the source pane
-    after frame-changing CLI commands (``up``/``down``/``frame N``) that
-    GDB never broadcasts on the MI channel.
+    end's fd number here. Each event is encoded as a single newline-
+    terminated line so tgdb can parse them out of the byte stream. The
+    line format is ``<TAG><payload>\\n`` where TAG is a single uppercase
+    ASCII char:
 
-    Idempotent: a second call with the same fd is a no-op.
+      ``P``         before_prompt — refresh selected frame in source pane.
+      ``R<regnum>`` register_changed — user wrote a register
+                    (e.g. ``set $rax=…``).  GDB has no MI async record
+                    for this; without the hook the register pane would
+                    only update on the next ``*stopped``.
+      ``O``         new_objfile — a shared library was just loaded.
+                    Coalesced; the dispatcher fires once per burst.
+      ``F``         free_objfile — a shared library was unloaded.
+      ``C``         clear_objfiles — program space was wiped (e.g. ``kill``).
+      ``Ipre``      inferior_call_pre — user expression about to call into
+                    the inferior (``print foo()``); freeze polling state.
+      ``Ipost``     inferior_call_post — call returned; refresh locals,
+                    registers, and memory because the inferior just ran.
+      ``X``         gdb_exiting — GDB's main loop is tearing down.  Lets
+                    tgdb shut down promptly instead of waiting for PTY EOF.
+
+    Idempotent: a second call with the same fd is a no-op.  Handlers are
+    deliberately tiny — they run on GDB's main thread and a slow handler
+    would stall the next prompt.  Errors writing the pipe are swallowed
+    so a dead/closed reader can't kill GDB.
     """
-    global _prompt_notify_fd
-    if _prompt_notify_fd == fd:
+    global _event_notify_fd
+    if _event_notify_fd == fd:
         return
-    _prompt_notify_fd = fd
+    _event_notify_fd = fd
 
-    def _on_before_prompt():
+    def _emit(line_bytes):
         try:
-            os.write(_prompt_notify_fd, b"p")
+            os.write(_event_notify_fd, line_bytes)
         except (BlockingIOError, OSError):
             pass
 
+    def _on_before_prompt():
+        _emit(b"P\n")
+
+    def _on_register_changed(event):
+        try:
+            regnum = int(event.regnum)
+        except (AttributeError, ValueError, TypeError):
+            regnum = -1
+        _emit(f"R{regnum}\n".encode())
+
+    def _on_new_objfile(_event):
+        _emit(b"O\n")
+
+    def _on_free_objfile(_event):
+        _emit(b"F\n")
+
+    def _on_clear_objfiles(_event):
+        _emit(b"C\n")
+
+    def _on_inferior_call(event):
+        if isinstance(event, gdb.InferiorCallPreEvent):
+            _emit(b"Ipre\n")
+        else:
+            _emit(b"Ipost\n")
+
+    def _on_gdb_exiting(_event):
+        _emit(b"X\n")
+
     gdb.events.before_prompt.connect(_on_before_prompt)
+    _try_connect("register_changed", _on_register_changed)
+    _try_connect("new_objfile", _on_new_objfile)
+    _try_connect("free_objfile", _on_free_objfile)
+    _try_connect("clear_objfiles", _on_clear_objfiles)
+    _try_connect("inferior_call", _on_inferior_call)
+    _try_connect("gdb_exiting", _on_gdb_exiting)
+
+
+def _try_connect(event_name, handler):
+    """Connect to a gdb.events.* registry that may not exist on older GDBs."""
+    registry = getattr(gdb.events, event_name, None)
+    if registry is None:
+        return
+    try:
+        registry.connect(handler)
+    except Exception:
+        pass
 
 
 def _is_builtin_local_name(name):

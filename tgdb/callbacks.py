@@ -417,7 +417,7 @@ class CallbacksMixin:
         """GDB is about to redisplay its CLI prompt — refresh selected frame.
 
         Wired off the inheritable notify pipe written by
-        ``register_prompt_notify_fd`` in ``tgdb_pysetup.py``.  Most prompts
+        ``register_event_notify_fd`` in ``tgdb_pysetup.py``.  Most prompts
         follow no-op user input, but typed CLI ``up``/``down``/``frame N``
         and similar silently move the selected frame, and GDB has no MI
         async record for that.  We issue ``-stack-info-frame`` on every
@@ -433,6 +433,118 @@ class CallbacksMixin:
             self.gdb.request_current_location(report_error=False)
         except Exception:
             pass
+
+
+    def _ui_on_register_changed(self, regnum: int) -> None:
+        """User wrote a register from the CLI (e.g. ``set $rax=0x1234``).
+
+        GDB does not emit any MI async record for register writes outside
+        of stop events, so without this hook the register pane would only
+        catch up on the next ``*stopped``.  ``regnum`` is the affected
+        register's number (or -1 for "refresh all"); we refresh the whole
+        register file because it's cheap and the pane already does the
+        diffing to highlight changed cells.
+        """
+        if self.gdb is None or self.gdb._inferior_running:
+            return
+        if self._register_pane is None or self._register_pane.parent is None:
+            return
+        try:
+            self.gdb.request_current_registers(report_error=False)
+        except Exception:
+            pass
+
+
+    def _ui_on_objfiles_changed(self) -> None:
+        """A shared library was loaded/unloaded or progspace was cleared.
+
+        Re-query ``-file-list-exec-source-files`` so the file dialog
+        reflects new/dropped translation units, and refresh the disasm
+        pane if it's visible (its instruction stream may have shifted).
+        Coalesced upstream so a burst of ``new_objfile`` events at startup
+        produces a single refresh.
+        """
+        if self.gdb is None:
+            return
+        try:
+            self.gdb.request_source_files()
+        except Exception:
+            pass
+        if self._disasm_pane is not None and self._disasm_pane.parent is not None:
+            current_addr = ""
+            line = 0
+            path = ""
+            func = ""
+            if self.gdb.current_frame is not None:
+                current_addr = self.gdb.current_frame.addr
+                line = self.gdb.current_frame.line
+                path = self.gdb.current_frame.fullname or self.gdb.current_frame.file
+                func = self.gdb.current_frame.func
+            supervise(
+                self._disasm_pane.refresh_disasm(
+                    path or "",
+                    line,
+                    current_addr=current_addr,
+                    thread_id=self.gdb.current_thread_id,
+                    func=func,
+                ),
+                name="disasm-pane-refresh",
+            )
+
+
+    def _ui_on_inferior_call_pre(self) -> None:
+        """User expression is about to call into the inferior.
+
+        Mark the bottom status briefly so the user knows the inferior is
+        being run by an expression like ``print foo()``.  No state-pane
+        refresh here — the call hasn't happened yet.
+        """
+        self._show_status("inferior call …")
+
+
+    def _ui_on_inferior_call_post(self) -> None:
+        """Inferior call finished — its side effects are now visible.
+
+        ``print foo()`` can change locals, registers, and arbitrary memory.
+        Tge inferior actually executed code, so refresh the same set of
+        panes we'd refresh on ``*stopped``.  ``=memory-changed`` does fire
+        for memory writes inside the call, so memory panes are already
+        covered by ``on_memory_changed``; we still touch them defensively
+        in case the call changed only its own locals.
+        """
+        if self.gdb is None or self.gdb._inferior_running:
+            return
+        try:
+            self.gdb.request_current_frame_locals(report_error=False)
+        except Exception:
+            pass
+        if self._register_pane is not None and self._register_pane.parent is not None:
+            try:
+                self.gdb.request_current_registers(report_error=False)
+            except Exception:
+                pass
+        if self._evaluate_pane is not None:
+            supervise(
+                self._evaluate_pane.refresh_all(),
+                name="evaluate-pane-refresh",
+            )
+        if self._memory_panes:
+            for pane in self._memory_panes:
+                if pane.parent is not None:
+                    pane.refresh_memory()
+
+
+    def _ui_on_gdb_exiting(self) -> None:
+        """GDB's main loop is tearing down — start tgdb shutdown promptly.
+
+        Without this hook, tgdb only learns GDB is gone when the primary
+        PTY hits EOF, which can lag behind the user typing ``quit``.  We
+        flag shutdown and let the existing PTY-EOF path (``_ui_gdb_exit``)
+        do the actual cleanup; calling ``self.exit()`` here would race
+        with the trailing console output GDB still emits before exit.
+        """
+        _log.info("GDB signaled gdb_exiting")
+        self._shutting_down = True
 
 
     def _ui_on_frame_changed(self, frame: Frame) -> None:

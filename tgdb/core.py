@@ -129,6 +129,14 @@ class AppCoreMixin:
         self.gdb.on_threads = lambda threads: _safe_later(self._ui_set_threads, threads)
         self.gdb.on_memory_changed = lambda: _safe_later(self._ui_on_memory_changed)
         self.gdb.on_cli_prompt = lambda: _safe_later(self._ui_on_cli_prompt)
+        self.gdb.on_register_changed = lambda regnum: _safe_later(
+            self._ui_on_register_changed,
+            regnum,
+        )
+        self.gdb.on_objfiles_changed = lambda: _safe_later(self._ui_on_objfiles_changed)
+        self.gdb.on_inferior_call_pre = lambda: _safe_later(self._ui_on_inferior_call_pre)
+        self.gdb.on_inferior_call_post = lambda: _safe_later(self._ui_on_inferior_call_post)
+        self.gdb.on_gdb_exiting = lambda: _safe_later(self._ui_on_gdb_exiting)
         self.gdb.on_exit = lambda: _safe_later(self._ui_gdb_exit)
         self.gdb.on_error = lambda msg: _safe_later(self._show_status, f"Error: {msg}")
 
