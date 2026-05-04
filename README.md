@@ -279,18 +279,42 @@ tgdb/
 ### How it works
 
 1. **Startup**: `TGDBApp` reads `~/.cgdb/cgdbrc`, spawns GDB via `ptyprocess`
-   with `--interpreter=mi2`.
-2. **GDB I/O**: An asyncio task reads GDB output from the PTY.
-   - Lines starting with `~` (console stream) → GDB widget
-   - Lines starting with `*` or `=` (async events) → decoded for source
-     position, breakpoints, etc.
-3. **Source view**: When GDB stops, the `*stopped` MI event provides the
-   current file and line. The source widget loads the file (if needed) and
+   with dual PTYs: primary (console), secondary (MI channel).
+2. **GDB I/O**: Two asyncio readers:
+   - Primary PTY: raw console bytes → GDB widget (with ANSI colours)
+   - Secondary PTY: MI stream → parser for async records (`*stopped`, `=thread-selected`, etc.)
+3. **Event-driven source updates**: An inheritable pipe lets GDB's embedded Python
+   (via `gdb.events.*` hooks in `tgdb_pysetup.py`) notify tgdb of frame changes,
+   register writes, inferior calls, and library loads without relying on MI
+   async records alone (GDB does not broadcast per-UI frame changes). Events
+   are coalesced and dispatched on the asyncio loop; see **Event Hooks** below.
+4. **Source view**: When the selected frame changes (via CLI `up`/`down`, library
+   load, or stop event), the source widget loads the file (if needed) and
    positions the executing-line arrow.
-4. **Breakpoints**: The space bar sends `-break-insert file:line` via MI.
+5. **Breakpoints**: The space bar sends `-break-insert file:line` via MI.
    Breakpoint events update the gutter markers.
-5. **Key mapping**: All keys pass through `KeyMapper` which resolves user
+6. **Key mapping**: All keys pass through `KeyMapper` which resolves user
    maps (`:map`/`:imap`) before dispatching.
+
+### Event Hooks
+
+tgdb wires several GDB Python events via an inheritable pipe (created at startup
+and inherited into the GDB child process). Each event is encoded as a tagged line,
+coalesced on the asyncio loop, and dispatched to callbacks in `core.py` and
+`callbacks.py`. This mechanism captures frame and state changes that GDB does not
+broadcast over the MI channel.
+
+| Event | GDB Python hook | Purpose |
+|-------|-----------------|---------|
+| `P` | `gdb.events.before_prompt` | CLI prompt about to display — refresh selected frame (catch `up`/`down`/`frame N` typed directly) |
+| `R<n>` | `gdb.events.register_changed` | User set a register (e.g. `set $rax=0x1234`) — refresh register pane immediately |
+| `O`/`F`/`C` | `gdb.events.new_objfile` / `free_objfile` / `clear_objfiles` | Shared libraries loaded/unloaded; invalidate any cached objfile state (currently unused; file list is lazily fetched by file dialog) |
+| `Ipre` / `Ipost` | `gdb.events.inferior_call` | Expression trigger inferior execution (e.g. `print foo()`) — `post` refreshes locals/registers/memory since inferior ran |
+| `X` | `gdb.events.gdb_exiting` | GDB's main loop shutting down — start tgdb exit promptly (avoids lag waiting for PTY EOF) |
+
+All handlers in `tgdb_pysetup.py` swallow write errors so a dead reader cannot
+stall GDB. Per-tag coalescing means a burst of N events produces a single dispatch
+per asyncio cycle, keeping MI load low.
 
 ---
 
@@ -302,5 +326,7 @@ tgdb/
 - GDB/MI parsing is done in pure Python (no C++ gdbwire library)
 - Readline integration: basic history via up/down arrows (no libreadline)
 - The `--tty` / `Ctrl-T` separate TTY feature is not yet implemented
-
-gdb
+- **Event-driven frame/state updates**: Embeds Python in GDB to hook `gdb.events.*`
+  (before_prompt, register_changed, inferior_call, gdb_exiting, etc.) via an
+  inherited pipe, ensuring frame changes from CLI commands (up/down/frame N)
+  update the source pane immediately, without relying on MI async records alone
