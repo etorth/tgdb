@@ -203,7 +203,7 @@ class ConfigOptionMixin:
         group = args[0]
         fg = ""
         bg = ""
-        attrs_val = ""
+        attrs_parts: list[str] = []
         for token in args[1:]:
             if "=" not in token:
                 continue
@@ -214,7 +214,15 @@ class ConfigOptionMixin:
             elif key == "ctermbg":
                 bg = value
             elif key in ("cterm", "term"):
-                attrs_val = value
+                # Merge attribute tokens instead of last-token-wins so
+                # ``:highlight Foo cterm=bold term=italic`` ends up with
+                # ``bold,italic`` applied.  Each value may itself be a
+                # comma-separated list (``cterm=bold,underline``); join
+                # them all into a single comma-separated string for the
+                # downstream ``set()`` parser to split.
+                if value:
+                    attrs_parts.append(value)
+        attrs_val = ",".join(attrs_parts)
         self.hl.set(group, fg=fg, bg=bg, attrs=attrs_val)
         return None
 
