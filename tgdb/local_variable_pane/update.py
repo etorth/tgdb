@@ -3,6 +3,7 @@ State-computation helpers for the local-variable pane.
 """
 
 from ..gdb_controller import Frame, LocalVariable
+from ..gdb_controller.types import normalize_addr
 from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log, _type_needs_name_fallback
 
 
@@ -167,7 +168,10 @@ class LocalVariablePaneUpdateMixin:
                     return None
 
                 try:
-                    addrs[variable.name] = await self._var_eval(f"&{variable.name}")
+                    # MI ``-data-evaluate-expression "&name"`` returns
+                    # ``"(int *) 0x...."``; normalise to a bare ``0x...``
+                    # so BindingKeys match the fast-path format.
+                    addrs[variable.name] = normalize_addr(await self._var_eval(f"&{variable.name}"))
                 except Exception:
                     addrs[variable.name] = variable.type
 
@@ -227,7 +231,13 @@ class LocalVariablePaneUpdateMixin:
             return None
 
         path = frame.fullname or frame.file
-        return (frame.func, path, frozenset(binding_keys))
+        # ``frame.level`` is required to disambiguate recursive calls of
+        # the same function: without it, every level of a recursion whose
+        # only locals live in registers / get the same ``addr`` sentinel
+        # collapses to one FrameKey, so expansion state saved at the deep
+        # frame is restored at every outer frame on unwind.  Including the
+        # level keeps each recursion depth's expansion slot distinct.
+        return (frame.func, path, frame.level, frozenset(binding_keys))
 
 
     def _build_removed_bindings(self, current_keys: set[BindingKey], new_binding_keys: set[BindingKey]) -> list[BindingKey]:

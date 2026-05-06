@@ -30,4 +30,4 @@ BindingKey: TypeAlias = tuple[str, str]
 BindingEntry: TypeAlias = tuple[str, str, LocalVariable]
 ExpansionSegment: TypeAlias = tuple[str, int]
 ExpansionPath: TypeAlias = tuple[ExpansionSegment, ...]
-FrameKey: TypeAlias = tuple[str, str, frozenset[BindingKey]] | None
+FrameKey: TypeAlias = tuple[str, str, int, frozenset[BindingKey]] | None
