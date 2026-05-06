@@ -133,25 +133,41 @@ class GDBResultMixin:
 
 
     def _handle_frame_result(self, meta: dict, results: dict) -> None:
+        kind = meta.get("kind")
+        # Only the request kinds that explicitly ask for the *current
+        # frame* should overwrite ``self.current_frame`` and forward to
+        # the frame-changed / source-file callbacks.  ``-break-insert``
+        # (and a handful of other commands on certain GDB versions) can
+        # echo a ``frame={...}`` describing the breakpoint location at
+        # the top level of their result payload — clobbering
+        # ``current_frame`` with that value sends the rest of the app
+        # chasing a phantom location and miswires every observer that
+        # reads ``current_frame``.
+        is_frame_query = kind == "current-location"
+
         frame = results.get("frame")
         report = bool(meta.get("report_error", True))
         if not frame:
-            if meta.get("kind") == "current-location":
+            if is_frame_query:
                 self.request_source_file(report_error=report)
+            return
+
+        if not is_frame_query:
+            # Non-frame request happens to carry a ``frame=`` payload —
+            # ignore it.  The next genuine ``current-location`` round
+            # trip will populate ``current_frame`` correctly.
             return
 
         parsed = self._parse_frame(frame)
         self.current_frame = parsed
         path = parsed.fullname or parsed.file
-        if meta.get("kind") == "current-location":
-            self.on_frame_changed(parsed)
+        self.on_frame_changed(parsed)
         if path:
             self.on_source_file(path, parsed.line)
-        elif meta.get("kind") == "current-location":
+        else:
             self.request_source_file(report_error=report)
 
-        if meta.get("kind") == "current-location":
-            supervise(self._publish_locals_async(), name="publish-locals")
-            self.request_current_stack_frames(report_error=False)
-            self.request_current_threads(report_error=False)
-            self.request_current_registers(report_error=False)
+        supervise(self._publish_locals_async(), name="publish-locals")
+        self.request_current_stack_frames(report_error=False)
+        self.request_current_threads(report_error=False)
+        self.request_current_registers(report_error=False)
