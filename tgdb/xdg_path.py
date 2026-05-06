@@ -3,9 +3,21 @@ from pathlib import Path
 
 
 def _xdg_home(env_var: str, default_subpath: str) -> Path:
-    """Return the XDG directory for *env_var*, falling back to *default_subpath* under $HOME."""
+    """Return the XDG directory for *env_var*, falling back to *default_subpath* under $HOME.
+
+    Per the XDG Base Directory Specification, an env var that is set but
+    not absolute must be ignored.  Without this guard a user who exports
+    e.g. ``XDG_CONFIG_HOME=relative/path`` ends up with config files
+    silently looked up under whichever cwd tgdb happened to be launched
+    from — a confusing failure mode.  Treat empty *and* relative values
+    the same as unset.
+    """
     value = os.environ.get(env_var, "")
-    return Path(value) if value else Path.home() / default_subpath
+    if value:
+        path = Path(value)
+        if path.is_absolute():
+            return path
+    return Path.home() / default_subpath
 
 
 class XDGPath:

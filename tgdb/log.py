@@ -32,6 +32,7 @@ import os
 import platform
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 _LOGGER_NAME = "tgdb"
 
@@ -54,6 +55,20 @@ def init(log_file: str) -> None:
         if isinstance(handler, logging.FileHandler):
             handler.close()
             _logger.removeHandler(handler)
+
+    # Best-effort create the log file's parent directory.  Without this,
+    # ``--log /var/log/tgdb/session.log`` (or any path under a directory
+    # the user hasn't created) raises FileNotFoundError out of
+    # ``FileHandler.__init__`` and tgdb dies before it has a chance to
+    # render any UI.  Failure of the mkdir itself (e.g. permission denied
+    # on the parent's parent) is surfaced through the existing OSError
+    # handler below as part of the FileHandler construction failure.
+    try:
+        parent = Path(log_file).parent
+        if parent and parent != Path():
+            parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
     try:
         fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
