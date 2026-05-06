@@ -10,7 +10,7 @@ import base64
 import json
 import logging
 
-from .types import LocalVariable, normalize_addr
+from .types import LocalVariable, normalize_addr, quote_mi_string
 
 _log = logging.getLogger("tgdb.gdb_varobj")
 
@@ -28,7 +28,7 @@ class VarobjMixin:
     async def _eval_expr_raw(self, expr: str) -> str:
         """Evaluate a GDB expression and return its raw value string."""
         result = await self.mi_command_async(
-            f"-data-evaluate-expression {expr}",
+            f"-data-evaluate-expression {quote_mi_string(expr)}",
             raise_on_error=True,
         )
         payload = result.get("payload") or {}
@@ -40,7 +40,7 @@ class VarobjMixin:
         Keys include ``name``, ``numchild``, ``value``, ``type``, etc.
         """
         result = await self.mi_command_async(
-            f'-var-create - {frame} "{expr}"',
+            f"-var-create - {frame} {quote_mi_string(expr)}",
             raise_on_error=True,
         )
         payload = result.get("payload") or {}
@@ -155,11 +155,21 @@ class VarobjMixin:
         GDB Python, which lets ``LocalVariablePane`` build its binding keys
         without an extra ``&name`` evaluation round-trip.
         """
+        # Capture the epoch at task start.  ``*stopped`` and ``*running``
+        # both bump ``_locals_epoch`` (see ``ParsingMixin._handle_async``),
+        # so any change between here and the final ``on_locals`` dispatch
+        # means the snapshot is stale and must not reach the UI.
+        epoch = self._locals_epoch
         try:
             dicts = await self.get_locals()
         except Exception as exc:
             _log.debug(f"_publish_locals_async failed: {exc}")
-            self.on_locals([])
+            if self._locals_epoch == epoch:
+                self.on_locals([])
+            return
+
+        if self._locals_epoch != epoch:
+            _log.debug("_publish_locals_async: dropping stale snapshot (epoch advanced during fetch)")
             return
 
         variables = [

@@ -37,6 +37,10 @@ class ParsingMixin:
         results = rec.get("payload") or {}
 
         if cls == "stopped":
+            # Invalidate any in-flight ``_publish_locals_async`` from a
+            # previous stop so its delayed ``on_locals`` cannot land on top
+            # of this stop's pane state.
+            self._locals_epoch += 1
             self._inferior_running = False
             frame = self._parse_frame(results.get("frame", {}))
             self.current_frame = frame
@@ -52,6 +56,12 @@ class ParsingMixin:
             self.request_current_registers(report_error=False)
             self.mi_command("-break-list")
         elif cls == "running":
+            # Same reasoning as the ``stopped`` branch — drop any
+            # ``_publish_locals_async`` snapshot that's still mid-flight,
+            # otherwise it would clobber ``on_locals([])`` (set just below)
+            # with locals from the previous stop while the inferior is now
+            # running and has no current frame.
+            self._locals_epoch += 1
             self._inferior_running = True
             self.current_frame = None
             self.locals = []
