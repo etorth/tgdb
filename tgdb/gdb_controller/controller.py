@@ -327,6 +327,18 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             except Exception:
                 _log.debug("GDB terminate() raised", exc_info=True)
 
+        # Cancel the debounced break-list refresh if one is in flight.
+        # ``set_breakpoint`` schedules ``_delayed_break_list`` via
+        # ``supervise``; without an explicit cancel here, that task
+        # eventually wakes up after the sleep, calls ``mi_command``
+        # against the now-closed MI fd (a no-op thanks to the
+        # ``self._mi_master_fd < 0`` guard), and exits.  Harmless but
+        # wasteful, and a fragile invariant — if the guard ever moves
+        # the cleanup path becomes a real bug.  Cancel deterministically.
+        if self._break_list_task is not None and not self._break_list_task.done():
+            self._break_list_task.cancel()
+        self._break_list_task = None
+
         # Wake any caller blocked in ``mi_command_async`` so they don't hang
         # on futures that will never resolve.
         self._fail_pending_futures(RuntimeError("GDB controller terminated"))
