@@ -118,16 +118,23 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
             with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
                 await script_fn()
         except asyncio.CancelledError:
+            # Do not propagate names back: a cancelled coroutine may have
+            # only partially mutated ``ns`` (half-finished loop, partial
+            # imports, etc.) and merging that into the persistent namespace
+            # leaves the user with an inconsistent snapshot they can't see.
             raise
         except Exception:
+            # Same reasoning as cancel: a script that raised mid-way should
+            # not leak its half-applied state into the persistent namespace.
             err = traceback.format_exc().strip()
             if print_fn:
                 print_fn(err)
                 return None
             return err
-        finally:
-            # Propagate any new/modified names back to the persistent namespace
-            # so that 'def foo', 'import mod', 'x = 1' survive across commands.
+        else:
+            # Only on successful completion: propagate any new/modified names
+            # back to the persistent namespace so that ``def foo``, ``import
+            # mod``, ``x = 1`` survive across commands.
             self._py_namespace.update(
                 {
                     k: v

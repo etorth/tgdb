@@ -57,7 +57,9 @@ class ConfigExecutionMixin:
                 continue
 
             check = stripped.lstrip(":")
-            match = re.match(r"^(python|py)\s+<<\s+(\S+)\s*$", check, re.IGNORECASE)
+            # Accept ``python<<EOF``, ``python <<EOF``, ``python << EOF`` —
+            # vim/cgdb tolerate any whitespace (including none) around ``<<``.
+            match = re.match(r"^(python|py)\s*<<\s*(\S+)\s*$", check, re.IGNORECASE)
             if match:
                 cmd_name = match.group(1).lower()
                 marker = match.group(2)
@@ -65,7 +67,12 @@ class ConfigExecutionMixin:
                 while index < len(raw_lines):
                     code_line = raw_lines[index].rstrip("\n")
                     index += 1
-                    if code_line.strip() == marker:
+                    # Strict column-0 match (the rstrip above only drops the
+                    # trailing newline).  Using ``.strip() == marker`` would
+                    # close the block on any line whose stripped contents
+                    # equal the marker — including an indented ``EOF`` inside
+                    # a docstring or string literal in the user's script.
+                    if code_line == marker:
                         break
                     code_lines.append(code_line)
                 await self.execute_async(
@@ -157,7 +164,10 @@ class ConfigExecutionMixin:
                 body_lines = heredoc_match.group(2).split("\n")
                 code_lines: list[str] = []
                 for body_line in body_lines:
-                    if body_line.strip() == marker:
+                    # Strict column-0 marker match — see ``load_file_async``
+                    # for why ``.strip() == marker`` is wrong (indented
+                    # ``EOF`` inside the user's code would close the block).
+                    if body_line == marker:
                         break
                     code_lines.append(body_line)
                 raw_arg = "\n".join(code_lines)
