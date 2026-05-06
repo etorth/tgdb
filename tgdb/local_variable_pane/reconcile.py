@@ -383,6 +383,28 @@ class LocalVariablePaneReconcileMixin:
                 return promoted
 
             value = info.get("value", "")
+            new_varobj_name = info.get("name", "")
+            if new_varobj_name and "<error reading variable:" in value:
+                # Same handling as ``_add_new_binding`` and
+                # ``_add_binding_by_name_fallback``: GDB created the
+                # varobj but the underlying memory is not yet
+                # initialised, so any tracked node would just show the
+                # error string forever.  Delete the GDB-side varobj
+                # and re-add the placeholder so the next refresh can
+                # try promoting again once the memory is live.
+                if self._var_delete:
+                    try:
+                        await self._var_delete(new_varobj_name)
+                    except Exception:
+                        _log.debug(f"-var-delete {new_varobj_name} failed", exc_info=True)
+                label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
+                self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+                _log.debug(
+                    f"Promotion of {variable.name} hit uninitialized memory "
+                    f"({value[:80]!r}); kept as placeholder"
+                )
+                continue
+
             varobj_name = self._remember_root_varobj(key, info, is_pinned=False)
             numchild = self._safe_int(info.get("numchild", "0"))
             has_children = (numchild > 0 or info.get("dynamic", "0") == "1") and not _suppress_children(info)

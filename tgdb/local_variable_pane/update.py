@@ -271,6 +271,18 @@ class LocalVariablePaneUpdateMixin:
             key = (binding_name, binding_addr)
             if key in current_keys:
                 continue
+            # Permanent placeholders (unparseable types whose
+            # depth > min_depth so they cannot be promoted to a real
+            # varobj) live in ``_uninitialized_nodes`` only — they do
+            # NOT appear in ``current_keys`` (which is
+            # ``_tracked.keys()``).  Without this skip, every refresh
+            # would rediscover them as "new", call
+            # ``_remove_placeholder_node`` (destroying the node), then
+            # immediately re-add a fresh placeholder.  The user sees a
+            # flicker on every stop and loses tree-cursor focus on
+            # those nodes.
+            if key in self._uninitialized_nodes:
+                continue
 
             to_add.append((binding_name, binding_addr, variable))
 
