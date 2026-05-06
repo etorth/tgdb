@@ -91,12 +91,20 @@ class KeyRoutingMixin:
                 src.goto_last_jump()
             elif char.isalpha():
                 src.jump_to_mark(char)
+            else:
+                # Surface a clear status instead of silently consuming
+                # the keystroke.  Without this, ``'1`` (or any other
+                # non-letter mark name) looks indistinguishable from a
+                # mark that was simply never set.
+                self._show_status(f"E20: Mark not set: {char!r}")
             return True
 
         if self._await_mark_set:
             self._await_mark_set = False
             if char.isalpha():
                 src.set_mark(char)
+            else:
+                self._show_status(f"E191: Argument must be a letter, not {char!r}")
             return True
 
         return False
