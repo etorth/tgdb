@@ -135,7 +135,7 @@ class SourceSearchMixin:
 
         for index in order:
             if regex.search(lines[index]):
-                self._last_jump_line = self.sel_line
+                self._stamp_jump_origin()
                 self.move_to(index + 1)
                 return True
         return False
@@ -238,6 +238,13 @@ class _SourceContent(
         self.color: bool = True  # :set color — enables/disables syntax colors
         self._global_marks: dict[str, tuple[str, int]] = {}
         self._last_jump_line: int = 1
+        # Path of the file the user was viewing when ``_last_jump_line`` was
+        # captured.  Empty means "the current file" — vi's ``''`` in that
+        # case just moves the cursor without switching files.  Set whenever
+        # ``_last_jump_line`` is updated so cross-file jumps (global marks
+        # in another file, executing-line jumps after a frame switch) can
+        # return the user to the original location.
+        self._last_jump_path: str = ""
         self._count_buf: str = ""         # numeric repeat-count being typed (e.g. "20" before 'j')
         self._g_pressed: bool = False     # True after first 'g' keypress (waiting for 'gg')
         self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)
