@@ -7,5 +7,5 @@ int main()
         *p = 8;
         int c = 10;
     }
-    return 0
+    return 0;
 }
