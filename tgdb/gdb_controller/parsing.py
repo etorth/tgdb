@@ -47,7 +47,6 @@ class ParsingMixin:
             path = frame.file or frame.fullname
             _log.info(f"stopped reason={reason} frame={path}:{frame.line}")
             self.on_stopped(frame)
-            await self._publish_locals_async()
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)
