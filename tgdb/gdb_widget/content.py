@@ -188,14 +188,20 @@ class _GDBContent(ScrollMixin, Widget):
         """
         if self._stream:
             self._stream.feed(data)
-        if not self._scroll_mode:
+        # Skip ``refresh()`` when the widget has been removed from the DOM
+        # (e.g. user deleted the GDB pane via the context menu).  The
+        # captured ``gdb_widget`` reference outlives the mount, so callbacks
+        # keep arriving — but Textual rejects ``refresh`` on an unmounted
+        # widget.  pyte state still advances so a re-mount sees a current
+        # screen.
+        if not self._scroll_mode and self.is_mounted:
             self.refresh()
 
 
     def inject_text(self, text: str) -> None:
         """Inject plain text directly into the scrollback (showdebugcommands)."""
         self._push_to_scrollback(Text(text.rstrip("\n")), None)
-        if not self._scroll_mode:
+        if not self._scroll_mode and self.is_mounted:
             self.refresh()
 
 
