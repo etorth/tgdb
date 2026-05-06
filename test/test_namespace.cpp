@@ -12,11 +12,19 @@ namespace
 int main()
 {
     A a{};
+    int b = 10;
+
     {
         A a{};
+        int b = 10;
+
         {
             A a{};
+            int b = 10;
         }
+
+        int c = 10;
+        int d = 10;
     }
     return 0;
 }
