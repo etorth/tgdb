@@ -40,6 +40,7 @@ class LocalVariable:
     is_shadowed: bool = False  # True when an inner scope has a same-named variable
     is_reference: bool = False  # True for lvalue & and rvalue && reference types
     line: int = 0           # declaration line from GDB DWARF (0 = unknown)
+    depth: int = 0          # block depth from get_locals_b64(): 0 = innermost
 
 
 @dataclass

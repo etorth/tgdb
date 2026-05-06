@@ -142,6 +142,7 @@ def get_locals_b64():
     sal = frame.find_sal()
     current_line = sal.line  # 0 means unknown
 
+    depth = 0
     all_vars = []
     seen_names = set()
 
@@ -200,6 +201,7 @@ def get_locals_b64():
                 "ref_kind": "lvalue (&)" if is_lref else ("rvalue (&&)" if is_rref else None),
                 "line": decl_line,
                 "addr": addr_str,
+                "depth": depth,
                 "is_shadowed": is_shadowed,
                 "scope_start": hex(block.start),
             })
@@ -216,6 +218,7 @@ def get_locals_b64():
             break
 
         block = block.superblock
+        depth += 1
 
     return base64.b64encode(json.dumps(all_vars, indent=2).encode()).decode("ascii")
 
