@@ -631,7 +631,21 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
     def _dispatch(self, line: str) -> None:
         if not line:
             return
-        rec = GDBMIParser.parse_response(line)
+        # ``parse_response`` is a direct copy of pygdbmi and has a few
+        # known issues on malformed input that would otherwise escape and
+        # kill the MI reader — the loop in ``advance_past_chars`` reads
+        # the buffer before bounds-checking (so a record like ``1^done,``
+        # that ends right after a comma raises IndexError on the next
+        # ``_parse_key``); the octal-escape decoder raises ValueError on
+        # one- or two-digit ``\N`` sequences; ``_parse_mi_output`` can
+        # raise on multi-record-per-line console output.  Catch any
+        # parser exception here, log it, and drop the offending line so
+        # one bad record does not silently end the GDB session.
+        try:
+            rec = GDBMIParser.parse_response(line)
+        except Exception as exc:
+            _log.warning(f"MI parse failed for {line[:200]!r}: {exc!r}")
+            return
         t = rec["type"]
         if t == "result":
             self._handle_result(rec)
