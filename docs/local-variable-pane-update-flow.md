@@ -119,11 +119,12 @@ results from overwriting fresher data.
 ## Display Order
 
 Variables are displayed in **declaration line order** (smallest line
-number at top, largest at bottom). This means:
-- Outermost scope variables appear first
-- Innermost scope variables appear last
-- Same-line variables preserve the order from `get_locals_b64()` (which
-  matches GDB's symbol iteration order = left-to-right declaration)
+number at top, largest at bottom). Outer-scope variables typically have
+smaller declaration line numbers (they are declared earlier in the
+function body), so they tend to appear above inner-scope variables — but
+this is a consequence of line ordering, not a guaranteed scope rule.
+Same-line variables preserve the order from `get_locals_b64()` (which
+matches GDB's symbol iteration order = left-to-right declaration).
 
 ## Expansion State Preservation
 

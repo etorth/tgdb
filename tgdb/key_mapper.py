@@ -29,7 +29,7 @@ class KeyMapper:
     def __init__(self, timeout_ms: int = 1000, ttimeout_ms: int = 100) -> None:
         self._roots: dict[str, TrieNode] = {"tgdb": TrieNode(), "gdb": TrieNode()}
         self._buf: dict[str, list[str]] = {"tgdb": [], "gdb": []}
-        self._last_key_time: float = 0.0
+        self._last_key_time: dict[str, float] = {}  # per-mode, so cross-mode keypresses don't reset another mode's timeout
         self.timeout_ms = timeout_ms
         self.ttimeout_ms = ttimeout_ms
         self.timeout_enabled = True
@@ -83,24 +83,33 @@ class KeyMapper:
         pass-through when no map matches.
         """
         now = time.monotonic()
-        if self._last_key_time:
-            elapsed_ms = (now - self._last_key_time) * 1000
-        else:
-            elapsed_ms = 9999
-        self._last_key_time = now
+        last = self._last_key_time.get(mode, 0.0)
+        elapsed_ms = (now - last) * 1000 if last else 9999
+        self._last_key_time[mode] = now
 
         buf = self._buf.setdefault(mode, [])
         root = self._roots.get(mode, TrieNode())
 
-        # If timeout elapsed, flush stale buffer and start fresh
-        if buf and self.timeout_enabled and elapsed_ms > self.timeout_ms:
-            flushed = list(buf)
-            buf.clear()
-            result: list[str] = []
-            for t in flushed:
-                result.extend(self._resolve(root, [t]))
-            buf.append(key_token)
-            return result
+        # If timeout elapsed, flush stale buffer and start fresh.
+        # Escape-initiated sequences use ttimeout/ttimeout_ms (terminal key codes);
+        # all other sequences use timeout/timeout_ms (key mappings).
+        if buf:
+            is_escape_seq = buf[0] == "escape"
+            if is_escape_seq and self.ttimeout_enabled:
+                timed_out = elapsed_ms > self.ttimeout_ms
+            elif self.timeout_enabled:
+                timed_out = elapsed_ms > self.timeout_ms
+            else:
+                timed_out = False
+
+            if timed_out:
+                flushed = list(buf)
+                buf.clear()
+                result: list[str] = []
+                for t in flushed:
+                    result.extend(self._resolve(root, [t]))
+                buf.append(key_token)
+                return result
 
         buf.append(key_token)
 
@@ -128,11 +137,22 @@ class KeyMapper:
 
 
     def flush(self, mode: str) -> list[str]:
-        """Force-flush any buffered tokens (called on timeout)."""
+        """Force-flush any buffered tokens (called on timeout).
+
+        Resolves each token through the trie so that a complete mapping that
+        was held back only because it could be a prefix of a longer sequence
+        is still fired rather than returned as a raw key.
+        """
         buf = self._buf.get(mode, [])
+        if not buf:
+            return []
         flushed = list(buf)
         buf.clear()
-        return flushed
+        root = self._roots.get(mode, TrieNode())
+        result: list[str] = []
+        for t in flushed:
+            result.extend(self._resolve(root, [t]))
+        return result
 
 
     def _resolve(self, root: TrieNode, tokens: list[str]) -> list[str]:
