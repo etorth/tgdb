@@ -13,13 +13,18 @@ class FileDialogKeyMixin:
         char = event.character or ""
 
         if self._query_pending:
+            # Only consume q/escape — every other key bubbles so app-global
+            # shortcuts (Ctrl-C, etc.) still work while the "press q to
+            # close" dialog is showing.
             if key in ("q", "escape"):
                 self.close()
                 self.post_message(FileDialogClosed())
-            event.stop()
+                event.stop()
             return
 
         if self._search_active:
+            # Search-input mode genuinely consumes every keystroke (it's a
+            # text-input modal); stop unconditionally here.
             self._handle_search_key(key, char)
             event.stop()
             return
@@ -42,6 +47,13 @@ class FileDialogKeyMixin:
         had_count = bool(self._num_buf)
         self._num_buf = ""
 
+        # Slash and question mark open the search prompt.  Some keyboard
+        # layouts / terminals report the bare character in ``char`` rather
+        # than the named key, so accept both.
+        is_slash = key == "slash" or char == "/"
+        is_question = key == "question_mark" or char == "?"
+
+        handled = True
         if key in ("q", "escape"):
             self.close()
             self.post_message(FileDialogClosed())
@@ -70,13 +82,13 @@ class FileDialogKeyMixin:
             self.refresh()
         elif char == "g":
             self._await_g = True
-        elif key == "slash":
+        elif is_slash:
             self._search_active = True
             self._search_forward = True
             self._search_buf = ""
             self._search_origin = self._sel
             self.refresh()
-        elif key == "question_mark":
+        elif is_question:
             self._search_active = True
             self._search_forward = False
             self._search_buf = ""
@@ -90,4 +102,11 @@ class FileDialogKeyMixin:
             if 0 <= self._sel < len(self._files):
                 self.close()
                 self.post_message(FileSelected(self._files[self._sel]))
-        event.stop()
+        else:
+            # Key did not match any dialog binding — let it bubble to the
+            # app so global shortcuts (Ctrl-C, mode switches, etc.) still
+            # fire while the dialog is open.
+            handled = False
+
+        if handled:
+            event.stop()
