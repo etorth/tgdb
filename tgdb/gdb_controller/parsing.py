@@ -54,7 +54,13 @@ class ParsingMixin:
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)
-            self.mi_command("-break-list")
+            # Silence transient ``-break-list`` errors — they occur on
+            # every stop during inferior restart, file-load races, and
+            # similar transitions where the breakpoint table is briefly
+            # in an inconsistent state.  Surfacing them via ``on_error``
+            # produces user-visible noise on essentially every stop in
+            # those windows; the next stop's break-list will succeed.
+            self.mi_command("-break-list", report_error=False)
         elif cls == "running":
             # Same reasoning as the ``stopped`` branch — drop any
             # ``_publish_locals_async`` snapshot that's still mid-flight,
