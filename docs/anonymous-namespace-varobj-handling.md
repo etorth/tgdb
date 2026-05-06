@@ -55,15 +55,13 @@ Each variable entering `_add_binding_by_name_fallback` is checked:
 
 1. **`variable.depth == min_depth_by_name[name]`** → this variable has the
    smallest depth, it wins the name. Create a real varobj via
-   `-var-create - * "name"`.
+   `-var-create - * "name"`.  Multiple fixed varobjs for the same name at
+   different addresses can coexist safely — each is permanently bound to its
+   own stack slot.
 
 2. **`variable.depth > min_depth_by_name[name]`** → this is an outer
    variable that cannot be reached by name. Create a **placeholder**
    (displays `name <address>`, non-expandable, no value tracking).
-
-3. **Name already claimed by a tracked varobj at a different address** →
-   placeholder (safety check for edge cases where a prior cycle already
-   bound the name).
 
 ## Fixed Varobj Binding
 
@@ -88,8 +86,7 @@ variable even if a shadowing relationship later changes.
 A placeholder is created when:
 
 - The variable's type needs name fallback (`(anonymous namespace)` in type)
-- The variable does NOT have the smallest depth for its name, OR
-- A same-named varobj already exists at a different address
+- The variable does NOT have the smallest depth for its name
 
 ### Promotion
 
@@ -99,7 +96,6 @@ A placeholder is promoted to a real varobj when:
   `get_locals_b64()` result
 - That variable has the **smallest depth** among all same-named
   unparseable-type variables
-- No same-named tracked varobj exists at a different address
 
 After promotion, the promoted key is filtered out of the `to_add` list to
 prevent duplicate node creation.
@@ -111,14 +107,15 @@ in the current variable list (the variable went out of scope).
 
 ## Reanchor Handling
 
-When an existing name-based varobj is flagged for reanchoring (shadowing
-state changed), and its type is unparseable:
+When an existing varobj is flagged for reanchoring (shadowing state changed),
+and its type is unparseable (anonymous namespace):
 
-- The old varobj is deleted
-- The old tree node is removed
-- A placeholder is created in its place
-
-This prevents attempting the impossible address-cast expression.
+- The varobj is **left untouched** — its fixed binding is permanently valid
+  regardless of current shadowing state.
+- `_build_reanchor_bindings` skips entries whose `_varobj_type` contains
+  `(anonymous namespace)`.
+- This avoids deleting a perfectly valid fixed varobj and recreating it as a
+  placeholder unnecessarily.
 
 ## Example Walkthrough
 

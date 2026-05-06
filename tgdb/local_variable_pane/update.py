@@ -3,7 +3,7 @@ State-computation helpers for the local-variable pane.
 """
 
 from ..gdb_controller import Frame, LocalVariable
-from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log
+from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log, _type_needs_name_fallback
 
 
 class LocalVariablePaneUpdateMixin:
@@ -276,6 +276,13 @@ class LocalVariablePaneUpdateMixin:
                 continue
 
             if varobj_name in self._pinned_varobjs:
+                continue
+
+            # Fixed varobjs for unparseable types (anonymous namespace) are
+            # permanently bound to their original stack slot.  They remain
+            # valid even when shadowed — skip reanchoring.
+            varobj_type = self._varobj_type.get(varobj_name, "")
+            if _type_needs_name_fallback(varobj_type):
                 continue
 
             to_reanchor.append((binding_name, binding_addr, variable))

@@ -6,16 +6,7 @@ from textual.widgets import Tree
 
 from ..async_util import supervise
 from ..gdb_controller import Frame, LocalVariable
-from .shared import BindingEntry, BindingKey, ExpansionPath, _log, _suppress_children
-
-
-def _type_needs_name_fallback(type_str: str) -> bool:
-    """Return True when *type_str* cannot be used in a GDB cast expression.
-
-    Anonymous-namespace types print as ``(anonymous namespace)::Foo`` which
-    GDB's expression parser rejects — the parentheses look like a cast.
-    """
-    return "(anonymous namespace)" in type_str
+from .shared import BindingEntry, BindingKey, ExpansionPath, _log, _suppress_children, _type_needs_name_fallback
 
 
 class LocalVariablePaneReconcileMixin:
@@ -205,26 +196,10 @@ class LocalVariablePaneReconcileMixin:
             )
             return True
 
-        # Check if a same-named varobj already exists at a different address.
-        # This can happen if the smallest-depth variable was already tracked
-        # from a prior cycle (e.g. promoted earlier).
-        name_already_bound = False
-        for (tracked_name, tracked_addr), tracked_varobj in self._tracked.items():
-            if tracked_name == binding_name and tracked_addr != binding_addr and tracked_varobj:
-                name_already_bound = True
-                break
-
-        if name_already_bound:
-            value_display = variable.value or variable.addr or "?"
-            label = self._build_value_label(variable.name, value_display, False, marker_active=marker_active)
-            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
-            _log.debug(
-                f"Placeholder for {variable.name} at {binding_addr}: "
-                f"type {variable.type!r} is unparseable, name already bound"
-            )
-            return True
-
         # Innermost (or only) variable — create by plain name.
+        # Fixed varobjs are permanently bound at creation, so even if another
+        # varobj for the same name at a different address already exists, both
+        # can coexist safely (they track different stack slots).
         try:
             info = await self._var_create(variable.name)
         except Exception:
@@ -362,17 +337,9 @@ class LocalVariablePaneReconcileMixin:
             if variable.depth != min_depth_by_name.get(placeholder_name):
                 continue
 
-            # Check if a same-named tracked varobj exists at a different address.
-            name_claimed = False
-            for (tracked_name, tracked_addr), tracked_varobj in self._tracked.items():
-                if tracked_name == placeholder_name and tracked_addr != placeholder_addr and tracked_varobj:
-                    name_claimed = True
-                    break
-
-            if name_claimed:
-                continue
-
             # Promote: remove placeholder, create real varobj by name.
+            # Multiple fixed varobjs for the same name at different addresses
+            # can coexist safely — each is permanently bound to its stack slot.
             marker_active = self._binding_marker_active(key, shadowed_keys)
             self._remove_placeholder_node(key)
 
