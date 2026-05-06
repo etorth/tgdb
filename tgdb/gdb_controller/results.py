@@ -2,8 +2,6 @@
 
 import logging
 
-from ..async_util import supervise
-
 _log = logging.getLogger("tgdb.gdb_controller")
 
 
@@ -151,7 +149,6 @@ class GDBResultMixin:
             self.request_source_file(report_error=report)
 
         if meta.get("kind") == "current-location":
-            supervise(self._publish_locals_async(), name="publish-locals")
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)
