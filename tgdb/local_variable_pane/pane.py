@@ -165,12 +165,17 @@ class LocalVariablePane(
         safe: newer snapshots automatically supersede older async work.
         """
         self._variables = list(variables)
-        self._rebuild_gen += 1
-        gen = self._rebuild_gen
         if not variables and frame is None:
+            # Inferior is running.  Keep the current tree visible until the
+            # next stop and let any in-flight reconciliation from the
+            # previous stop run to completion: bumping ``_rebuild_gen`` here
+            # would abort it mid-way, leaving the tree in a partial state
+            # (orphaned nodes, half-removed bindings, leaked GDB-side
+            # varobjs).  No new reconciliation is started either.
             return
 
+        self._rebuild_gen += 1
         supervise(
-            self._update_variables(gen, frame, self._variables),
+            self._update_variables(self._rebuild_gen, frame, self._variables),
             name="locals-update",
         )

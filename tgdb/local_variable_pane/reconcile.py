@@ -12,6 +12,31 @@ from .shared import BindingEntry, BindingKey, ExpansionPath, _log, _suppress_chi
 class LocalVariablePaneReconcileMixin:
     """Tree reconciliation and label-sync helpers."""
 
+    async def _abort_pending_create(self, info: dict) -> None:
+        """Delete a varobj that was created during a now-superseded reconciliation.
+
+        ``-var-create`` returns a fresh GDB varobj that has not yet been
+        registered in ``_tracked`` / ``_varobj_to_node``.  When the gen-counter
+        check immediately after creation finds a newer rebuild has started,
+        the freshly-created varobj has no Python-side reference and would
+        leak inside GDB until the inferior exits.  Send ``-var-delete`` so
+        the abort path is symmetric with the success path.
+        """
+        if not self._var_delete:
+            return
+
+        varobj_name = info.get("name", "")
+        if not varobj_name:
+            return
+
+        try:
+            await self._var_delete(varobj_name)
+        except Exception:
+            _log.debug(
+                f"-var-delete {varobj_name} after abort failed", exc_info=True,
+            )
+
+
     async def _remove_gone_bindings(self, gen: int, to_remove: list[BindingKey]) -> bool:
         for binding_name, binding_addr in to_remove:
             key = (binding_name, binding_addr)
@@ -21,14 +46,12 @@ class LocalVariablePaneReconcileMixin:
                 node = self._varobj_to_node.get(varobj_name)
 
             if varobj_name:
+                # ``_purge_varobj_subtree`` also clears ``_varobj_names``.
                 self._purge_varobj_subtree(varobj_name)
                 self._pinned_varobjs.discard(varobj_name)
 
             if node is not None:
                 node.remove()
-
-            if varobj_name and varobj_name in self._varobj_names:
-                self._varobj_names.remove(varobj_name)
 
             if varobj_name and self._var_delete:
                 try:
@@ -116,6 +139,7 @@ class LocalVariablePaneReconcileMixin:
             return True
 
         if self._rebuild_gen != gen:
+            await self._abort_pending_create(info)
             return False
 
         value = info.get("value", "")
@@ -212,6 +236,7 @@ class LocalVariablePaneReconcileMixin:
             return True
 
         if self._rebuild_gen != gen:
+            await self._abort_pending_create(info)
             return False
 
         value = info.get("value", "")
@@ -354,6 +379,7 @@ class LocalVariablePaneReconcileMixin:
                 continue
 
             if self._rebuild_gen != gen:
+                await self._abort_pending_create(info)
                 return promoted
 
             value = info.get("value", "")
@@ -520,9 +546,8 @@ class LocalVariablePaneReconcileMixin:
             type_str = self._varobj_type.get(old_varobj, "")
 
         if old_varobj:
+            # ``_purge_varobj_subtree`` also clears ``_varobj_names``.
             self._purge_varobj_subtree(old_varobj)
-            if old_varobj in self._varobj_names:
-                self._varobj_names.remove(old_varobj)
             self._pinned_varobjs.discard(old_varobj)
             if self._var_delete:
                 try:
@@ -532,6 +557,13 @@ class LocalVariablePaneReconcileMixin:
 
         self._tracked.pop(key, None)
         if self._rebuild_gen != gen:
+            # Old varobj is gone (deleted on the GDB side, dropped from all
+            # tracking dicts) but the TreeNode is still mounted with stale
+            # contents.  Remove it so the next reconciliation pass starts
+            # from a clean slate instead of finding a duplicate when it
+            # re-creates the binding.
+            if node is not None:
+                node.remove()
             return
 
         fallback_value = outer_var.value or "?"
@@ -559,6 +591,11 @@ class LocalVariablePaneReconcileMixin:
             return
 
         if self._rebuild_gen != gen:
+            # Both the just-created replacement varobj and the still-mounted
+            # old TreeNode would be orphaned otherwise.
+            await self._abort_pending_create(info)
+            if node is not None:
+                node.remove()
             return
 
         new_varobj = self._remember_reanchored_varobj(key, info, type_str)
