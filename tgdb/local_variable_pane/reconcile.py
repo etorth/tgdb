@@ -72,6 +72,7 @@ class LocalVariablePaneReconcileMixin:
         binding: BindingEntry,
         restore: set[ExpansionPath],
         shadowed_keys: set[BindingKey],
+        min_depth_by_name: dict[str, int],
     ) -> bool:
         binding_name, binding_addr, variable = binding
         key = (binding_name, binding_addr)
@@ -107,7 +108,7 @@ class LocalVariablePaneReconcileMixin:
         # variables with unparseable types become placeholders.
         if use_addr and _type_needs_name_fallback(type_str):
             return await self._add_binding_by_name_fallback(
-                gen, tree, binding, restore, shadowed_keys, marker_active,
+                gen, tree, binding, restore, shadowed_keys, marker_active, min_depth_by_name,
             )
 
         var_expr = f"*({type_str}*){binding_addr}" if use_addr else variable.name
@@ -170,6 +171,7 @@ class LocalVariablePaneReconcileMixin:
         restore: set[ExpansionPath],
         shadowed_keys: set[BindingKey],
         marker_active: bool,
+        min_depth_by_name: dict[str, int],
     ) -> bool:
         """Create a varobj by plain name for a variable whose type is unparseable.
 
@@ -177,11 +179,9 @@ class LocalVariablePaneReconcileMixin:
         expression ``*(type*)addr`` fails in GDB's parser.  We fall back to
         creating the varobj by the variable's plain name.
 
-        GDB resolves the name to the innermost scope, so this only works for
-        the variable with the smallest ``depth``.  If a same-named varobj
-        already exists at a different address (i.e. this is a shadowed outer
-        variable), we create a placeholder instead — there is no way to bind
-        a varobj to the outer instance without a parseable type for the cast.
+        GDB resolves the name to the innermost scope, so only the variable with
+        the smallest depth for its name can claim the name.  Others become
+        placeholders.
 
         Placeholders are promoted to real varobjs when scope changes make
         name-based creation possible again (handled by ``_promote_placeholders``
@@ -190,9 +190,24 @@ class LocalVariablePaneReconcileMixin:
         binding_name, binding_addr, variable = binding
         key = (binding_name, binding_addr)
 
+        # Only the variable with the smallest depth for this name can be
+        # created by plain name — GDB resolves to the innermost scope.
+        is_smallest_depth = (variable.depth == min_depth_by_name.get(binding_name, 0))
+
+        if not is_smallest_depth:
+            # Not the innermost — must be a placeholder.
+            value_display = variable.value or variable.addr or "?"
+            label = self._build_value_label(variable.name, value_display, False, marker_active=marker_active)
+            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+            _log.debug(
+                f"Placeholder for shadowed {variable.name} at {binding_addr}: "
+                f"depth {variable.depth} > min {min_depth_by_name.get(binding_name)}"
+            )
+            return True
+
         # Check if a same-named varobj already exists at a different address.
-        # If so, this is an outer (shadowed) variable that cannot be reached
-        # by name — GDB would resolve the name to the inner one.
+        # This can happen if the smallest-depth variable was already tracked
+        # from a prior cycle (e.g. promoted earlier).
         name_already_bound = False
         for (tracked_name, tracked_addr), tracked_varobj in self._tracked.items():
             if tracked_name == binding_name and tracked_addr != binding_addr and tracked_varobj:
@@ -200,21 +215,14 @@ class LocalVariablePaneReconcileMixin:
                 break
 
         if name_already_bound:
-            # Outer shadowed variable with unparseable type — placeholder only.
             value_display = variable.value or variable.addr or "?"
             label = self._build_value_label(variable.name, value_display, False, marker_active=marker_active)
             self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
             _log.debug(
-                f"Placeholder for shadowed {variable.name} at {binding_addr}: "
+                f"Placeholder for {variable.name} at {binding_addr}: "
                 f"type {variable.type!r} is unparseable, name already bound"
             )
             return True
-
-        # Also check placeholders for same-named variables — if a placeholder
-        # exists at a different address, that means we already saw a same-named
-        # variable in this cycle.  The placeholder is the outer one, so we are
-        # the inner one and can claim the name.
-        # (No conflict — proceed to create by name.)
 
         # Innermost (or only) variable — create by plain name.
         try:
@@ -278,15 +286,26 @@ class LocalVariablePaneReconcileMixin:
         to_add: list[BindingEntry],
         restore: set[ExpansionPath],
         shadowed_keys: set[BindingKey],
+        all_bindings: list[BindingEntry],
     ) -> bool:
         if not self._var_create:
             return True
+
+        # Precompute: for each variable name, find the minimum depth among
+        # same-named variables with unparseable types.  Used by the name
+        # fallback to decide who gets the real varobj vs placeholder.
+        min_depth_by_name: dict[str, int] = {}
+        for _, _, var in all_bindings:
+            if _type_needs_name_fallback(var.type or ""):
+                prev = min_depth_by_name.get(var.name)
+                if prev is None or var.depth < prev:
+                    min_depth_by_name[var.name] = var.depth
 
         for binding in to_add:
             if self._rebuild_gen != gen:
                 return False
 
-            if not await self._add_new_binding(gen, tree, binding, restore, shadowed_keys):
+            if not await self._add_new_binding(gen, tree, binding, restore, shadowed_keys, min_depth_by_name):
                 return False
 
         return True
@@ -469,19 +488,13 @@ class LocalVariablePaneReconcileMixin:
         if self._rebuild_gen != gen:
             return
 
-        # Sort new bindings: innermost scope first (ascending depth), then
-        # by declaration line.  Python's sorted() is stable, so variables
-        # with identical (depth, line) — e.g. multiple declarations on one
-        # line — keep their original order from get_locals_b64().
-        # This ensures name-based varobj creation for unparseable types
-        # (anonymous namespace) binds to the correct innermost variable —
-        # GDB resolves the name to the innermost scope at the current PC.
         # Filter out keys that were just promoted from placeholders — those
         # already have real varobj nodes and must not be re-added.
+        # No sort: preserve original order from get_locals_b64() (declaration
+        # order, newest last).
         to_add_filtered = [b for b in to_add if (b[0], b[1]) not in promoted]
-        to_add_sorted = sorted(to_add_filtered, key=lambda b: (b[2].depth, b[2].line))
 
-        if not await self._add_new_bindings(gen, tree, to_add_sorted, restore, shadowed_keys):
+        if not await self._add_new_bindings(gen, tree, to_add_filtered, restore, shadowed_keys, new_bindings):
             return
 
         self._sync_shadow_labels(shadowed_keys)
