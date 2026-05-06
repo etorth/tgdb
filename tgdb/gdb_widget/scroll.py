@@ -63,6 +63,43 @@ def _max_cell_width(lines: list[Text], start: int, count: int) -> int:
     return max(cell_len(lines[i].plain) for i in range(start, end))
 
 
+def _truncate_to_cells(line: Text, cells: int) -> Text:
+    """Return *line* truncated from the right to fit in *cells* display cells.
+
+    Mirrors ``_drop_left_cells`` semantics for the right side: when a
+    wide character straddles the cut point, it is dropped and the
+    leftover cells are filled with single-cell ``?`` placeholders so
+    the overlay column ends up exactly where it should.  ``"你好world"``
+    truncated to 3 cells renders as ``"你?"`` (the first wide char fits
+    and the half-cut second wide char becomes a single ``?``).
+
+    When the line is naturally shorter than *cells* the result keeps
+    its original length — no padding — matching the upstream behaviour
+    for the case where there's nothing to truncate.
+    """
+    if cells <= 0:
+        return Text()
+    plain = line.plain
+    used = 0
+    char_idx = 0
+    pad = 0
+    for ch in plain:
+        w = cell_len(ch)
+        if used + w > cells:
+            # ch straddles the cut.  Drop it and emit ``pad`` ?
+            # placeholders so the right-side column is preserved.
+            pad = cells - used
+            break
+        used += w
+        char_idx += 1
+        if used == cells:
+            break
+    truncated = line[:char_idx]
+    if pad > 0:
+        truncated = truncated + Text("?" * pad)
+    return truncated
+
+
 # ---------------------------------------------------------------------------
 # Messages (posted by scroll-mode methods)
 # ---------------------------------------------------------------------------
@@ -222,9 +259,16 @@ class ScrollMixin:
             sb_total = len(self._scrollback)
             stat = f"[{delta}/{sb_total}]"
             first = rendered_lines[0]
+            # ``stat`` is ASCII so ``len(stat) == cell_len(stat)``.  The
+            # truncation of the line, however, must be cell-aware:
+            # ``first[:left_width]`` slices by character, which produces a
+            # wrong-width result when ``first`` contains wide chars (each
+            # wide char counts as 1 char but 2 cells).  ``_truncate_to_cells``
+            # measures by cells and pads with spaces so the overlay stays
+            # flush-right at column ``w``.
             left_width = max(0, w - len(stat))
             rendered_lines[0] = Text.assemble(
-                first[:left_width],
+                _truncate_to_cells(first, left_width),
                 (stat, self.hl.style("ScrollModeStatus")),
             )
 
