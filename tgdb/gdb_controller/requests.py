@@ -31,10 +31,24 @@ class GDBRequestMixin:
             "report_error": report_error,
             "kind": kind,
         }
-        raw = f"{token}{cmd}\n"
-        _log.debug(f"MI->: {raw.rstrip()}")
+        raw = f"{token}{cmd}\n".encode()
+        _log.debug(f"MI->: {raw.rstrip()!r}")
+        # ``os.write`` may return fewer bytes than requested when the PTY
+        # buffer fills (long expression evaluations, large sourced files,
+        # etc.).  Without a retry loop the rest of the command would be
+        # silently dropped and the awaiting future would never resolve
+        # until its individual timeout fired — looking from the outside
+        # like GDB simply hung on that command.  Loop until the full
+        # buffer is delivered or os.write raises a real error.
         try:
-            os.write(self._mi_master_fd, raw.encode())
+            written = 0
+            while written < len(raw):
+                n = os.write(self._mi_master_fd, raw[written:])
+                if n <= 0:
+                    # Should not happen on a valid blocking fd, but
+                    # defend against returning to the loop forever.
+                    raise OSError("os.write returned 0 bytes")
+                written += n
         except OSError:
             self._request_meta.pop(token, None)
             return None
