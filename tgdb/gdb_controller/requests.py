@@ -94,17 +94,31 @@ class GDBRequestMixin:
                 raise RuntimeError("MI channel not open")
             return {}
         self._pending[token] = future
+        # No ``asyncio.shield`` here: shielding the future kept it alive when
+        # the caller's task was cancelled, leaving an entry in ``_pending``
+        # forever and never resolving the inner future.  Letting the future
+        # cancel together with the caller — and guaranteeing cleanup via the
+        # finally block below — keeps the bookkeeping in lockstep with task
+        # lifetime.  PTY EOF and ``terminate()`` also reject pending futures
+        # via ``_fail_pending_futures``; that exception surfaces here as a
+        # RuntimeError out of the await and is propagated to the caller.
         try:
             if timeout is None:
-                result = await asyncio.shield(future)
+                result = await future
             else:
-                result = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+                result = await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError as exc:
-            self._pending.pop(token, None)
-            self._request_meta.pop(token, None)
             if raise_on_error:
                 raise RuntimeError("MI command timed out — GDB may be busy") from exc
             return {}
+        finally:
+            # Drop bookkeeping in every exit path (timeout, cancel, shutdown
+            # rejection, normal return).  These pops are no-ops on the normal
+            # path because ``_handle_result`` already consumed the entries,
+            # and on the shutdown path because ``_fail_pending_futures``
+            # already cleared both dicts.
+            self._pending.pop(token, None)
+            self._request_meta.pop(token, None)
         message = result.get("message", "")
         if message == "error" and raise_on_error:
             payload = result.get("payload") or {}

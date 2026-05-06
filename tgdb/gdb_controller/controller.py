@@ -269,6 +269,45 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             self._proc.write(data)
 
 
+    def _fail_pending_futures(self, reason: BaseException) -> None:
+        """Reject every in-flight ``mi_command_async`` future.
+
+        Called when the MI channel is going away — PTY EOF or ``terminate()``.
+        Without this, awaiters block until their individual timeout (or
+        forever for ``timeout=None``) waiting for responses that GDB will
+        never produce.  Both ``_pending`` and ``_request_meta`` are cleared
+        so any late-arriving response is silently dropped on lookup.
+        """
+        pending = list(self._pending.items())
+        self._pending.clear()
+        self._request_meta.clear()
+        for _token, future in pending:
+            if not future.done():
+                future.set_exception(reason)
+
+
+    def _watched_fds(self) -> list[int]:
+        """Return fds that may currently have an asyncio reader attached.
+
+        Used by ``terminate()`` to remove readers *before* closing fds —
+        closing a fd that's still registered with epoll is undefined and
+        can cause spurious callbacks on a recycled fd later.
+        """
+        fds: list[int] = []
+        if self._proc is not None:
+            try:
+                fd = self._proc.fd
+            except Exception:
+                fd = -1
+            if isinstance(fd, int) and fd >= 0:
+                fds.append(fd)
+        if self._mi_master_fd >= 0:
+            fds.append(self._mi_master_fd)
+        if self._prompt_pipe_r >= 0:
+            fds.append(self._prompt_pipe_r)
+        return fds
+
+
     def terminate(self) -> None:
         if self._proc is None:
             _log.warning("terminate() called but GDB was never started")
@@ -279,6 +318,40 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                 self._proc.terminate(force=True)
             except Exception:
                 _log.debug("GDB terminate() raised", exc_info=True)
+
+        # Wake any caller blocked in ``mi_command_async`` so they don't hang
+        # on futures that will never resolve.
+        self._fail_pending_futures(RuntimeError("GDB controller terminated"))
+
+        # ``terminate()`` may be invoked outside an asyncio context (e.g.
+        # from ``start()``'s except clause when spawn fails).  Tolerate the
+        # no-loop case rather than crashing the cleanup path.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        # Wake ``run_async`` if it's still awaiting console EOF.  Otherwise
+        # the task hangs forever because closing the fd below does not
+        # synthesise an EOF callback once the reader has been removed.
+        done = getattr(self, "_console_done", None)
+        if loop is not None and done is not None and not done.done():
+            try:
+                done.set_result(None)
+            except Exception:
+                _log.debug("set _console_done on terminate raised", exc_info=True)
+
+        # Remove asyncio readers BEFORE closing the underlying fds.
+        # ``run_async``'s finally block also removes them, but it only runs
+        # after ``_console_done`` resolves and is racy with the close calls
+        # below — so do the removal here unconditionally.
+        if loop is not None:
+            for fd in self._watched_fds():
+                try:
+                    loop.remove_reader(fd)
+                except Exception:
+                    pass
+
         for attr in ("_mi_master_fd", "_mi_slave_fd", "_prompt_pipe_r", "_prompt_pipe_w"):
             fd = getattr(self, attr, -1)
             if fd >= 0:
@@ -490,12 +563,15 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             if data:
                 self.on_console(data)
         except EOFError:
-            # GDB process closed — signal run_async to finish
+            # GDB process closed — signal run_async to finish and reject
+            # any in-flight MI requests so awaiters do not hang.
             loop.remove_reader(self._proc.fd)
+            self._fail_pending_futures(RuntimeError("GDB process exited"))
             if not self._console_done.done():
                 self._console_done.set_result(None)
         except Exception:
             loop.remove_reader(self._proc.fd)
+            self._fail_pending_futures(RuntimeError("console read failed"))
             if not self._console_done.done():
                 self._console_done.set_result(None)
 
@@ -505,6 +581,16 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         try:
             data = os.read(self._mi_master_fd, 4096)
             if not data:
+                # MI side closed (GDB tore down the new-ui channel).  Without
+                # unregistering, asyncio's level-triggered reader keeps firing
+                # zero-byte callbacks on the dead fd and pins a CPU.  Reject
+                # any in-flight MI futures while we're at it — no responses
+                # will ever come back through this fd.
+                try:
+                    asyncio.get_running_loop().remove_reader(self._mi_master_fd)
+                except Exception:
+                    pass
+                self._fail_pending_futures(RuntimeError("MI channel closed"))
                 return
             self._mi_buf += data.decode("utf-8", errors="replace")
             if len(self._mi_buf) > _MI_BUF_MAX_BYTES:
