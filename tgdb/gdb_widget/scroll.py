@@ -9,7 +9,39 @@ focused on core terminal emulation and live rendering.
 import re
 
 from textual.message import Message
+from rich.cells import cell_len
 from rich.text import Text
+
+
+def _drop_left_cells(line: Text, cells: int) -> Text:
+    """Return *line* with the leading *cells* display cells removed.
+
+    Counts cell width per character (wide chars count as 2 cells) so
+    CJK / emoji content stays aligned after horizontal scrolling.  If
+    a wide character straddles the requested cut point it's dropped
+    whole — the alternative would be to insert a partial-width
+    placeholder, which is uglier than losing one column.
+    """
+    if cells <= 0:
+        return line
+    plain = line.plain
+    used = 0
+    char_idx = 0
+    for ch in plain:
+        w = cell_len(ch)
+        if used + w > cells:
+            break
+        used += w
+        char_idx += 1
+    return line[char_idx:]
+
+
+def _max_cell_width(lines: list[Text], start: int, count: int) -> int:
+    """Greatest cell width among ``lines[start : start + count]``."""
+    end = min(start + count, len(lines))
+    if start >= end:
+        return 0
+    return max(cell_len(lines[i].plain) for i in range(start, end))
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +124,19 @@ class ScrollMixin:
 
     def _scroll_right(self) -> None:
         """Horizontal scroll right (cgdb scr_right)."""
-        self._h_offset += 1
-        self.refresh()
+        # Clamp ``_h_offset`` so it cannot grow beyond the longest visible
+        # line.  Without this the offset increments unbounded — eventually
+        # the slice in ``_render_scroll`` returns empty Text and the user
+        # sees blank rows with no upper bound on how far they've scrolled.
+        lines = self._all_lines()
+        total = len(lines)
+        h = self._visible_height()
+        start = max(0, total - h - self._scroll_offset)
+        max_cells = _max_cell_width(lines, start, h)
+        # Keep at least one cell of content visible at the right edge.
+        if self._h_offset + 1 < max_cells:
+            self._h_offset += 1
+            self.refresh()
 
 
     def _beginning_of_row(self) -> None:
@@ -104,16 +147,14 @@ class ScrollMixin:
 
     def _end_of_row(self) -> None:
         """Jump to end of row (cgdb scr_end_of_row, key '$')."""
-        # Measure longest visible line
+        # Measure longest visible line in display cells, not characters,
+        # so wide chars (CJK / emoji) participate correctly.
         lines = self._all_lines()
         total = len(lines)
         h = self._visible_height()
         start = max(0, total - h - self._scroll_offset)
         w = max(80, self.size.width or 80)
-        max_w = max(
-            (len(lines[i].plain) for i in range(start, min(start + h, total))),
-            default=w,
-        )
+        max_w = _max_cell_width(lines, start, h) or w
         self._h_offset = max(0, max_w - w)
         self.refresh()
 
@@ -143,12 +184,13 @@ class ScrollMixin:
                             line.stylize(self.hl.style("Search"), m.start(), m.end())
                     except re.error:
                         pass
-                # Apply horizontal offset (cgdb scroll_cursor_col)
+                # Apply horizontal offset (cgdb scroll_cursor_col).  Use
+                # cell-aware slicing so wide chars (CJK / emoji) stay
+                # aligned: ``_h_offset`` is measured in display cells, not
+                # characters.
                 if self._h_offset > 0:
-                    # Trim _h_offset chars from the left
-                    plain = line.plain
-                    if self._h_offset < len(plain):
-                        line = line[self._h_offset :]
+                    if self._h_offset < cell_len(line.plain):
+                        line = _drop_left_cells(line, self._h_offset)
                     else:
                         line = Text()
                 rendered_lines.append(line)
