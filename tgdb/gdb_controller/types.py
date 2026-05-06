@@ -12,6 +12,21 @@ from dataclasses import dataclass
 _ADDR_HEX_RE = re.compile(r"0x[0-9a-fA-F]+")
 
 
+def quote_mi_string(s: str) -> str:
+    """Escape and double-quote *s* for inclusion in an MI command argument.
+
+    GDB/MI uses C-string quoting for free-form arguments (the expression
+    of ``-data-evaluate-expression``, ``-var-create``, etc.): backslashes
+    escape themselves and double quotes.  Interpolating raw text — even
+    GDB-synthesised text such as a type string — produces a malformed MI
+    command line whenever the value contains ``"`` or ``\\`` or a literal
+    newline, which silently desyncs the request/response correlation
+    because the parser sees what looks like a different record.
+    """
+    escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
 def normalize_addr(addr: str) -> str:
     """Reduce an address string to a canonical ``0x...`` token.
 

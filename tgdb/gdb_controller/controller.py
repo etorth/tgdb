@@ -129,6 +129,14 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         # Pending debounced -break-list refresh (replaces any in-flight task
         # so rapid set_breakpoint() calls coalesce into one MI request).
         self._break_list_task: asyncio.Task | None = None
+        # Epoch counter for in-flight ``_publish_locals_async`` tasks.  The
+        # publish runs through several MI roundtrips after a stop; if the
+        # inferior resumes (or steps to a new stop) before it finishes, the
+        # in-flight snapshot would otherwise overwrite ``on_locals`` with
+        # stale data once it eventually completes.  Bumped on every
+        # ``*stopped`` and ``*running`` so each publish task can detect
+        # that its triggering state is no longer current.
+        self._locals_epoch: int = 0
 
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from ..async_util import supervise
+from .types import quote_mi_string
 
 _log = logging.getLogger("tgdb.gdb_controller")
 
@@ -292,8 +293,9 @@ class GDBRequestMixin:
 
 
     async def eval_expr(self, expr: str) -> str:
-        escaped = expr.replace("\\", "\\\\").replace('"', '\\"')
-        result = await self.mi_command_async(f'-data-evaluate-expression "{escaped}"')
+        result = await self.mi_command_async(
+            f"-data-evaluate-expression {quote_mi_string(expr)}",
+        )
         payload = result.get("payload") or {}
         message = result.get("message", "")
         if message == "error":
