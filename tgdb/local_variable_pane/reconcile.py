@@ -277,7 +277,11 @@ class LocalVariablePaneReconcileMixin:
             if prev is None or var.depth < prev:
                 min_depth_by_name[var.name] = var.depth
 
-        for binding in to_add:
+        # Sort to_add by declaration line for display order (oldest first,
+        # newest last).  Stable sort preserves original order for same line.
+        display_ordered = sorted(to_add, key=lambda b: b[2].line)
+
+        for binding in display_ordered:
             if self._rebuild_gen != gen:
                 return False
 
