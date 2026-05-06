@@ -233,6 +233,7 @@ class _GetLocalsB64Func(gdb.Function):
     def __init__(self):
         super().__init__("get_locals_b64")
 
+
     def invoke(self):
         return get_locals_b64()
 

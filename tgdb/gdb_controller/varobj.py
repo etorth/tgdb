@@ -34,6 +34,7 @@ class VarobjMixin:
         payload = result.get("payload") or {}
         return payload.get("value", "")
 
+
     async def var_create(self, expr: str, *, frame: str = "*") -> dict:
         """Create a varobj for *expr*.  Returns the MI result payload.
 
