@@ -17,23 +17,42 @@ def _drop_left_cells(line: Text, cells: int) -> Text:
     """Return *line* with the leading *cells* display cells removed.
 
     Counts cell width per character (wide chars count as 2 cells) so
-    CJK / emoji content stays aligned after horizontal scrolling.  If
-    a wide character straddles the requested cut point it's dropped
-    whole — the alternative would be to insert a partial-width
-    placeholder, which is uglier than losing one column.
+    CJK / emoji content stays column-aligned after horizontal scrolling.
+
+    When the cut point falls inside a wide character, that character
+    is dropped and the lost cells are filled with single-cell ``?``
+    placeholders.  This keeps the right-hand content in the same
+    physical column it would occupy with a perfect cut: ``"你好"``
+    cut by 1 cell renders as ``"?好"`` (the leading half of ``你`` is
+    gone but the column ``好`` would be in is preserved).  Without
+    the placeholder, ``好`` would shift one column left every time
+    the user scrolled by an odd number of cells through wide content.
     """
     if cells <= 0:
         return line
     plain = line.plain
     used = 0
     char_idx = 0
+    pad = 0
     for ch in plain:
         w = cell_len(ch)
         if used + w > cells:
+            # ch straddles the cut.  Skip it and emit ``pad``
+            # placeholder cells (always 1 in practice — the only
+            # straddle for a 2-cell-wide char is a 1-cell offset)
+            # so the right-side content stays in column.
+            pad = used + w - cells
+            char_idx += 1
             break
         used += w
         char_idx += 1
-    return line[char_idx:]
+        if used == cells:
+            break
+
+    result = line[char_idx:]
+    if pad > 0:
+        result = Text("?" * pad) + result
+    return result
 
 
 def _max_cell_width(lines: list[Text], start: int, count: int) -> int:
