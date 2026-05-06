@@ -10,7 +10,7 @@ import base64
 import json
 import logging
 
-from .types import LocalVariable
+from .types import LocalVariable, normalize_addr
 
 _log = logging.getLogger("tgdb.gdb_varobj")
 
@@ -168,7 +168,7 @@ class VarobjMixin:
                 value=d.get("value", ""),
                 type=d.get("type", ""),
                 is_arg=bool(d.get("is_arg", False)),
-                addr=d.get("addr", ""),
+                addr=normalize_addr(d.get("addr", "")),
                 is_shadowed=bool(d.get("is_shadowed", False)),
                 is_reference=bool(d.get("is_reference", False)),
                 line=int(d.get("line", 0)),

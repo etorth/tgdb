@@ -5,7 +5,40 @@ These types are used across the tgdb package to represent debugger state
 (breakpoints, frames, local variables, threads, registers).
 """
 
+import re
 from dataclasses import dataclass
+
+
+_ADDR_HEX_RE = re.compile(r"0x[0-9a-fA-F]+")
+
+
+def normalize_addr(addr: str) -> str:
+    """Reduce an address string to a canonical ``0x...`` token.
+
+    GDB emits stack addresses in two formats depending on the capture path:
+
+    - ``str(gdb.Value.address)`` from the embedded Python helper produces
+      a bare ``"0x7fffffffd123"`` (or, on some GDB versions / print
+      settings, a type-prefixed ``"(int *) 0x7fffffffd123"``).
+    - MI ``-data-evaluate-expression "&name"`` always returns the
+      type-prefixed form ``"(int *) 0x7fffffffd123"``.
+
+    Both are canonicalised here to the bare hex token so that BindingKeys
+    built by either capture path compare equal across refreshes.  Without
+    this, falling back from the fast (Python-helper) path to the slow
+    (MI ``&name``) path mid-session makes every variable look "removed
+    and re-added" because the addr field changes format, dropping
+    expansion state and forcing a full tree rebuild.
+
+    Empty strings and the sentinels ``"register"`` / ``"unknown"`` pass
+    through unchanged.
+    """
+    if not addr or addr in ("register", "unknown"):
+        return addr
+    match = _ADDR_HEX_RE.search(addr)
+    if match:
+        return match.group(0).lower()
+    return addr
 
 
 @dataclass
