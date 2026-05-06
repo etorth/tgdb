@@ -134,12 +134,22 @@ def _unescape_internal(escaped_str: str, *, expect_closing_quote: bool, start: i
                 replaced = f"\\{escaped_octal}"
 
         elif escaped_char is not None:
-            try:
-                replaced = _NON_OCTAL_ESCAPES[escaped_char]
-            except KeyError as exc:
-                raise ValueError(
-                    f"Invalid escape character {escaped_char!r} in {escaped_str!r}"
-                ) from exc
+            # ----------------------------------------------------------
+            # DIVERGENCE FROM UPSTREAM pygdbmi
+            # ----------------------------------------------------------
+            # The original implementation raised ValueError for any
+            # ``\X`` whose ``X`` was not in ``_NON_OCTAL_ESCAPES``.  In
+            # pygdbmi this only happens on truly malformed MI, but the
+            # GDB versions we target occasionally emit ``\1`` or ``\10``
+            # (1 or 2 octal digits — not the strict ``[0-7]{3}`` that
+            # ``escaped_octal`` requires).  When that happens the regex
+            # falls through to ``escaped_char`` matching the leading
+            # digit, the lookup raises, and the exception kills the MI
+            # read loop.  Pass unknown escapes through verbatim instead
+            # so a misencoded value at most produces a slightly-wrong
+            # display rather than a session-ending crash.
+            # ----------------------------------------------------------
+            replaced = _NON_OCTAL_ESCAPES.get(escaped_char, escaped_char)
 
         elif unescaped_quote:
             if not expect_closing_quote:
