@@ -266,15 +266,16 @@ class LocalVariablePaneReconcileMixin:
         if not self._var_create:
             return True
 
-        # Precompute: for each variable name, find the minimum depth among
-        # same-named variables with unparseable types.  Used by the name
-        # fallback to decide who gets the real varobj vs placeholder.
+        # Precompute: for each variable name, find the minimum depth across
+        # ALL variables with that name (not just unparseable ones).  GDB's
+        # name resolution always resolves to the innermost scope, so if a
+        # parseable variable shadows an unparseable one, name-based creation
+        # would bind to the wrong variable.
         min_depth_by_name: dict[str, int] = {}
         for _, _, var in all_bindings:
-            if _type_needs_name_fallback(var.type or ""):
-                prev = min_depth_by_name.get(var.name)
-                if prev is None or var.depth < prev:
-                    min_depth_by_name[var.name] = var.depth
+            prev = min_depth_by_name.get(var.name)
+            if prev is None or var.depth < prev:
+                min_depth_by_name[var.name] = var.depth
 
         for binding in to_add:
             if self._rebuild_gen != gen:

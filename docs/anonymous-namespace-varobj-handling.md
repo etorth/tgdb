@@ -47,9 +47,12 @@ not for display ordering.
 
 ## Shadowing Rules
 
-When multiple same-named variables with unparseable types coexist,
 `_add_new_bindings` precomputes `min_depth_by_name` — the smallest depth
-among same-named unparseable-type variables across all current bindings.
+across **all** variables with the same name (not just unparseable ones).
+This is critical because GDB's name resolution always binds to the
+innermost scope regardless of type — if a parseable `int a` at depth=0
+shadows an unparseable `(anonymous namespace)::A a` at depth=1, the
+name `"a"` resolves to the `int`, making the anonymous one unreachable.
 
 Each variable entering `_add_binding_by_name_fallback` is checked:
 
@@ -60,8 +63,9 @@ Each variable entering `_add_binding_by_name_fallback` is checked:
    own stack slot.
 
 2. **`variable.depth > min_depth_by_name[name]`** → this is an outer
-   variable that cannot be reached by name. Create a **placeholder**
-   (displays `name <address>`, non-expandable, no value tracking).
+   variable (or shadowed by a parseable type at smaller depth) that cannot
+   be reached by name. Create a **placeholder** (displays `name <address>`,
+   non-expandable, no value tracking).
 
 ## Fixed Varobj Binding
 
@@ -149,6 +153,17 @@ void foo() {
 3. `_promote_placeholders`: outer `a` placeholder has depth=0 which equals
    `min_depth_by_name["a"]`, no same-named varobj exists → **promoted** via
    `-var-create - * "a"` → binds correctly to outer `a`
+
+## Global Variable Shadowing
+
+If a global variable `::a` exists and a local `(anonymous namespace)::A a`
+is in scope, `-var-create - * "a"` will always bind to the local — GDB's
+name resolution prefers locals over globals.
+
+This is safe because `get_locals_b64()` only returns variables visible at
+the current PC.  We never attempt name-based creation for a variable not in
+the current locals list.  If the local hasn't been declared yet at the
+current PC, it won't appear in `get_locals_b64()` and won't be processed.
 
 ## Implementation Files
 
