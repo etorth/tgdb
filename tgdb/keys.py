@@ -166,6 +166,24 @@ class KeyRoutingMixin:
     def _resume_pending_replay(self: "TGDBApp") -> None:
         if not self._pending_replay_tokens:
             return
+        # If a multi-line message is showing because the just-finished
+        # command produced multi-line output, dismiss it programmatically
+        # BEFORE replaying queued tokens.  Without this, the first queued
+        # token gets fed to ``_dispatch_ml_message_key`` →
+        # ``bar.feed_key`` → ``_handle_message_key``, which treats any
+        # non-j/k key as a "press any key to dismiss" stroke and consumes
+        # it.  For an imap like ``<F2>`` → ``:break main<CR>:run<CR>``
+        # where ``:break main`` produces multi-line output, the leading
+        # ``:`` of ``:run`` would be eaten as a dismiss keystroke and
+        # ``run`` would land in TGDB mode (not CMD), silently dropping
+        # the second command of the macro.
+        if self._mode == "ML_MESSAGE":
+            try:
+                bar = self.query_one("#cmdline", CommandLineBar)
+                bar.dismiss_message()
+            except NoMatches:
+                pass
+            self._switch_to_tgdb()
         tokens = self._pending_replay_tokens
         self._pending_replay_tokens = []
         self._replay_key_sequence(tokens)
