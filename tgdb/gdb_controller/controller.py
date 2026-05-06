@@ -509,9 +509,17 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             self._prompt_refresh_pending = True
         elif tag == b"R":
             try:
-                self._pending_regnums.add(int(raw[1:]))
+                regnum = int(raw[1:])
             except ValueError:
-                self._pending_regnums.add(-1)
+                regnum = -1
+            # Negative values other than the documented ``-1`` sentinel
+            # ("refresh all") have no meaning as regnums but ``int()``
+            # accepts them happily — collapse them onto the sentinel so
+            # ``-5`` and ``-1`` produce identical refresh-all dispatches
+            # instead of one valid sentinel and one stray fake regnum.
+            if regnum < 0:
+                regnum = -1
+            self._pending_regnums.add(regnum)
         elif tag in (b"O", b"F", b"C"):
             self._objfiles_refresh_pending = True
         elif tag == b"I":
