@@ -83,7 +83,7 @@ class Splitter(Widget):
 
 
     def render(self) -> Text:
-        style = self.hl.style("StatusLine")
+        style = self.hl.style("CommandLine")
         if self._is_horizontal_split:
             height = max(1, self.size.height or 1)
             return Text(
