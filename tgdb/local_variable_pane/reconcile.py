@@ -668,6 +668,40 @@ class LocalVariablePaneReconcileMixin:
             self._set_node_marker_active(node, new_marker_active)
 
 
+    def _invalidate_typechanged_binding(self, varobj_name: str) -> None:
+        """Drop local tracking for a varobj whose type just changed.
+
+        Called from ``_apply_changelist`` when the changelist reports
+        ``type_changed=true``.  Removes the BindingKey from ``_tracked``,
+        purges varobj/child mappings, removes the now-stale TreeNode, and
+        supervises an async ``-var-delete`` so the old GDB-side varobj
+        does not leak.  The next reconciliation pass sees the binding
+        absent from ``_tracked`` and re-creates it via the normal
+        add-binding path with the current type's metadata.
+        """
+        # Find the BindingKey that points at this varobj so we can drop
+        # it from ``_tracked`` — otherwise the next reconciliation
+        # treats the binding as still-present and skips re-creation.
+        for binding_key, tracked_name in list(self._tracked.items()):
+            if tracked_name == varobj_name:
+                self._tracked.pop(binding_key, None)
+                break
+
+        node = self._varobj_to_node.get(varobj_name)
+        # ``_purge_varobj_subtree`` clears ``_varobj_to_node``,
+        # ``_dynamic_varobjs``, ``_varobj_type``, and ``_varobj_names``.
+        self._purge_varobj_subtree(varobj_name)
+        self._pinned_varobjs.discard(varobj_name)
+        if node is not None:
+            node.remove()
+
+        if self._var_delete is not None:
+            supervise(
+                self._delete_varobj_safe(varobj_name),
+                name="locals-typechanged-delete",
+            )
+
+
     def _apply_changelist(self, changelist: list[dict], skip_varobjs: frozenset[str] = frozenset()) -> None:
         """Apply ``-var-update`` results to the live tree."""
         _log.debug(f"changelist: {len(changelist)} changes")
@@ -681,6 +715,17 @@ class LocalVariablePaneReconcileMixin:
                 continue
 
             if change.get("type_changed", "false") == "true":
+                # GDB rebound the varobj to a different type (e.g. a
+                # union's active member changed, or a polymorphic pointer
+                # acquired a new dynamic type).  The cached metadata —
+                # ``has_children``, ``numchild``, ``_varobj_type`` — is
+                # now stale, and any subsequent reanchor logic that reads
+                # ``_varobj_type`` would take the wrong branch.  Drop
+                # this binding from local tracking so the next
+                # reconciliation pass re-creates it from scratch with
+                # current type info, and supervise the GDB-side delete
+                # so the orphaned varobj does not leak.
+                self._invalidate_typechanged_binding(varobj_name)
                 continue
 
             node = self._varobj_to_node.get(varobj_name)
