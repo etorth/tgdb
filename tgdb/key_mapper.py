@@ -105,9 +105,7 @@ class KeyMapper:
             if timed_out:
                 flushed = list(buf)
                 buf.clear()
-                result: list[str] = []
-                for t in flushed:
-                    result.extend(self._resolve(root, [t]))
+                result = self._resolve_buffer(root, flushed)
                 buf.append(key_token)
                 return result
 
@@ -117,10 +115,13 @@ class KeyMapper:
         node = root
         for token in buf:
             if token not in node.children:
-                # No map possible — flush everything as pass-through
+                # No map can extend the buffer — resolve greedily so any
+                # complete-prefix mapping (e.g. "aa" given "aa"→b and
+                # "aaa"→c) still fires before the unmappable tail flushes
+                # as pass-through.
                 flushed = list(buf)
                 buf.clear()
-                return flushed
+                return self._resolve_buffer(root, flushed)
             node = node.children[token]
 
         if node.value is not None:
@@ -139,9 +140,9 @@ class KeyMapper:
     def flush(self, mode: str) -> list[str]:
         """Force-flush any buffered tokens (called on timeout).
 
-        Resolves each token through the trie so that a complete mapping that
-        was held back only because it could be a prefix of a longer sequence
-        is still fired rather than returned as a raw key.
+        Resolves the buffer greedily so a complete mapping held back only
+        because it could be a prefix of a longer sequence still fires
+        rather than being returned as raw keys.  See ``_resolve_buffer``.
         """
         buf = self._buf.get(mode, [])
         if not buf:
@@ -149,18 +150,40 @@ class KeyMapper:
         flushed = list(buf)
         buf.clear()
         root = self._roots.get(mode, TrieNode())
+        return self._resolve_buffer(root, flushed)
+
+
+    def _resolve_buffer(self, root: TrieNode, tokens: list[str]) -> list[str]:
+        """Greedy longest-prefix resolution for a buffered token sequence.
+
+        Walks the trie from each position, tracking the longest prefix
+        whose terminal node has a value, then emits that mapping's
+        expansion and continues from the position after it.  When no
+        prefix at the current position matches, the single token passes
+        through unchanged.  Mirrors vim's timeout behavior: given
+        ``aa → b`` and ``aaa → c``, a buffer of ``["a","a"]`` flushes to
+        ``["b"]``, and ``["x","a","a"]`` flushes to ``["x","b"]``.
+        """
         result: list[str] = []
-        for t in flushed:
-            result.extend(self._resolve(root, [t]))
+        i = 0
+        n = len(tokens)
+        while i < n:
+            node = root
+            j = i
+            last_match_end = i
+            last_match_value: list[str] | None = None
+            while j < n and tokens[j] in node.children:
+                node = node.children[tokens[j]]
+                j += 1
+                if node.value is not None:
+                    last_match_end = j
+                    last_match_value = node.value
+
+            if last_match_value is not None:
+                result.extend(last_match_value)
+                i = last_match_end
+            else:
+                result.append(tokens[i])
+                i += 1
+
         return result
-
-
-    def _resolve(self, root: TrieNode, tokens: list[str]) -> list[str]:
-        node = root
-        for t in tokens:
-            if t not in node.children:
-                return tokens
-            node = node.children[t]
-        if node.value is not None:
-            return list(node.value)
-        return tokens
