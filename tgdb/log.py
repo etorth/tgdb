@@ -38,9 +38,18 @@ _LOGGER_NAME = "tgdb"
 
 # The root tgdb logger. By default it has only a NullHandler so no output
 # is produced unless init() is called.
+#
+# Default level is WARNING — not DEBUG — even though only the NullHandler
+# is attached.  The reason is cost: when tgdb is run without ``--log``,
+# every ``_log.debug(...)`` site in the codebase still walks the handler
+# list and formats its arguments unless the level filter cuts it off
+# first.  tgdb has hundreds of DEBUG-level calls inside hot paths (MI
+# parsing, varobj operations, key dispatching).  Setting the level to
+# WARNING here makes those calls effectively free for the no-log case;
+# ``init()`` raises the level back to DEBUG when a log file is provided.
 _logger = logging.getLogger(_LOGGER_NAME)
 _logger.addHandler(logging.NullHandler())
-_logger.setLevel(logging.DEBUG)
+_logger.setLevel(logging.WARNING)
 _logger.propagate = False
 
 
@@ -81,6 +90,10 @@ def init(log_file: str) -> None:
     )
     fh.setFormatter(fmt)
     _logger.addHandler(fh)
+    # Now that a real handler is attached, raise the level filter so
+    # DEBUG records actually flow through to the file.  The module-level
+    # default is WARNING for the ``--log``-not-given fast path.
+    _logger.setLevel(logging.DEBUG)
 
     start_time = datetime.now(timezone.utc).astimezone()
     _logger.info("=" * 60)
