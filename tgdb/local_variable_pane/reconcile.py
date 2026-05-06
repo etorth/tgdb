@@ -277,11 +277,7 @@ class LocalVariablePaneReconcileMixin:
             if prev is None or var.depth < prev:
                 min_depth_by_name[var.name] = var.depth
 
-        # Sort to_add by declaration line for display order (oldest first,
-        # newest last).  Stable sort preserves original order for same line.
-        display_ordered = sorted(to_add, key=lambda b: b[2].line)
-
-        for binding in display_ordered:
+        for binding in to_add:
             if self._rebuild_gen != gen:
                 return False
 
@@ -469,7 +465,46 @@ class LocalVariablePaneReconcileMixin:
         if not await self._add_new_bindings(gen, tree, to_add_filtered, restore, shadowed_keys, new_bindings):
             return
 
+        # Ensure root children are in declaration-line order.  Due to async
+        # varobj creation (name fallback) and the double-fire pattern, nodes
+        # may have been appended out of order.
+        self._sort_root_children_by_line(tree, new_bindings)
+
         self._sync_shadow_labels(shadowed_keys)
+
+
+    def _sort_root_children_by_line(self, tree: Tree, new_bindings: list[BindingEntry]) -> None:
+        """Reorder root children to match declaration-line order.
+
+        Builds a mapping from each root node to the declaration line of its
+        variable, then sorts root._children stably by that line.
+        """
+        # Map BindingKey → line from new_bindings (covers all current variables).
+        key_to_line: dict[BindingKey, int] = {}
+        for _, _, var in new_bindings:
+            key = (var.name, var.addr or var.type)
+            key_to_line[key] = var.line
+
+        # Build node → line mapping.
+        # Tracked varobj nodes: reverse _tracked and _varobj_to_node.
+        node_to_line: dict[int, int] = {}  # id(node) → line
+        for key, varobj_name in self._tracked.items():
+            if not varobj_name:
+                continue
+            node = self._varobj_to_node.get(varobj_name)
+            if node is not None:
+                node_to_line[id(node)] = key_to_line.get(key, 0)
+
+        # Placeholder nodes: _uninitialized_nodes maps key → node.
+        for key, node in self._uninitialized_nodes.items():
+            node_to_line[id(node)] = key_to_line.get(key, 0)
+
+        root = tree.root
+        if not root._children:
+            return
+
+        root._children.sort(key=lambda n: node_to_line.get(id(n), 0))
+        tree._invalidate()
 
 
     async def _reanchor_var(self, gen: int, name: str, addr: str, outer_var: LocalVariable, tree: Tree) -> None:
