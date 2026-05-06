@@ -63,13 +63,31 @@ class ConfigKeyMixin:
         return tokens
 
 
+    # US-keyboard shifted equivalents.  ``<S-1>`` should resolve to ``!``
+    # the same way pressing Shift-1 produces ``!`` on a standard layout —
+    # the upper-case-letter case (``<S-a>`` → ``A``) is handled inline
+    # because Python's ``.upper()`` already does the right thing for
+    # alphabetic characters.  Without this table, ``<S-1>`` returned a
+    # bare ``"1"`` and the user's mapping silently bound to the
+    # unshifted key.
+    _SHIFTED_CHARS: dict[str, str] = {
+        "1": "!", "2": "@", "3": "#", "4": "$", "5": "%",
+        "6": "^", "7": "&", "8": "*", "9": "(", "0": ")",
+        "-": "_", "=": "+", "[": "{", "]": "}",
+        ";": ":", "'": '"', ",": "<", ".": ">", "/": "?",
+        "\\": "|", "`": "~",
+    }
+
     def _key_token(self, name: str) -> str:
         if name in self._KEY_TOKENS:
             return self._KEY_TOKENS[name]
         if name.startswith("c-") and len(name) == 3:
             return f"ctrl+{name[2].lower()}"
         if name.startswith("s-") and len(name) == 3:
-            return name[2].upper()
+            base = name[2]
+            if base in self._SHIFTED_CHARS:
+                return self._SHIFTED_CHARS[base]
+            return base.upper()
         if (name.startswith("m-") or name.startswith("a-")) and len(name) == 3:
             return f"escape+{name[2]}"
         return f"<{name}>"
