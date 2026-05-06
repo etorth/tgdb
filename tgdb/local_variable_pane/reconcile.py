@@ -299,29 +299,36 @@ class LocalVariablePaneReconcileMixin:
         new_bindings: list[BindingEntry],
         restore: set[ExpansionPath],
         shadowed_keys: set[BindingKey],
-    ) -> None:
+    ) -> set[BindingKey]:
         """Promote placeholders to real varobjs when name-based creation is possible.
 
-        A placeholder exists for an unparseable-type variable that was shadowed
-        when first seen.  If the inner scope has exited and this variable is now
-        the only one with its name, we can create a varobj by plain name.
-        """
-        if not self._var_create:
-            return
+        A placeholder is promotable when its (name, addr) matches a variable
+        in the current variable list AND that variable has the smallest depth
+        among all same-named variables.  GDB resolves plain names to the
+        innermost scope, so only the smallest-depth variable can be correctly
+        created by name.
 
-        # Build a lookup: for each variable name, how many bindings exist?
-        # Also map (name, addr) → variable for the ones we care about.
+        Returns the set of (name, addr) keys that were successfully promoted —
+        the caller must filter these out of any subsequent ``to_add`` list to
+        avoid creating duplicate nodes for the same binding.
+        """
+        promoted: set[BindingKey] = set()
+        if not self._var_create:
+            return promoted
+
+        # Build lookup: (name, addr) → variable, and name → min depth.
         var_by_key: dict[BindingKey, LocalVariable] = {}
+        min_depth_by_name: dict[str, int] = {}
         for _, _, variable in new_bindings:
             key = (variable.name, variable.addr or variable.type)
             var_by_key[key] = variable
+            prev = min_depth_by_name.get(variable.name)
+            if prev is None or variable.depth < prev:
+                min_depth_by_name[variable.name] = variable.depth
 
-        # Find placeholders that are promotable: they have unparseable types,
-        # they are still in the current variable set, and no same-named varobj
-        # exists at a different address.
         for key in list(self._uninitialized_nodes.keys()):
             if self._rebuild_gen != gen:
-                return
+                return promoted
 
             placeholder_name, placeholder_addr = key
             variable = var_by_key.get(key)
@@ -329,6 +336,11 @@ class LocalVariablePaneReconcileMixin:
                 continue
 
             if not _type_needs_name_fallback(variable.type or ""):
+                continue
+
+            # Only the variable with the smallest depth for this name can be
+            # created by plain name — GDB resolves to the innermost scope.
+            if variable.depth != min_depth_by_name.get(placeholder_name):
                 continue
 
             # Check if a same-named tracked varobj exists at a different address.
@@ -341,8 +353,7 @@ class LocalVariablePaneReconcileMixin:
             if name_claimed:
                 continue
 
-            # No same-named varobj exists — we can promote by creating with
-            # plain name.  Remove the placeholder and create a real varobj.
+            # Promote: remove placeholder, create real varobj by name.
             marker_active = self._binding_marker_active(key, shadowed_keys)
             self._remove_placeholder_node(key)
 
@@ -356,7 +367,7 @@ class LocalVariablePaneReconcileMixin:
                 continue
 
             if self._rebuild_gen != gen:
-                return
+                return promoted
 
             value = info.get("value", "")
             varobj_name = self._remember_root_varobj(key, info, is_pinned=False)
@@ -376,9 +387,12 @@ class LocalVariablePaneReconcileMixin:
             if varobj_name:
                 self._varobj_to_node[varobj_name] = node
 
+            promoted.add(key)
             _log.debug(f"Promoted placeholder {variable.name} at {placeholder_addr} to varobj={varobj_name}")
 
             await self._restore_binding_expansion(gen, tree, restore, variable.name)
+
+        return promoted
 
 
     async def _update_variables(self, gen: int, frame: Frame | None, variables: list[LocalVariable]) -> None:
@@ -451,7 +465,7 @@ class LocalVariablePaneReconcileMixin:
         # Promote placeholders whose unparseable-type variable is no longer
         # shadowed.  This must happen before _add_new_bindings so we don't
         # try to add a binding that was just promoted.
-        await self._promote_placeholders(gen, tree, new_bindings, restore, shadowed_keys)
+        promoted = await self._promote_placeholders(gen, tree, new_bindings, restore, shadowed_keys)
         if self._rebuild_gen != gen:
             return
 
@@ -462,7 +476,10 @@ class LocalVariablePaneReconcileMixin:
         # This ensures name-based varobj creation for unparseable types
         # (anonymous namespace) binds to the correct innermost variable —
         # GDB resolves the name to the innermost scope at the current PC.
-        to_add_sorted = sorted(to_add, key=lambda b: (b[2].depth, b[2].line))
+        # Filter out keys that were just promoted from placeholders — those
+        # already have real varobj nodes and must not be re-added.
+        to_add_filtered = [b for b in to_add if (b[0], b[1]) not in promoted]
+        to_add_sorted = sorted(to_add_filtered, key=lambda b: (b[2].depth, b[2].line))
 
         if not await self._add_new_bindings(gen, tree, to_add_sorted, restore, shadowed_keys):
             return
@@ -504,10 +521,10 @@ class LocalVariablePaneReconcileMixin:
             return
 
         # Unparseable types (e.g. anonymous namespace) cannot be reanchored
-        # via address cast — collapse to placeholder.
+        # via address cast — remove the old node and add a placeholder.
         if _type_needs_name_fallback(type_str):
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True, marker_active=False)
+                node.remove()
             label = self._build_value_label(name, fallback_value, False, marker_active=False)
             self._add_placeholder_node(tree, key, name, label, marker_active=False)
             _log.debug(f"Reanchor {name} at {addr}: type {type_str!r} unparseable, demoted to placeholder")

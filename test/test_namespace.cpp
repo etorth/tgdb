@@ -1,11 +1,13 @@
 #include <string>
 
+int g_count = 0;
 namespace
 {
     struct A
     {
-        int a = 0;
-        std::string s = "empty";
+        int a;
+        std::string s;
+        A(): a(g_count++), s(std::to_string(a)) {}
     };
 }
 
