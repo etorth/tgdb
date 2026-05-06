@@ -82,7 +82,7 @@ class SourceNavigationMixin:
         if line_count:
             self.sel_line = min(line_count, self.sel_line + height)
         else:
-            self.sel_line = min(1, self.sel_line + height)
+            self.sel_line = 1
         self._ensure_visible(self.sel_line)
         self.refresh()
 
