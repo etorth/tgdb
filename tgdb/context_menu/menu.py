@@ -139,12 +139,22 @@ class ContextMenu(Widget):
     # ------------------------------------------------------------------
 
     def _handle_panel_hover(self, depth: int, item_index: int) -> None:
+        # Mouse motion fires this on every event over the panel.  Bail
+        # whenever the hovered (depth, item_index) already matches the
+        # current selection at that depth — even when an open child
+        # panel exists at a deeper depth.  The previous guard required
+        # ``depth == len(self._selection_path) - 1``, which meant
+        # mousing back over a parent panel item that was already
+        # selected (with its child panel still showing) re-ran
+        # ``_set_selection``: that truncates ``_selection_path`` and
+        # reopens the child from index 0, triggering a full
+        # ``_relayout`` and visibly resetting the user's submenu cursor
+        # on every passing mouse motion.
         if (
             depth < len(self._selection_path)
             and self._selection_path[depth] == item_index
-            and depth == len(self._selection_path) - 1
         ):
-            return  # selection unchanged
+            return
         self._set_selection(depth, item_index, open_child=True)
 
 
