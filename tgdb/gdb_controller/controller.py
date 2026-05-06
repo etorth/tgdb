@@ -327,6 +327,18 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             except Exception:
                 _log.debug("GDB terminate() raised", exc_info=True)
 
+        # Cancel the debounced break-list refresh if one is in flight.
+        # ``set_breakpoint`` schedules ``_delayed_break_list`` via
+        # ``supervise``; without an explicit cancel here, that task
+        # eventually wakes up after the sleep, calls ``mi_command``
+        # against the now-closed MI fd (a no-op thanks to the
+        # ``self._mi_master_fd < 0`` guard), and exits.  Harmless but
+        # wasteful, and a fragile invariant — if the guard ever moves
+        # the cleanup path becomes a real bug.  Cancel deterministically.
+        if self._break_list_task is not None and not self._break_list_task.done():
+            self._break_list_task.cancel()
+        self._break_list_task = None
+
         # Wake any caller blocked in ``mi_command_async`` so they don't hang
         # on futures that will never resolve.
         self._fail_pending_futures(RuntimeError("GDB controller terminated"))
@@ -509,9 +521,17 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             self._prompt_refresh_pending = True
         elif tag == b"R":
             try:
-                self._pending_regnums.add(int(raw[1:]))
+                regnum = int(raw[1:])
             except ValueError:
-                self._pending_regnums.add(-1)
+                regnum = -1
+            # Negative values other than the documented ``-1`` sentinel
+            # ("refresh all") have no meaning as regnums but ``int()``
+            # accepts them happily — collapse them onto the sentinel so
+            # ``-5`` and ``-1`` produce identical refresh-all dispatches
+            # instead of one valid sentinel and one stray fake regnum.
+            if regnum < 0:
+                regnum = -1
+            self._pending_regnums.add(regnum)
         elif tag in (b"O", b"F", b"C"):
             self._objfiles_refresh_pending = True
         elif tag == b"I":
@@ -631,7 +651,21 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
     def _dispatch(self, line: str) -> None:
         if not line:
             return
-        rec = GDBMIParser.parse_response(line)
+        # ``parse_response`` is a direct copy of pygdbmi and has a few
+        # known issues on malformed input that would otherwise escape and
+        # kill the MI reader — the loop in ``advance_past_chars`` reads
+        # the buffer before bounds-checking (so a record like ``1^done,``
+        # that ends right after a comma raises IndexError on the next
+        # ``_parse_key``); the octal-escape decoder raises ValueError on
+        # one- or two-digit ``\N`` sequences; ``_parse_mi_output`` can
+        # raise on multi-record-per-line console output.  Catch any
+        # parser exception here, log it, and drop the offending line so
+        # one bad record does not silently end the GDB session.
+        try:
+            rec = GDBMIParser.parse_response(line)
+        except Exception as exc:
+            _log.warning(f"MI parse failed for {line[:200]!r}: {exc!r}")
+            return
         t = rec["type"]
         if t == "result":
             self._handle_result(rec)

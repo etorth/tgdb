@@ -64,10 +64,10 @@ class FileDialogViewMixin:
 
         label = self._LABEL
         pad = max(0, (width - len(label)) // 2)
-        result.append(" " * pad + label, style=self.hl.style("StatusLine"))
+        result.append(" " * pad + label, style=self.hl.style("CommandLine"))
         result.append(
             " " * max(0, width - pad - len(label)),
-            style=self.hl.style("StatusLine"),
+            style=self.hl.style("CommandLine"),
         )
         result.append("\n")
 
@@ -80,7 +80,7 @@ class FileDialogViewMixin:
                 if row_index == message_row and message:
                     pad = max(0, (width - len(message)) // 2)
                     result.append(" " * pad, style=self.hl.style("Normal"))
-                    result.append(message, style=self.hl.style("StatusLine"))
+                    result.append(message, style=self.hl.style("CommandLine"))
                     result.append(
                         " " * max(0, width - pad - len(message)),
                         style=self.hl.style("Normal"),
@@ -90,7 +90,7 @@ class FileDialogViewMixin:
 
             result.append("\n")
             bar = " Esc=quit" if self._query_pending else " q=quit"
-            result.append(bar[:width].ljust(width), style=self.hl.style("StatusLine"))
+            result.append(bar[:width].ljust(width), style=self.hl.style("CommandLine"))
             return result
 
         start = self._scroll_start()
@@ -133,5 +133,5 @@ class FileDialogViewMixin:
         else:
             current = self._sel + 1 if self._sel >= 0 else 0
             bar = f" {current}/{file_count}  j/k=move  Enter=open  /=search  q=quit"
-        result.append(bar[:width].ljust(width), style=self.hl.style("StatusLine"))
+        result.append(bar[:width].ljust(width), style=self.hl.style("CommandLine"))
         return result

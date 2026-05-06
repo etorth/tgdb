@@ -113,15 +113,32 @@ class KeyMapper:
 
         # Walk trie with buffered sequence
         node = root
-        for token in buf:
+        for break_pos, token in enumerate(buf):
             if token not in node.children:
-                # No map can extend the buffer — resolve greedily so any
-                # complete-prefix mapping (e.g. "aa" given "aa"→b and
-                # "aaa"→c) still fires before the unmappable tail flushes
-                # as pass-through.
-                flushed = list(buf)
+                # No map can extend the buffer at this point.  Resolve
+                # the prefix greedily so any complete-prefix mapping
+                # (e.g. "aa" given "aa"→b and "aaa"→c) still fires
+                # before the unmappable tail emits.
+                #
+                # The breaking token (and anything after it in the
+                # buffer) might itself begin a new mapping — re-buffer
+                # those tokens that DO extend a mapping at the trie
+                # root so the next keystroke can complete the new
+                # sequence.  Without this re-buffer step, typing
+                # ``a`` (extends ``aa``→b) then ``b`` (starts ``bc``→y)
+                # then ``c`` would emit three literal keys instead of
+                # ``a`` followed by the ``bc``→y expansion: the ``b``
+                # would be flushed as raw before the ``c`` arrived.
+                head = buf[:break_pos]
+                tail = buf[break_pos:]
                 buf.clear()
-                return self._resolve_buffer(root, flushed)
+                result = self._resolve_buffer(root, head) if head else []
+                for t in tail:
+                    if t in root.children:
+                        buf.append(t)
+                    else:
+                        result.append(t)
+                return result
             node = node.children[token]
 
         if node.value is not None:

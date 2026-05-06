@@ -39,17 +39,24 @@ class UserCommandMixin:
         nargs = "0"
         complete_func = ""
         while remaining.startswith("-"):
-            m = re.match(r"-nargs=([01*?+])\s*", remaining)
+            # ``-nargs`` accepts only a single character from ``[01*?+]``
+            # as its value.  The previous regex used ``\s*`` to consume
+            # trailing whitespace but had no boundary on the value
+            # itself, so ``-nargs=1zzz`` matched with ``nargs="1"`` and
+            # left ``zzz`` to be (mis-)reported as a separate unknown
+            # attribute.  Anchor with a lookahead for whitespace or end
+            # of string so the value must end at a real boundary.
+            m = re.match(r"-nargs=([01*?+])(?=\s|$)\s*", remaining)
             if m:
                 nargs = m.group(1)
                 remaining = remaining[m.end() :]
                 continue
-            m = re.match(r"-complete=(\S+)\s*", remaining)
+            m = re.match(r"-complete=(\S+)(?=\s|$)\s*", remaining)
             if m:
                 complete_func = m.group(1)
                 remaining = remaining[m.end() :]
                 continue
-            m = re.match(r"-bang\s*", remaining)
+            m = re.match(r"-bang(?=\s|$)\s*", remaining)
             if m:
                 remaining = remaining[m.end() :]
                 continue

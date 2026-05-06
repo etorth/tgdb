@@ -5,7 +5,7 @@ Public implementation of the disassembly-pane package.
 ``layout asm`` window:
 
 - The title bar shows ``Thread <id> (asm) In: <func>`` on the left and
-  ``Lxx  PC: 0x...`` on the right, all in the StatusLine palette (tgdb
+  ``Lxx  PC: 0x...`` on the right, all in the CommandLine palette (tgdb
   puts pane status at the top, while plain gdb puts it at the bottom).
 - Each line is formatted as ``ADDR  <func+offset>  INST`` with the columns
   aligned across the visible block.

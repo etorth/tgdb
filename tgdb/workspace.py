@@ -83,7 +83,7 @@ class Splitter(Widget):
 
 
     def render(self) -> Text:
-        style = self.hl.style("StatusLine")
+        style = self.hl.style("CommandLine")
         if self._is_horizontal_split:
             height = max(1, self.size.height or 1)
             return Text(
@@ -343,12 +343,21 @@ class PaneContainer(Widget):
         if not self._items:
             self._weights = []
             return
-        self._weights = []
+        new_weights: list[int] = []
         for item in self._items:
-            if is_horizontal:
-                self._weights.append(max(1, item.size.width))
-            else:
-                self._weights.append(max(1, item.size.height))
+            size = item.size.width if is_horizontal else item.size.height
+            if size <= 0:
+                # Textual hasn't laid out yet — typically because we just
+                # rebuilt the container (e.g. orientation flip) and a drag
+                # event arrived in the same event-loop tick before sizes
+                # propagated.  Capturing now would push every weight to
+                # ``max(1, 0) = 1`` and reset every pane to an equal split,
+                # discarding whatever ratio the user had dragged to.  Keep
+                # the existing ``_weights`` and let the next valid drag
+                # capture fresh values.
+                return
+            new_weights.append(size)
+        self._weights = new_weights
 
 
     def _resize_from_drag(self, splitter: "Splitter", screen_x: int, screen_y: int) -> bool:

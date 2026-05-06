@@ -85,7 +85,21 @@ class ConfigOptionMixin:
             return f"set history: invalid value {val!r} (must be a non-negative integer)"
         if n < 0:
             return "set history: value must be >= 0"
+        self._apply_historysize(n)
+        return None
 
+
+    def _apply_historysize(self, n: int) -> None:
+        """Set ``config.historysize`` *and* prune the live cmdline-bar buffer.
+
+        Both ``set history=N`` (the cgdb short form, routed through
+        ``_cmd_set_history_n``) and ``set historysize=N`` (the canonical
+        long form, routed through ``_set_option``'s ``_INT_OPTIONS``
+        branch) need to enforce the new limit on the in-memory history
+        immediately — otherwise the live buffer keeps its previous length
+        until the next restart even though ``config.historysize`` reads
+        as the new value.  Centralised here so both forms behave the same.
+        """
         bar = self._cmdline_bar
         if bar is not None:
             if n == 0:
@@ -93,7 +107,6 @@ class ConfigOptionMixin:
             elif len(bar._history) > n:
                 bar._history = bar._history[-n:]
         self.config.historysize = n
-        return None
 
 
     async def _set_option(self, name: str, value: str) -> str | None:
@@ -104,15 +117,22 @@ class ConfigOptionMixin:
             return None
         if name in _INT_OPTIONS:
             try:
-                setattr(self.config, name, int(value))
-                if name == "timeoutlen":
-                    self.km.timeout_ms = int(value)
-                elif name == "ttimeoutlen":
-                    self.km.ttimeout_ms = int(value)
-                _log.debug(f"set {name} = {getattr(self.config, name)!r}")
+                n = int(value)
             except ValueError:
                 _log.warning(f"set: invalid integer value for {name}: {value!r}")
                 return f"set: invalid integer '{value}'"
+            if name == "historysize":
+                # Route through the same helper as ``set history=N`` so
+                # the in-memory cmdline buffer is pruned to the new limit
+                # immediately rather than at next restart.
+                self._apply_historysize(n)
+            else:
+                setattr(self.config, name, n)
+            if name == "timeoutlen":
+                self.km.timeout_ms = n
+            elif name == "ttimeoutlen":
+                self.km.ttimeout_ms = n
+            _log.debug(f"set {name} = {getattr(self.config, name)!r}")
             return None
         if name in _STR_OPTIONS:
             setattr(self.config, name, value.lower())
@@ -183,7 +203,7 @@ class ConfigOptionMixin:
         group = args[0]
         fg = ""
         bg = ""
-        attrs_val = ""
+        attrs_parts: list[str] = []
         for token in args[1:]:
             if "=" not in token:
                 continue
@@ -194,7 +214,15 @@ class ConfigOptionMixin:
             elif key == "ctermbg":
                 bg = value
             elif key in ("cterm", "term"):
-                attrs_val = value
+                # Merge attribute tokens instead of last-token-wins so
+                # ``:highlight Foo cterm=bold term=italic`` ends up with
+                # ``bold,italic`` applied.  Each value may itself be a
+                # comma-separated list (``cterm=bold,underline``); join
+                # them all into a single comma-separated string for the
+                # downstream ``set()`` parser to split.
+                if value:
+                    attrs_parts.append(value)
+        attrs_val = ",".join(attrs_parts)
         self.hl.set(group, fg=fg, bg=bg, attrs=attrs_val)
         return None
 

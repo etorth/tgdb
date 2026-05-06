@@ -5,7 +5,8 @@ Shared pane chrome and rendering helpers for tgdb workspace widgets.
 source view, GDB console, and the optional auxiliary panes. The title bar is:
 
 - always visible, even when ``title()`` returns ``None``;
-- styled with the ``StatusLine`` highlight group by default; and
+- styled with the ``CommandLine`` highlight group by default
+  (``StatusLine`` is accepted as a legacy alias from cgdb configs); and
 - usable as a drag handle when the pane sits inside a vertical
   ``PaneContainer``.
 
@@ -206,7 +207,7 @@ class PaneBase(Widget):
 
     def color(self) -> str:
         """Highlight-group name used to style the title bar background."""
-        return "StatusLine"
+        return "CommandLine"
 
 
     def align(self) -> str:

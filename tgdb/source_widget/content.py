@@ -38,12 +38,27 @@ class SourceFileMixin:
             if previous:
                 self._file_positions[previous.path] = self.sel_line
 
+            # Capture mtime BEFORE reading the file contents.  ``SourceFile``
+            # also captures it inside __init__, but that runs *after* the
+            # content read here — so a modification that lands during the
+            # read would store a mtime newer than the content we actually
+            # got, and ``reload_if_changed`` would later see "current
+            # mtime == stored mtime" and skip a real reload.  Pre-capturing
+            # at most produces a spurious reload (mtime older than content)
+            # which is harmless.
+            try:
+                pre_mtime = os.path.getmtime(path)
+            except OSError:
+                pre_mtime = 0.0
+
             with open(path, errors="replace") as handle:
                 content = handle.read()
             lines = content.expandtabs(self.tabstop).splitlines()
             if not lines:
                 lines = [""]
             source_file = SourceFile(path, lines)
+            if pre_mtime:
+                source_file.mtime = pre_mtime  # override post-read mtime captured by __init__
             if previous and previous.path == path:
                 source_file.bp_flags = list(previous.bp_flags[: len(lines)])
                 while len(source_file.bp_flags) < len(lines):
@@ -57,6 +72,14 @@ class SourceFileMixin:
             self._ensure_visible(self.sel_line)
             self.refresh()
             _log.info(f"load file: {path}")
+            # Any pending search typed before any file was loaded is
+            # consumed here, regardless of which load path got us here
+            # (initial -file-list-exec-source-file, *stopped, frame
+            # changed, or user-driven file-dialog selection).  Previously
+            # only the ``_ui_load_source_file`` callback consumed it,
+            # which silently dropped the search whenever the binary
+            # stopped at main without going through that path first.
+            self.run_pending_search()
             return True
         except OSError as exc:
             _log.warning(f"load file failed: {path}: {exc}")
@@ -135,7 +158,7 @@ class SourceSearchMixin:
 
         for index in order:
             if regex.search(lines[index]):
-                self._last_jump_line = self.sel_line
+                self._stamp_jump_origin()
                 self.move_to(index + 1)
                 return True
         return False
@@ -238,6 +261,13 @@ class _SourceContent(
         self.color: bool = True  # :set color — enables/disables syntax colors
         self._global_marks: dict[str, tuple[str, int]] = {}
         self._last_jump_line: int = 1
+        # Path of the file the user was viewing when ``_last_jump_line`` was
+        # captured.  Empty means "the current file" — vi's ``''`` in that
+        # case just moves the cursor without switching files.  Set whenever
+        # ``_last_jump_line`` is updated so cross-file jumps (global marks
+        # in another file, executing-line jumps after a frame switch) can
+        # return the user to the original location.
+        self._last_jump_path: str = ""
         self._count_buf: str = ""         # numeric repeat-count being typed (e.g. "20" before 'j')
         self._g_pressed: bool = False     # True after first 'g' keypress (waiting for 'gg')
         self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)

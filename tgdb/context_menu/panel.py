@@ -54,7 +54,13 @@ class _PanelWidget(Widget):
         panel = self._panel
         width = panel.width
         inner_width = panel.inner_width
-        border_rich = RichStyle.parse(self._hl.style("StatusLine"))
+        # Use the canonical group name directly.  The ``StatusLine`` →
+        # ``CommandLine`` alias still exists for cgdb-config-file
+        # compatibility, but resolving through it for an internal
+        # renderer is fragile: if the alias is ever removed (or its
+        # mapping changes), every render here silently falls back to
+        # the empty default style with no error.
+        border_rich = RichStyle.parse(self._hl.style("CommandLine"))
         selected_rich = RichStyle.parse(self._hl.style("SelectedLineHighlight"))
 
         if y == 0:

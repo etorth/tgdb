@@ -54,7 +54,13 @@ class ParsingMixin:
             self.request_current_stack_frames(report_error=False)
             self.request_current_threads(report_error=False)
             self.request_current_registers(report_error=False)
-            self.mi_command("-break-list")
+            # Silence transient ``-break-list`` errors — they occur on
+            # every stop during inferior restart, file-load races, and
+            # similar transitions where the breakpoint table is briefly
+            # in an inconsistent state.  Surfacing them via ``on_error``
+            # produces user-visible noise on essentially every stop in
+            # those windows; the next stop's break-list will succeed.
+            self.mi_command("-break-list", report_error=False)
         elif cls == "running":
             # Same reasoning as the ``stopped`` branch — drop any
             # ``_publish_locals_async`` snapshot that's still mid-flight,
@@ -100,17 +106,19 @@ class ParsingMixin:
                 # second call needed here.
                 self._update_breakpoint_from_mi(bkpt)
         elif cls == "breakpoint-deleted":
+            # Narrow the except scope to the int() conversion only — the
+            # original ``try`` block wrapped the entire branch including
+            # ``on_breakpoints``, so a bug in the callback (which can
+            # surface ``ValueError`` / ``TypeError`` for many unrelated
+            # reasons) would be silently swallowed instead of propagating
+            # to the supervisor's done-callback for visible logging.
             try:
                 num = int(results.get("id", ""))
-                _log.info(f"breakpoint-deleted id={results.get('id', '')}")
-                kept = []
-                for b in self.breakpoints:
-                    if b.number != num:
-                        kept.append(b)
-                self.breakpoints = kept
-                self.on_breakpoints(list(self.breakpoints))
             except (ValueError, TypeError):
-                pass
+                return
+            _log.info(f"breakpoint-deleted id={results.get('id', '')}")
+            self.breakpoints = [b for b in self.breakpoints if b.number != num]
+            self.on_breakpoints(list(self.breakpoints))
 
     # ------------------------------------------------------------------
     # Internal helpers

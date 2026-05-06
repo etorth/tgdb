@@ -1,6 +1,11 @@
 """Highlight group definitions — mirrors cgdb's highlight_groups.cpp."""
 
+import logging
 from dataclasses import dataclass
+
+from rich.style import Style as _RichStyle
+
+_log = logging.getLogger("tgdb.highlight")
 
 
 @dataclass
@@ -76,7 +81,17 @@ CGDB_COLORS: dict[str, str] = {
 
 
 def resolve_color(name: str) -> str:
-    """Normalise a cgdb colour name to a Rich colour string."""
+    """Normalise a cgdb colour name to a Rich colour string.
+
+    Unknown / typo'd colour tokens (``puce``, ``gren``, etc.) used to
+    pass through verbatim, get stored on the highlight group, and only
+    surface as a Rich parse error inside the renderer minutes later —
+    far from the offending ``:highlight`` line and with no way for the
+    user to know which command was at fault.  Validate at resolution
+    time by attempting to construct a ``rich.style.Style`` and falling
+    back to ``""`` (i.e. "no colour applied") with a warning if the
+    parse fails.
+    """
     if name in ("-1", "none", ""):
         return ""
     lower = name.lower()
@@ -85,7 +100,18 @@ def resolve_color(name: str) -> str:
         if number < 0:
             return ""
         return f"color({number})"
-    return CGDB_COLORS.get(lower, lower)
+    resolved = CGDB_COLORS.get(lower, lower)
+    try:
+        # ``Style.parse`` accepts colour names, ``color(N)``, ``#RRGGBB``,
+        # and ``rgb(r,g,b)``.  Unrecognised tokens raise ``ColorParseError``
+        # (or generic ``Exception`` on older Rich versions).
+        _RichStyle.parse(resolved)
+    except Exception:
+        _log.warning(
+            f"highlight: unrecognised colour {name!r} (resolved to {resolved!r}); ignored"
+        )
+        return ""
+    return resolved
 
 
 # ---------------------------------------------------------------------------

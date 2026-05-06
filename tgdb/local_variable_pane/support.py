@@ -125,6 +125,13 @@ class LocalVariablePaneSupportMixin:
 
         self._pinned_varobjs.add(varobj_name)
 
+        # Drop any stale dynamic-flag entry first.  In normal operation
+        # GDB hands out fresh varobj names so a re-add can't collide with
+        # a prior dynamic flag, but if a name ever IS recycled, leaving
+        # the old flag in place would cause ``_do_var_update`` to take
+        # the dynamic-container code path on a non-dynamic varobj —
+        # incorrect updates and possibly skipped values.  Be explicit.
+        self._dynamic_varobjs.discard(varobj_name)
         if info.get("dynamic", "0") == "1":
             self._dynamic_varobjs.add(varobj_name)
 

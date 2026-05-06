@@ -32,14 +32,24 @@ import os
 import platform
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 _LOGGER_NAME = "tgdb"
 
 # The root tgdb logger. By default it has only a NullHandler so no output
 # is produced unless init() is called.
+#
+# Default level is WARNING — not DEBUG — even though only the NullHandler
+# is attached.  The reason is cost: when tgdb is run without ``--log``,
+# every ``_log.debug(...)`` site in the codebase still walks the handler
+# list and formats its arguments unless the level filter cuts it off
+# first.  tgdb has hundreds of DEBUG-level calls inside hot paths (MI
+# parsing, varobj operations, key dispatching).  Setting the level to
+# WARNING here makes those calls effectively free for the no-log case;
+# ``init()`` raises the level back to DEBUG when a log file is provided.
 _logger = logging.getLogger(_LOGGER_NAME)
 _logger.addHandler(logging.NullHandler())
-_logger.setLevel(logging.DEBUG)
+_logger.setLevel(logging.WARNING)
 _logger.propagate = False
 
 
@@ -55,6 +65,20 @@ def init(log_file: str) -> None:
             handler.close()
             _logger.removeHandler(handler)
 
+    # Best-effort create the log file's parent directory.  Without this,
+    # ``--log /var/log/tgdb/session.log`` (or any path under a directory
+    # the user hasn't created) raises FileNotFoundError out of
+    # ``FileHandler.__init__`` and tgdb dies before it has a chance to
+    # render any UI.  Failure of the mkdir itself (e.g. permission denied
+    # on the parent's parent) is surfaced through the existing OSError
+    # handler below as part of the FileHandler construction failure.
+    try:
+        parent = Path(log_file).parent
+        if parent and parent != Path():
+            parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
     try:
         fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     except OSError as e:
@@ -66,6 +90,10 @@ def init(log_file: str) -> None:
     )
     fh.setFormatter(fmt)
     _logger.addHandler(fh)
+    # Now that a real handler is attached, raise the level filter so
+    # DEBUG records actually flow through to the file.  The module-level
+    # default is WARNING for the ``--log``-not-given fast path.
+    _logger.setLevel(logging.DEBUG)
 
     start_time = datetime.now(timezone.utc).astimezone()
     _logger.info("=" * 60)

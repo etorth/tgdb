@@ -138,6 +138,18 @@ class CallbacksMixin:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
+        # Defensively clear the GDB-scroll widget's ``_search_active``
+        # flag too: the cmdline bar is shared between source and
+        # gdb-scroll search, so a sequence like "press / in source,
+        # focus jumps to GDB, press / in GDB" leaves both widgets
+        # thinking they own the bar.  When one search commits/cancels
+        # the bar's input is cleared but the OTHER widget's
+        # ``_search_active`` stays True, routing subsequent keystrokes
+        # to its ``_handle_search_input`` until something else clears
+        # it.  Symmetrical reset in ``on_scroll_search_*`` below.
+        gdb_w = self._get_gdb_widget(mounted_only=True)
+        if gdb_w is not None and getattr(gdb_w, "_search_active", False):
+            gdb_w._search_active = False
         self._set_mode("TGDB")
 
 
@@ -146,6 +158,9 @@ class CallbacksMixin:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
+        gdb_w = self._get_gdb_widget(mounted_only=True)
+        if gdb_w is not None and getattr(gdb_w, "_search_active", False):
+            gdb_w._search_active = False
         self._set_mode("TGDB")
 
 
@@ -188,6 +203,14 @@ class CallbacksMixin:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
+        # Symmetrical to ``on_search_commit`` — clear the source
+        # widget's ``_search_active`` so a focus-switch race doesn't
+        # leave it routing keys to its own search-input handler after
+        # the gdb-scroll search has already committed/cancelled the
+        # shared cmdline bar.
+        src = self._get_source_view(mounted_only=True)
+        if src is not None and getattr(src, "_search_active", False):
+            src._search_active = False
         self._set_mode("GDB_SCROLL")
 
 
@@ -196,6 +219,9 @@ class CallbacksMixin:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
+        src = self._get_source_view(mounted_only=True)
+        if src is not None and getattr(src, "_search_active", False):
+            src._search_active = False
         self._set_mode("GDB_SCROLL")
 
 

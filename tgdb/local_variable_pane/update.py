@@ -199,6 +199,7 @@ class LocalVariablePaneUpdateMixin:
 
         new_bindings: list[BindingEntry] = []
         seen_names: set[str] = set()
+        outer_occurrence: dict[str, int] = {}
 
         for variable in variables:
             if variable.name not in seen_names:
@@ -208,10 +209,21 @@ class LocalVariablePaneUpdateMixin:
                 continue
 
             outer_addrs = tracked_outer.get(variable.name, [])
-            if not outer_addrs:
-                continue
-
-            outer_addr = outer_addrs.pop(0)
+            if outer_addrs:
+                outer_addr = outer_addrs.pop(0)
+            else:
+                # Cold start (no previous tracking) for an outer
+                # same-named variable.  The slow path gets each
+                # ``addrs[name]`` from a single ``&name`` evaluation,
+                # which GDB resolves to the innermost scope only — so
+                # there's no way to recover a real address for the
+                # outer.  Synthesize a stable-ish key from the type
+                # string and the occurrence index so the outer at
+                # least gets a distinct BindingKey instead of
+                # colliding with the inner and being silently dropped.
+                idx = outer_occurrence.get(variable.name, 0)
+                outer_occurrence[variable.name] = idx + 1
+                outer_addr = f"{variable.type}#outer{idx}"
             new_bindings.append((variable.name, outer_addr, variable))
 
         new_binding_keys: set[BindingKey] = set()
@@ -258,6 +270,18 @@ class LocalVariablePaneUpdateMixin:
         for binding_name, binding_addr, variable in new_bindings:
             key = (binding_name, binding_addr)
             if key in current_keys:
+                continue
+            # Permanent placeholders (unparseable types whose
+            # depth > min_depth so they cannot be promoted to a real
+            # varobj) live in ``_uninitialized_nodes`` only — they do
+            # NOT appear in ``current_keys`` (which is
+            # ``_tracked.keys()``).  Without this skip, every refresh
+            # would rediscover them as "new", call
+            # ``_remove_placeholder_node`` (destroying the node), then
+            # immediately re-add a fresh placeholder.  The user sees a
+            # flicker on every stop and loses tree-cursor focus on
+            # those nodes.
+            if key in self._uninitialized_nodes:
                 continue
 
             to_add.append((binding_name, binding_addr, variable))

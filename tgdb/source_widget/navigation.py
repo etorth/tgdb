@@ -108,14 +108,37 @@ class SourceNavigationMixin:
 
     def goto_executing(self) -> None:
         if self.exe_line > 0:
-            self._last_jump_line = self.sel_line
+            self._stamp_jump_origin()
             self.move_to(self.exe_line)
 
 
     def goto_last_jump(self) -> None:
         target_line = self._last_jump_line
-        self._last_jump_line = self.sel_line
+        target_path = self._last_jump_path
+        # Capture the new origin before navigating so a second '' returns
+        # the user to where they were just before the back-jump.
+        new_path = self.source_file.path if self.source_file else ""
+        new_line = self.sel_line
+        self._last_jump_line = new_line
+        self._last_jump_path = new_path
+        if target_path and target_path != new_path:
+            # Cross-file return: the saved origin is in a different file,
+            # so route through the workspace (mirrors the forward-jump
+            # path used by global-mark navigation).
+            self.post_message(JumpGlobalMark(target_path, target_line))
+            return
         self.move_to(target_line)
+
+
+    def _stamp_jump_origin(self) -> None:
+        """Capture the current cursor as the jump-back origin.
+
+        Records both the line and the path so that a subsequent '' from a
+        different file returns to the originating file rather than just the
+        line number in whatever file is currently visible.
+        """
+        self._last_jump_line = self.sel_line
+        self._last_jump_path = self.source_file.path if self.source_file else ""
 
 
     def show_logo(self) -> None:
@@ -152,7 +175,7 @@ class SourceNavigationMixin:
             if source_file:
                 line = source_file.marks_local.get(ch)
             if line is not None:
-                self._last_jump_line = self.sel_line
+                self._stamp_jump_origin()
                 self.move_to(line)
                 return True
         else:
@@ -160,9 +183,15 @@ class SourceNavigationMixin:
             if mark:
                 path, line = mark
                 if source_file and source_file.path == path:
-                    self._last_jump_line = self.sel_line
+                    self._stamp_jump_origin()
                     self.move_to(line)
                     return True
+                # Cross-file global-mark jump: stamp the origin BEFORE
+                # posting the navigation message so a subsequent '' can
+                # return to this file at the current line.  Without this
+                # stamp the back-jump silently uses the previous in-file
+                # jump origin and goes to the wrong line.
+                self._stamp_jump_origin()
                 self.post_message(JumpGlobalMark(path, line))
                 return True
         return False
