@@ -153,8 +153,18 @@ class HighlightGroups:
         self._groups: dict[str, HighlightStyle] = {
             k: HighlightStyle(**vars(v)) for k, v in DEFAULT_GROUPS.items()
         }
+        # Case-insensitive lookup: lower(name) → canonical name.  Built from
+        # the default groups; ``set()`` extends it whenever a brand-new group
+        # is created.  This is what makes ``:highlight commandline ctermfg=red``
+        # find the existing ``CommandLine`` group instead of silently spawning
+        # a ghost ``commandline`` entry that no renderer queries.
+        self._canonical_by_lower: dict[str, str] = {
+            k.lower(): k for k in self._groups
+        }
 
-    # Legacy cgdb aliases — accepted in :highlight command
+    # Legacy cgdb aliases — accepted in :highlight command.  Aliases override
+    # the case-insensitive canonical lookup so e.g. "statusline" continues to
+    # mean "CommandLine" rather than spawning its own group.
     _ALIASES: dict[str, str] = {
         "arrow": "ExecutingLineArrow",
         "linehighlight": "ExecutingLineHighlight",
@@ -163,7 +173,10 @@ class HighlightGroups:
     }
 
     def _resolve_name(self, name: str) -> str:
-        return self._ALIASES.get(name.lower(), name)
+        lower = name.lower()
+        if lower in self._ALIASES:
+            return self._ALIASES[lower]
+        return self._canonical_by_lower.get(lower, name)
 
 
     def get(self, name: str) -> HighlightStyle:
@@ -174,6 +187,10 @@ class HighlightGroups:
     def set(self, name: str, *, fg: str = "", bg: str = "", attrs: str = "") -> None:
         """Apply :highlight command values to a group."""
         name = self._resolve_name(name)
+        if name not in self._groups:
+            # First time we've seen this group — register its canonical case
+            # so that subsequent case variants resolve back to the same key.
+            self._canonical_by_lower[name.lower()] = name
         grp = self._groups.setdefault(name, HighlightStyle())
         if fg:
             grp.fg = resolve_color(fg) or None
