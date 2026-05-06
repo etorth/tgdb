@@ -208,7 +208,11 @@ class KeyRoutingMixin:
                 elif token == "escape":
                     char = "\x1b"
                 elif token.startswith("ctrl+") and len(token) == 6:
-                    char = chr(ord(token[5].upper()) - 64)
+                    # Clamp to the C0 range — ``ctrl+5`` etc. would otherwise
+                    # compute ``chr(-11)`` and ValueError out of the replay
+                    # loop, leaking a partial map expansion to the GDB PTY.
+                    code = ord(token[5].upper()) - 64
+                    char = chr(code) if 0 <= code <= 31 else ""
                 else:
                     char = ""
                 if char:
