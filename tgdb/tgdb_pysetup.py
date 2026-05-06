@@ -192,13 +192,20 @@ def get_locals_b64():
 
             is_shadowed = name in seen_names
 
+            if is_lref:
+                ref_kind = "lvalue (&)"
+            elif is_rref:
+                ref_kind = "rvalue (&&)"
+            else:
+                ref_kind = None
+
             all_vars.append({
                 "name": name,
                 "value": val_str,
                 "type": str(symbol.type),
                 "is_arg": symbol.is_argument,
                 "is_reference": is_reference,
-                "ref_kind": "lvalue (&)" if is_lref else ("rvalue (&&)" if is_rref else None),
+                "ref_kind": ref_kind,
                 "line": decl_line,
                 "addr": addr_str,
                 "depth": depth,

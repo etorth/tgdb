@@ -495,7 +495,10 @@ class WorkspaceMixin:
         if await self._hide_workspace_item(target) is None:
             self._show_status("Unable to hide cell")
             return
-        label = self._pane_label(pane_kind) if pane_kind is not None else "pane"
+        if pane_kind is not None:
+            label = self._pane_label(pane_kind)
+        else:
+            label = "pane"
         self._show_status(f"Hid {label}")
 
 

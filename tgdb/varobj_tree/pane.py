@@ -35,7 +35,10 @@ class _VarobjTree(Tree):
                 text.stylize(self._MARKER_ACTIVE_STYLE, 0, len(marker))
             return text
 
-        label_plain = node.label.plain if hasattr(node.label, "plain") else str(node.label)
+        if hasattr(node.label, "plain"):
+            label_plain = node.label.plain
+        else:
+            label_plain = str(node.label)
         if label_plain.startswith("●"):
             text.stylize(self._MARKER_ACTIVE_STYLE, 0, 1)
 
@@ -67,7 +70,9 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
 
     def __init__(self, hl: HighlightGroups, cfg: Config | None = None, **kwargs) -> None:
         super().__init__(hl, **kwargs)
-        self._cfg = cfg if cfg is not None else Config()
+        if cfg is None:
+            cfg = Config()
+        self._cfg = cfg
         # Persist the Tree widget across compose() lifecycles so that a remount
         # (e.g. after a workspace split that re-parents this pane) does not
         # discard the populated TreeNodes built by reconciliation.
