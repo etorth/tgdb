@@ -283,9 +283,12 @@ class CommandsMixin:
         src.move_to(1)
         self._switch_to_tgdb()
 
+
+
     # ------------------------------------------------------------------
     # New feature commands
     # ------------------------------------------------------------------
+
 
     def _cmd_signal(self: "TGDBApp", args: list) -> str | None:
         """Send a signal to the inferior: :signal SIGNAME (e.g. SIGTERM, 9)."""

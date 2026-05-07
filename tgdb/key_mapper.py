@@ -35,9 +35,12 @@ class KeyMapper:
         self.timeout_enabled = True
         self.ttimeout_enabled = True
 
+
+
     # ------------------------------------------------------------------
     # Map management
     # ------------------------------------------------------------------
+
 
     def map(self, mode: str, lhs: list[str], rhs: list[str]) -> None:
         """Register a mapping from LHS token sequence to RHS token sequence."""
@@ -70,9 +73,12 @@ class KeyMapper:
                 del parent.children[token]
         return True
 
+
+
     # ------------------------------------------------------------------
     # Key feeding
     # ------------------------------------------------------------------
+
 
     def feed(self, mode: str, key_token: str) -> list[str]:
         """Feed one key-name token; return list of tokens to dispatch.

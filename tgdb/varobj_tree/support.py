@@ -20,7 +20,10 @@ class VarobjTreeSupportMixin:
             self._dynamic_varobjs.add(varobj_name)
 
 
+
+
     _MARKER_LEAF = "●"
+
 
     @staticmethod
     def _plain_label(body: str) -> Text:

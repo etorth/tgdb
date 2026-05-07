@@ -214,9 +214,12 @@ class ScrollMixin:
         self._h_offset = max(0, max_w - w)
         self.refresh()
 
+
+
     # ------------------------------------------------------------------
     # Scroll-mode rendering
     # ------------------------------------------------------------------
+
 
     def _render_scroll(self, h: int) -> Text:
         """Render scroll mode: combined scrollback + screen."""
@@ -279,9 +282,12 @@ class ScrollMixin:
             out.append_text(line)
         return out
 
+
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
+
 
     def _do_search(self, pattern: str, forward: bool) -> bool:
         lines = self._all_lines()
@@ -317,9 +323,12 @@ class ScrollMixin:
                 return True
         return False
 
+
+
     # ------------------------------------------------------------------
     # Key handling — scroll mode
     # ------------------------------------------------------------------
+
 
     def _handle_scroll_key(self, key: str, char: str) -> None:
         if char.isdigit() and char != "0":
@@ -395,9 +404,12 @@ class ScrollMixin:
         elif char == "N":
             self._do_search(self._search_pattern, not self._search_forward)
 
+
+
     # ------------------------------------------------------------------
     # Key handling — search input
     # ------------------------------------------------------------------
+
 
     def _handle_search_key(self, key: str, char: str) -> None:
         if key == "escape":

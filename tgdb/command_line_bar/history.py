@@ -136,9 +136,12 @@ class HistoryMixin:
         if max_size > 0:
             self._history = self._history[-max_size:]
 
+
+
     # ------------------------------------------------------------------
     # History navigation helpers
     # ------------------------------------------------------------------
+
 
     def _history_up(self) -> None:
         """Move to the previous history entry that matches the current prefix."""
@@ -230,9 +233,12 @@ class HistoryMixin:
         self._history_idx = -1
         self._history_prefix = ""
 
+
+
     # ------------------------------------------------------------------
     # Tab completion
     # ------------------------------------------------------------------
+
 
     def _handle_tab(self, *, reverse: bool = False) -> None:
         if self._completions:

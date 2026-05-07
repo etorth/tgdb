@@ -188,9 +188,12 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         # Lets tgdb begin teardown without waiting for PTY EOF.
         self.on_gdb_exiting: Callable[[], None] = lambda: None
 
+
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
 
     def start(self, rows: int = 24, cols: int = 80) -> None:
         """
@@ -381,9 +384,12 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                     _log.debug(f"closing {attr} raised", exc_info=True)
                 setattr(self, attr, -1)
 
+
+
     # ------------------------------------------------------------------
     # Async read loops — event-driven via loop.add_reader(), no polling
     # ------------------------------------------------------------------
+
 
     async def run_async(self) -> None:
         loop = asyncio.get_running_loop()
@@ -445,6 +451,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                     pass
             _log.info("GDB exited")
             self.on_exit()
+
+
 
 
     # Cap the partial-line buffer so a runaway writer (or a peer that

@@ -188,6 +188,8 @@ class HighlightGroups:
             k.lower(): k for k in self._groups
         }
 
+
+
     # Legacy cgdb aliases — accepted in :highlight command.  Aliases override
     # the case-insensitive canonical lookup so e.g. "statusline" continues to
     # mean "CommandLine" rather than spawning its own group.
@@ -197,6 +199,7 @@ class HighlightGroups:
         # cgdb config files use "StatusLine"; map to the new name
         "statusline": "CommandLine",
     }
+
 
     def _resolve_name(self, name: str) -> str:
         lower = name.lower()

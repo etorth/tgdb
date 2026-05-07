@@ -90,9 +90,12 @@ class ContextMenu(Widget):
         # The ContextMenu widget itself is 1×1 and hidden under the root panel.
         return Text()
 
+
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
 
     @property
     def is_open(self) -> bool:
@@ -134,9 +137,12 @@ class ContextMenu(Widget):
                 return True
         return False
 
+
+
     # ------------------------------------------------------------------
     # Forwarded from _PanelWidget
     # ------------------------------------------------------------------
+
 
     def _handle_panel_hover(self, depth: int, item_index: int) -> None:
         # Mouse motion fires this on every event over the panel.  Bail
@@ -167,9 +173,12 @@ class ContextMenu(Widget):
         if not item.has_children:
             self._submit_selection()
 
+
+
     # ------------------------------------------------------------------
     # Internal state helpers
     # ------------------------------------------------------------------
+
 
     def _entries_at_depth(self, depth: int) -> tuple[ContextMenuItem, ...]:
         items = self._items
@@ -363,18 +372,24 @@ class ContextMenu(Widget):
         if item.action:
             self.post_message(ContextMenuSelected(item.action))
 
+
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
 
     def on_unmount(self) -> None:
         for pw in self._panel_widgets:
             pw.remove()
         self._panel_widgets = []
 
+
+
     # ------------------------------------------------------------------
     # Keyboard
     # ------------------------------------------------------------------
+
 
     def on_key(self, event: events.Key) -> None:
         if not self.is_open or not self._selection_path:

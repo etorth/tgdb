@@ -188,9 +188,12 @@ class KeyRoutingMixin:
         self._pending_replay_tokens = []
         self._replay_key_sequence(tokens)
 
+
+
     # ------------------------------------------------------------------
     # imap support — GDB-mode key mapper
     # ------------------------------------------------------------------
+
 
     def _imap_feed(self: "TGDBApp", key: str) -> "list[str] | None":
         """Feed one key token to the GDB-mode mapper.
@@ -371,9 +374,12 @@ class KeyRoutingMixin:
 
         return False
 
+
+
     # ------------------------------------------------------------------
     # Global key handling
     # ------------------------------------------------------------------
+
 
     def _point_in_widget(self: "TGDBApp", widget, screen_x: int, screen_y: int) -> bool:
         if widget is None:

@@ -42,13 +42,11 @@ original; only import paths and minor formatting have been adjusted.
 
 import functools
 import re
-from typing import (
-    Any,
-    Callable,
-    Iterator,
-    Match,
-    Pattern,
-)
+from collections.abc import Callable, Iterator
+from typing import Any
+
+Match = re.Match
+Pattern = re.Pattern
 
 
 # =========================================================================

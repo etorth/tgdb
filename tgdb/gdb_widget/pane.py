@@ -76,9 +76,12 @@ class GDBWidget(PaneBase):
         yield from super().compose()
         yield self._content
 
+
+
     # ------------------------------------------------------------------
     # Key and refresh delegation
     # ------------------------------------------------------------------
+
 
     def on_key(self, event: events.Key) -> None:
         self._content.on_key(event)
@@ -89,9 +92,12 @@ class GDBWidget(PaneBase):
             self._content.refresh(*args, **kwargs)
         return super().refresh(*args, **kwargs)
 
+
+
     # ------------------------------------------------------------------
     # Attribute delegation to _GDBContent
     # ------------------------------------------------------------------
+
 
     def __setattr__(self, name: str, value) -> None:
         if name in _GDB_DELEGATE_SET and "_content" in self.__dict__:

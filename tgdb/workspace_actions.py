@@ -165,9 +165,12 @@ class WorkspaceMixin:
             return
         supervise(pane.prime_function("main"), name="disasm-pane-prime-main")
 
+
+
     # ------------------------------------------------------------------
     # Pane queries
     # ------------------------------------------------------------------
+
 
     def _pane_widget(self: "TGDBApp", pane_kind: str) -> Widget | None:
         descriptor = self._pane_descriptors.get(pane_kind)
@@ -208,9 +211,12 @@ class WorkspaceMixin:
             return None
         return descriptor.create()
 
+
+
     # ------------------------------------------------------------------
     # Context menu helpers
     # ------------------------------------------------------------------
+
 
     def _get_context_menu(self: "TGDBApp") -> ContextMenu | None:
         try:
@@ -313,9 +319,12 @@ class WorkspaceMixin:
         if restore_focus:
             self._restore_focus_after_context_menu()
 
+
+
     # ------------------------------------------------------------------
     # Workspace tree operations
     # ------------------------------------------------------------------
+
 
     def _find_workspace_item(
         self: "TGDBApp", widget: Widget | None
@@ -450,9 +459,12 @@ class WorkspaceMixin:
             await new_container.set_items([target, EmptyPane(self.hl)])
         return True
 
+
+
     # ------------------------------------------------------------------
     # Context menu message handlers
     # ------------------------------------------------------------------
+
 
     def _get_parent_container(
         self: "TGDBApp", widget: Widget

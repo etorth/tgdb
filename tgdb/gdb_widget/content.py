@@ -67,18 +67,24 @@ class _GDBContent(ScrollMixin, Widget):
         self._dot_pending: bool = False
         self._gdb_resize_notified: tuple[int, int] = (24, 80)
 
+
+
     # ------------------------------------------------------------------
     # Scrollback helpers
     # ------------------------------------------------------------------
+
 
     def _push_to_scrollback(self, text: Text, raw=None) -> None:
         """Append one line to both scrollback deques (text for display, raw for restoration)."""
         self._scrollback.append(text)
         self._scrollback_raw.append(raw)  # dict copy of pyte row, or None
 
+
+
     # ------------------------------------------------------------------
     # pyte initialisation / resize
     # ------------------------------------------------------------------
+
 
     def _init_pyte(self, rows: int, cols: int) -> None:
         """Create or resize the pyte terminal, preserving existing content."""
@@ -177,9 +183,12 @@ class _GDBContent(ScrollMixin, Widget):
         self._screen.cursor.y = min(new_rows - 1, cy + n_restore)
         self._screen.dirty.update(range(new_rows))
 
+
+
     # ------------------------------------------------------------------
     # Feed raw GDB console bytes into the pyte emulator
     # ------------------------------------------------------------------
+
 
     def feed_bytes(self, data: bytes) -> None:
         """
@@ -226,9 +235,12 @@ class _GDBContent(ScrollMixin, Widget):
 
         return None
 
+
+
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
+
 
     def _visible_height(self) -> int:
         return max(1, self.size.height)
@@ -307,9 +319,12 @@ class _GDBContent(ScrollMixin, Widget):
             result.append("\n")
         return result
 
+
+
     # ------------------------------------------------------------------
     # Resize — keep pyte screen in sync with widget size
     # ------------------------------------------------------------------
+
 
     def on_resize(self, event: events.Resize) -> None:
         new_rows = event.size.height
@@ -323,6 +338,8 @@ class _GDBContent(ScrollMixin, Widget):
             self.resize_gdb(new_rows, new_cols)
             self._gdb_resize_notified = (new_rows, new_cols)
         self.refresh()
+
+
 
     # ------------------------------------------------------------------
     # Scroll helpers
@@ -374,6 +391,7 @@ class _GDBContent(ScrollMixin, Widget):
         "f11": b"\x1b[23~",
         "f12": b"\x1b[24~",
     }
+
 
     def on_key(self, event: events.Key) -> None:
         key = event.key

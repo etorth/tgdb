@@ -80,7 +80,10 @@ class SourceViewRendering:
                 result.append("\n")
         return result
 
+
+
     # Width of the line-number field (minimum 1, grows with file size)
+
 
     def _nr_width(self) -> int:
         if self.source_file:

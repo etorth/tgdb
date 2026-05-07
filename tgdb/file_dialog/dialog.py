@@ -167,9 +167,12 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
         self._body_message: str | None = None
         self.can_focus = True
 
+
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
 
     @property
     def files(self) -> list[str]:

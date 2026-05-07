@@ -117,9 +117,12 @@ class _TitleBar(Widget):
             text = " " * width
         return Text(text, style=style, no_wrap=True, overflow="crop")
 
+
+
     # ------------------------------------------------------------------
     # Mouse drag — walk up to find the right vertical container
     # ------------------------------------------------------------------
+
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.button == 1:

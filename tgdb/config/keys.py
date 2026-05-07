@@ -78,6 +78,7 @@ class ConfigKeyMixin:
         "\\": "|", "`": "~",
     }
 
+
     def _key_token(self, name: str) -> str:
         if name in self._KEY_TOKENS:
             return self._KEY_TOKENS[name]

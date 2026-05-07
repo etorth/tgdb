@@ -125,9 +125,12 @@ class TGDBScreen:
     def _set_app(self, app: "TGDBApp") -> None:
         self._app = app
 
+
+
     # ------------------------------------------------------------------
     # Read-only queries (synchronous)
     # ------------------------------------------------------------------
+
 
     def size(self) -> tuple[int, int]:
         """Return ``(width, height)`` of the terminal in cells."""
@@ -151,9 +154,12 @@ class TGDBScreen:
         """Return a lazy handle for the workspace cell at *address*."""
         return PaneHandle(self, list(address))
 
+
+
     # ------------------------------------------------------------------
     # Write operations — async coroutines; call with ``await``
     # ------------------------------------------------------------------
+
 
     async def close_all_panes(self) -> None:
         """Remove all workspace panes and reset to a single empty cell."""
@@ -183,9 +189,12 @@ class TGDBScreen:
         """Delete the workspace cell at *address* (equivalent to context-menu Delete)."""
         await self._do_close(list(address))
 
+
+
     # ------------------------------------------------------------------
     # Async implementation helpers
     # ------------------------------------------------------------------
+
 
     def _get_widget_at(self, address: list[int]):
         """Synchronously navigate the live widget tree to the node at *address*."""

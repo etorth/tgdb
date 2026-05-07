@@ -120,9 +120,12 @@ class ParsingMixin:
             self.breakpoints = [b for b in self.breakpoints if b.number != num]
             self.on_breakpoints(list(self.breakpoints))
 
+
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
 
     def _parse_frame(self, data: dict) -> Frame:
         if not isinstance(data, dict):

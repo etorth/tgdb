@@ -111,9 +111,12 @@ class LayoutMixin:
         gdb_size = max(0, axis - src_size)
         return src_size, gdb_size
 
+
+
     # ------------------------------------------------------------------
     # Resize / orientation message handlers
     # ------------------------------------------------------------------
+
 
     def on_resize_source(self: "TGDBApp", msg: ResizeSource) -> None:
         is_horizontal = self.cfg.winsplitorientation == "horizontal"
@@ -180,9 +183,12 @@ class LayoutMixin:
         self._preserve_window_shift_once = True
         self._apply_split()
 
+
+
     # ------------------------------------------------------------------
     # Apply split
     # ------------------------------------------------------------------
+
 
     def _apply_split(self: "TGDBApp") -> None:
         split = self.cfg.winsplit.lower()
