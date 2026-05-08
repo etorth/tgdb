@@ -4,12 +4,12 @@
 
 int main()
 {
-    std::variant<std::string, std::vector<int>, int, float> var {};
+    std::variant<std::string, std::vector<int>, int, float> v {};
 
-    var = std::string{"string"};
-    var = std::vector<int>{1, 2, 3};
-    var = int(20);
-    var = float(0.25);
+    v = std::string{"string"};
+    v = std::vector<int>{1, 2, 3};
+    v = int(20);
+    v = float(0.25);
 
     return 0;
 }
