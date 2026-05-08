@@ -67,10 +67,10 @@ class VarobjMixin:
         if limit > 0:
             cmd = (
                 f"-var-list-children --all-values"
-                f" {varobj_name} {from_idx} {from_idx + limit}"
+                f" {quote_mi_string(varobj_name)} {from_idx} {from_idx + limit}"
             )
         else:
-            cmd = f"-var-list-children --all-values {varobj_name}"
+            cmd = f"-var-list-children --all-values {quote_mi_string(varobj_name)}"
         result = await self.mi_command_async(cmd, raise_on_error=True)
         payload = result.get("payload") or {}
         has_more = payload.get("has_more", "0") == "1"
@@ -97,7 +97,10 @@ class VarobjMixin:
         """Delete a varobj and its children."""
         _log.debug(f"var_delete {varobj_name}")
         try:
-            await self.mi_command_async(f"-var-delete {varobj_name}", raise_on_error=True)
+            await self.mi_command_async(
+                f"-var-delete {quote_mi_string(varobj_name)}",
+                raise_on_error=True,
+            )
         except RuntimeError:
             pass
 
@@ -215,7 +218,7 @@ class VarobjMixin:
         quickly even when the container has many (or garbage-sized) children.
         """
         result = await self.mi_command_async(
-            f"-var-evaluate-expression {varobj_name}",
+            f"-var-evaluate-expression {quote_mi_string(varobj_name)}",
             raise_on_error=True,
         )
         payload = result.get("payload") or {}
@@ -231,8 +234,9 @@ class VarobjMixin:
         1.5 s) for dynamic/pretty-printed varobjs whose pretty-printer may
         iterate a huge (possibly garbage) number of elements.
         """
+        target = "*" if varobj_name == "*" else quote_mi_string(varobj_name)
         result = await self.mi_command_async(
-            f"-var-update --all-values {varobj_name}",
+            f"-var-update --all-values {target}",
             timeout=timeout,
             raise_on_error=True,
         )

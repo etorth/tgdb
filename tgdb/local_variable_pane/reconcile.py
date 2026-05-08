@@ -464,9 +464,11 @@ class LocalVariablePaneReconcileMixin:
         to_add = self._build_added_bindings(current_keys, new_bindings)
         to_reanchor = self._build_reanchor_bindings(current_keys, new_bindings, shadowed_keys)
 
+        dynamic_root_overrides = self._build_dynamic_root_value_overrides(variables)
+
         no_change = not to_remove and not to_add and not to_reanchor and new_frame_key == self._frame_key
         if no_change:
-            changelist = await self._update_unchanged_varobjs(gen, set())
+            changelist = await self._update_unchanged_varobjs(gen, set(), dynamic_root_overrides)
             if changelist or self._rebuild_gen == gen:
                 self._sync_shadow_labels(shadowed_keys)
             return
@@ -477,7 +479,7 @@ class LocalVariablePaneReconcileMixin:
         self._frame_key = new_frame_key
 
         stale_varobjs = self._build_stale_varobjs(to_remove, to_reanchor)
-        changelist = await self._update_unchanged_varobjs(gen, stale_varobjs)
+        changelist = await self._update_unchanged_varobjs(gen, stale_varobjs, dynamic_root_overrides)
         if self._rebuild_gen != gen:
             return
 
@@ -778,6 +780,31 @@ class LocalVariablePaneReconcileMixin:
             node.set_label(label)
 
             if change.get("new_num_children") is None or not data.get("loaded"):
+                continue
+
+            if varobj_name in self._dynamic_varobjs:
+                # A dynamic printer reported its child count changed.
+                # This covers two cases:
+                #   1. Container resize (e.g. std::vector push_back) — the
+                #      old children remain valid, only the count grew.
+                #   2. Printer shape transition (e.g. std::variant switched
+                #      alternative, std::optional toggled, std::any
+                #      rebound) — old child names like ``[contained value]``
+                #      are now nonsensical against the new layout
+                #      ``[0],[1],...``, but GDB's varobj cache keeps them
+                #      internally and a follow-up ``-var-list-children``
+                #      triggers ``varobj.c:install_new_value`` assertion
+                #      (``!var->value->lazy()`` / ``!print_value.empty()``)
+                #      and crashes GDB.
+                # We cannot tell case (1) from (2) reliably from the change
+                # payload alone — ``displayhint`` does not move on
+                # ``std::variant`` because its printer always reports
+                # ``"array"``.  Be conservative and recreate on either:
+                # the only cost in case (1) is losing expansion state on
+                # resize, while case (2) is a hard crash.
+                new_displayhint = change.get("displayhint", data.get("displayhint", ""))
+                data["displayhint"] = new_displayhint
+                self._invalidate_typechanged_binding(varobj_name)
                 continue
 
             data["loaded"] = False

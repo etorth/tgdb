@@ -88,7 +88,40 @@ class LocalVariablePaneUpdateMixin:
         return safe_to_update
 
 
-    async def _do_var_update(self) -> list[dict]:
+    def _build_dynamic_root_value_overrides(
+        self,
+        variables: list[LocalVariable],
+    ) -> dict[str, str]:
+        """Map dynamic-root varobj name -> fresh value from ``get_locals_b64()``.
+
+        GDB's ``-var-evaluate-expression`` returns a stale (or garbage)
+        ``to_string()`` for dynamic varobjs whose pretty-printer's
+        contained alternative changed under fixed storage — e.g.
+        ``std::variant`` flipping between ``string`` and ``vector<int>``,
+        ``std::optional`` toggling, ``std::any`` rebinding.  The
+        ``get_locals_b64()`` helper does a fresh CLI-style evaluation per
+        stop and returns the correct printer output, so we use it to
+        override the label refresh for the matching dynamic root varobjs.
+        Children and non-root dynamic varobjs are not in the locals
+        snapshot and continue to use ``-var-evaluate-expression``.
+        """
+        overrides: dict[str, str] = {}
+        if not self._dynamic_varobjs or not variables:
+            return overrides
+
+        for variable in variables:
+            addr = variable.addr or variable.type
+            varobj_name = self._tracked.get((variable.name, addr), "")
+            if varobj_name and varobj_name in self._dynamic_varobjs:
+                overrides[varobj_name] = variable.value
+
+        return overrides
+
+
+    async def _do_var_update(
+        self,
+        dynamic_root_overrides: dict[str, str] | None = None,
+    ) -> list[dict]:
         """Update all tracked varobjs and return a merged changelist."""
         if not self._varobj_names:
             return []
@@ -110,19 +143,26 @@ class LocalVariablePaneUpdateMixin:
 
         safe_dynamic_updated: set[str] = set()
         garbage_dynamic: set[str] = set()
+        overrides = dynamic_root_overrides or {}
 
         if self._var_eval_expr:
             for varobj_name in self._dynamic_varobjs:
-                try:
-                    new_value = await self._var_eval_expr(varobj_name)
+                override = overrides.get(varobj_name)
+                if override is not None:
+                    new_value = override
                     changelist.append({"name": varobj_name, "value": new_value})
-                    _log.debug(f"dynamic root {varobj_name} value refreshed: {new_value!r}")
-                except Exception as exc:
-                    _log.warning(f"var_evaluate_expression {varobj_name} failed: {exc}")
-                    new_value = ""
+                    _log.debug(f"dynamic root {varobj_name} value from locals: {new_value!r}")
+                else:
+                    try:
+                        new_value = await self._var_eval_expr(varobj_name)
+                        changelist.append({"name": varobj_name, "value": new_value})
+                        _log.debug(f"dynamic root {varobj_name} value refreshed: {new_value!r}")
+                    except Exception as exc:
+                        _log.warning(f"var_evaluate_expression {varobj_name} failed: {exc}")
+                        new_value = ""
 
                 length = self._parse_container_length(new_value)
-                if length is not None and length < self._SAFE_CHILD_COUNT:
+                if length is None or length < self._SAFE_CHILD_COUNT:
                     try:
                         result = await self._var_update(varobj_name, timeout=10.0)
                     except Exception as exc:
@@ -340,12 +380,17 @@ class LocalVariablePaneUpdateMixin:
         return stale_varobjs
 
 
-    async def _update_unchanged_varobjs(self, gen: int, stale_varobjs: set[str]) -> list[dict]:
+    async def _update_unchanged_varobjs(
+        self,
+        gen: int,
+        stale_varobjs: set[str],
+        dynamic_root_overrides: dict[str, str] | None = None,
+    ) -> list[dict]:
         if not self._varobj_names:
             return []
 
         try:
-            changelist = await self._do_var_update()
+            changelist = await self._do_var_update(dynamic_root_overrides)
         except Exception:
             return []
 
