@@ -145,8 +145,24 @@ class LocalVariablePaneUpdateMixin:
         garbage_dynamic: set[str] = set()
         overrides = dynamic_root_overrides or {}
 
+        # Iterate only dynamic ROOT varobjs.  ``_dynamic_varobjs`` also
+        # contains dynamic descendants — children that GDB marked
+        # ``dynamic="1"`` (e.g. ``var1.[contained value]``, the
+        # std::string contained inside a std::variant) — but those get
+        # their changes piggybacked through the root's ``-var-update``
+        # changelist.  Issuing ``-var-update`` directly on a stale
+        # dynamic CHILD whose parent printer's contained type just
+        # changed (variant alternative switch, optional toggle, any
+        # rebind) crashes GDB at gdb/varobj.c:1298 with
+        # ``install_new_value: Assertion '!var->value->lazy()'`` because
+        # GDB's varobj cache for that child is in an inconsistent state
+        # post-transition.  Roots are tracked in ``_varobj_names``;
+        # filter against it to limit the iteration to roots only.
+        root_set = set(self._varobj_names)
+        dynamic_roots = [n for n in self._dynamic_varobjs if n in root_set]
+
         if self._var_eval_expr:
-            for varobj_name in self._dynamic_varobjs:
+            for varobj_name in dynamic_roots:
                 override = overrides.get(varobj_name)
                 if override is not None:
                     new_value = override
