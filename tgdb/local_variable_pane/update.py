@@ -77,10 +77,21 @@ class LocalVariablePaneUpdateMixin:
             if varobj_name in self._dynamic_varobjs:
                 continue
 
-            if _is_child_of_any(varobj_name, safe_dynamic_updated):
-                continue
-
-            if _is_child_of_any(varobj_name, garbage_dynamic):
+            # Exclude any varobj that is a descendant of ANY dynamic
+            # varobj — including non-root ones such as
+            # ``var36.public.index`` (a std::vector that is a member of
+            # a non-dynamic struct).  Their children's value/access
+            # info is owned by the parent printer and refreshes through
+            # the parent's ``-var-update`` cascade.  Issuing
+            # ``-var-update`` on the child directly can hit GDB
+            # asserts (e.g. ``c-varobj.c:860 cplus_describe_child:
+            # Assertion 'access' failed`` on
+            # ``var36.public.index.[N]``) that crash the entire debug
+            # session.  Checking ``self._dynamic_varobjs`` here
+            # subsumes the prior ``safe_dynamic_updated`` /
+            # ``garbage_dynamic`` checks (those are subsets) and also
+            # catches the non-root case those did not cover.
+            if _is_child_of_any(varobj_name, self._dynamic_varobjs):
                 continue
 
             safe_to_update.append(varobj_name)
