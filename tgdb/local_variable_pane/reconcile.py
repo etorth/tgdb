@@ -440,6 +440,15 @@ class LocalVariablePaneReconcileMixin:
         except Exception:
             return
 
+        # Reset the shape-transition tracker — _apply_changelist (run
+        # later inside _update_unchanged_varobjs) populates this set
+        # when it drops a binding due to a dynamic printer's child
+        # shape change (e.g. std::variant alternative switch).  We
+        # consume the set after _apply_changelist returns to re-add
+        # the invalidated bindings within the same reconciliation
+        # pass, so the user does not see the variable disappear.
+        self._shape_readd_keys = set()
+
         # Fast path: variables published by _publish_locals_async() carry addr
         # and is_shadowed directly from GDB Python — no extra MI round-trips.
         if variables and variables[0].addr:
@@ -469,6 +478,17 @@ class LocalVariablePaneReconcileMixin:
         no_change = not to_remove and not to_add and not to_reanchor and new_frame_key == self._frame_key
         if no_change:
             changelist = await self._update_unchanged_varobjs(gen, set(), dynamic_root_overrides)
+            if self._rebuild_gen != gen:
+                return
+            # Re-add bindings that _apply_changelist invalidated due to a
+            # dynamic-printer shape transition.  Empty fast-return when
+            # there were none, which is the common case.
+            if self._shape_readd_keys:
+                if not await self._readd_shape_transitioned_bindings(
+                    gen, tree, new_bindings, shadowed_keys,
+                ):
+                    return
+                self._sort_root_children_by_line(tree, new_bindings)
             if changelist or self._rebuild_gen == gen:
                 self._sync_shadow_labels(shadowed_keys)
             return
@@ -482,6 +502,16 @@ class LocalVariablePaneReconcileMixin:
         changelist = await self._update_unchanged_varobjs(gen, stale_varobjs, dynamic_root_overrides)
         if self._rebuild_gen != gen:
             return
+
+        # Re-add shape-transitioned bindings before the to_reanchor /
+        # to_remove / to_add processing so the rest of the pipeline
+        # operates on a tree whose invalidated nodes have been
+        # restored to their post-transition state.
+        if self._shape_readd_keys:
+            if not await self._readd_shape_transitioned_bindings(
+                gen, tree, new_bindings, shadowed_keys,
+            ):
+                return
 
         to_reanchor = self._demote_out_of_scope_reanchors(to_reanchor, changelist, to_remove)
         if self._rebuild_gen != gen:
@@ -692,23 +722,28 @@ class LocalVariablePaneReconcileMixin:
             self._set_node_marker_active(node, new_marker_active)
 
 
-    def _invalidate_typechanged_binding(self, varobj_name: str) -> None:
+    def _invalidate_typechanged_binding(self, varobj_name: str) -> BindingKey | None:
         """Drop local tracking for a varobj whose type just changed.
 
         Called from ``_apply_changelist`` when the changelist reports
-        ``type_changed=true``.  Removes the BindingKey from ``_tracked``,
-        purges varobj/child mappings, removes the now-stale TreeNode, and
-        supervises an async ``-var-delete`` so the old GDB-side varobj
-        does not leak.  The next reconciliation pass sees the binding
-        absent from ``_tracked`` and re-creates it via the normal
-        add-binding path with the current type's metadata.
+        ``type_changed=true`` or when a dynamic printer's child shape
+        transition makes the GDB-side varobj cache inconsistent.
+        Removes the BindingKey from ``_tracked``, purges varobj/child
+        mappings, removes the now-stale TreeNode, and supervises an
+        async ``-var-delete`` so the old GDB-side varobj does not leak.
+
+        Returns the dropped BindingKey (or ``None`` if no matching key
+        was found) so the caller can schedule an immediate re-add in
+        the same reconciliation pass.
         """
         # Find the BindingKey that points at this varobj so we can drop
         # it from ``_tracked`` — otherwise the next reconciliation
         # treats the binding as still-present and skips re-creation.
+        dropped_key: BindingKey | None = None
         for binding_key, tracked_name in list(self._tracked.items()):
             if tracked_name == varobj_name:
                 self._tracked.pop(binding_key, None)
+                dropped_key = binding_key
                 break
 
         node = self._varobj_to_node.get(varobj_name)
@@ -724,6 +759,123 @@ class LocalVariablePaneReconcileMixin:
                 self._delete_varobj_safe(varobj_name),
                 name="locals-typechanged-delete",
             )
+
+        return dropped_key
+
+
+    async def _readd_shape_transitioned_bindings(
+        self,
+        gen: int,
+        tree: Tree,
+        new_bindings: list[BindingEntry],
+        shadowed_keys: set[BindingKey],
+    ) -> bool:
+        """Re-create bindings that ``_apply_changelist`` invalidated.
+
+        Consumes ``self._shape_readd_keys`` (populated by
+        ``_apply_changelist`` when a dynamic printer's child shape
+        transition forced a binding to be dropped to avoid a GDB
+        ``install_new_value`` assertion).  For each dropped key whose
+        binding is still present in ``new_bindings`` (i.e. the
+        variable did not also go out of scope), re-creates the
+        varobj via the normal add-binding path so the user sees the
+        variable transition to its new value rather than disappearing
+        from the pane.
+
+        The fresh varobj has a clean GDB-side printer state so a
+        subsequent ``-var-list-children`` is safe.
+
+        Returns True on success or no-op.  Returns False when the
+        reconciliation generation advanced mid-flight, signalling
+        the caller to abort.
+        """
+        keys = self._shape_readd_keys
+        # Consume the set so a subsequent reconciliation pass does
+        # not re-process the same keys.
+        self._shape_readd_keys = set()
+        if not keys:
+            return True
+
+        readd_bindings = [
+            b for b in new_bindings if (b[0], b[1]) in keys
+        ]
+        if not readd_bindings:
+            return True
+
+        # No expansions to restore: the variant alternative just
+        # changed, the old child set is gone, and any saved
+        # expansion would have referred to children that no longer
+        # exist (e.g. ``[contained value]``).  Recreate collapsed.
+        return await self._add_new_bindings(
+            gen, tree, readd_bindings, set(), shadowed_keys, new_bindings,
+        )
+
+
+    def _is_dynamic_shape_transition(self, varobj_name: str, change: dict) -> bool:
+        """Return True if a dynamic varobj's child shape just changed
+        in a way that makes GDB's varobj cache inconsistent.
+
+        GDB's varobj cache crashes (``gdb/varobj.c:1298``,
+        ``install_new_value`` assertion) on a follow-up
+        ``-var-list-children`` after the dynamic printer's children
+        change name pattern — e.g. std::variant flips from a
+        string-like alternative (single child named
+        ``[contained value]``) to a vector alternative (multiple
+        children named ``[0],[1],[2]``).  ``-var-update`` reports the
+        new layout via ``new_children`` plus ``new_num_children``, but
+        keeps stale entries (like ``[contained value]``) in its
+        internal cache, so a refresh asserts.
+
+        Benign cases that look the same on the surface but DO NOT
+        crash GDB:
+          * std::vector / list / map growing or shrinking — the kept
+            children's names (``[0],[1],...``) remain valid against
+            the new layout, so GDB's cache stays consistent.
+
+        Distinguishing test (cheap, no MI round-trip):
+          * Walk the direct tracked children of ``varobj_name`` and
+            collect their ``exp`` strings.
+          * If ``new_num_children == 0`` while we have tracked
+            children, every tracked child is now invalid → transition.
+          * Otherwise compute the expected exp set for the new
+            array-style layout (``[0]..[new_num_children-1]``) and
+            check that every tracked child's exp falls inside it.
+            If any tracked exp is not in the expected set, GDB has
+            kept a child whose name does not match the new layout
+            (the variant ``[contained value]`` case) → transition.
+
+        For non-array-indexed printers (e.g. associative containers
+        with composite key exps) this can mis-classify a benign
+        update as a transition; the cost is an extra recreate, not a
+        crash, so we err on the safe side.
+        """
+        try:
+            new_num_children = int(change.get("new_num_children", "0"))
+        except (TypeError, ValueError):
+            return True
+
+        prefix = f"{varobj_name}."
+        tracked_exps: list[str] = []
+        for name, node in self._varobj_to_node.items():
+            if not name.startswith(prefix):
+                continue
+            # Direct children only — the trailing segment must not
+            # contain a ``.`` (which would mark a grandchild).
+            if "." in name[len(prefix):]:
+                continue
+            data = node.data if isinstance(node.data, dict) else {}
+            exp = data.get("exp", "")
+            if exp:
+                tracked_exps.append(exp)
+
+        if not tracked_exps:
+            return False
+
+        if new_num_children == 0:
+            return True
+
+        expected_exps = {f"[{i}]" for i in range(new_num_children)}
+        return any(exp not in expected_exps for exp in tracked_exps)
 
 
     def _apply_changelist(self, changelist: list[dict], skip_varobjs: frozenset[str] = frozenset()) -> None:
@@ -782,29 +934,36 @@ class LocalVariablePaneReconcileMixin:
             if change.get("new_num_children") is None or not data.get("loaded"):
                 continue
 
-            if varobj_name in self._dynamic_varobjs:
-                # A dynamic printer reported its child count changed.
-                # This covers two cases:
-                #   1. Container resize (e.g. std::vector push_back) — the
-                #      old children remain valid, only the count grew.
-                #   2. Printer shape transition (e.g. std::variant switched
-                #      alternative, std::optional toggled, std::any
-                #      rebound) — old child names like ``[contained value]``
-                #      are now nonsensical against the new layout
-                #      ``[0],[1],...``, but GDB's varobj cache keeps them
-                #      internally and a follow-up ``-var-list-children``
-                #      triggers ``varobj.c:install_new_value`` assertion
-                #      (``!var->value->lazy()`` / ``!print_value.empty()``)
-                #      and crashes GDB.
-                # We cannot tell case (1) from (2) reliably from the change
-                # payload alone — ``displayhint`` does not move on
-                # ``std::variant`` because its printer always reports
-                # ``"array"``.  Be conservative and recreate on either:
-                # the only cost in case (1) is losing expansion state on
-                # resize, while case (2) is a hard crash.
+            if (
+                varobj_name in self._dynamic_varobjs
+                and self._is_dynamic_shape_transition(varobj_name, change)
+            ):
+                # Dynamic printer's child names changed shape in a way
+                # that makes GDB's varobj cache inconsistent — e.g.
+                # std::variant flipped from string (child
+                # ``[contained value]``) to vector (children
+                # ``[0],[1],[2]``).  A follow-up
+                # ``-var-list-children`` would crash GDB at
+                # ``varobj.c:1298 install_new_value`` because GDB
+                # keeps the stale ``[contained value]`` child in its
+                # internal cache against an array-indexed layout.
+                #
+                # Drop the binding (which deletes the GDB-side varobj)
+                # and record the dropped BindingKey so
+                # ``_update_variables`` can re-add it from the
+                # current locals snapshot in the same reconciliation
+                # pass.  The user sees the variable transition to its
+                # new value rather than disappearing.
+                #
+                # Benign growth (vector::push_back, set::insert,
+                # etc.) is filtered out by
+                # ``_is_dynamic_shape_transition`` and falls through
+                # to the normal clear-children path below.
                 new_displayhint = change.get("displayhint", data.get("displayhint", ""))
                 data["displayhint"] = new_displayhint
-                self._invalidate_typechanged_binding(varobj_name)
+                dropped_key = self._invalidate_typechanged_binding(varobj_name)
+                if dropped_key is not None:
+                    self._shape_readd_keys.add(dropped_key)
                 continue
 
             data["loaded"] = False

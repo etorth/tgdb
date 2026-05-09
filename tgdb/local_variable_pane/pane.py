@@ -131,6 +131,14 @@ class LocalVariablePane(
         self._uninitialized_nodes: dict[tuple[str, str], TreeNode] = {}
         self._frame_key: tuple | None = None
         self._saved_expansions: dict[tuple, set[tuple[tuple[str, int], ...]]] = {}
+        # Transient set populated by _apply_changelist when a dynamic
+        # printer's children change shape (e.g. std::variant alternative
+        # switch).  Each enclosing _update_variables call resets and then
+        # consumes this set after _apply_changelist returns to re-add the
+        # invalidated bindings in the same reconciliation pass.  Kept
+        # on the pane (not as a method-local) so the sync _apply_changelist
+        # mixin method can communicate with the async _update_variables.
+        self._shape_readd_keys: set[tuple[str, str]] = set()
 
 
     def title(self) -> str:
