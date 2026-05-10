@@ -9,9 +9,14 @@ For every bug we record:
 - **Symptom** — what the user sees.
 - **Trigger** — the exact MI sequence that provokes it.
 - **Crash signature** — the assert / error string GDB emits.
-- **Reproducer** — a standalone script we can run to verify the bug still
-  exists on a given GDB build.  Reproducers should depend only on `gdb`,
-  `g++`, and the Python standard library so they survive across machines.
+- **Reproducer** — a standalone script under
+  [`../known_gdb_bug_reproduce/`](../known_gdb_bug_reproduce/), one
+  file per bug, depending only on `gdb`, `g++`, and the Python
+  standard library.  `## Bug N` in this document maps to
+  `bug_N.py` on disk.  Run with `python3 known_gdb_bug_reproduce/bug_N.py`;
+  exit code 0 means the bug is reproduced on the current GDB build,
+  1 means it is not (assume fixed upstream or behaviour-different
+  build), 2 means `gdb`/`g++` missing, 3 means setup diverged.
 - **Affected GDB / libstdc++ versions** — what we have observed.
 - **tgdb workaround** — commit + file references for the workaround logic
   in this repo, plus a note on the limit of the workaround.
@@ -104,263 +109,10 @@ the transition.  This is a UX cost, not correctness — the alternative
 
 ### Reproducer
 
-Save the following script and run with `python3` while
-`gdb` and `g++` are on `$PATH`.  Exit codes:
+Run [`../known_gdb_bug_reproduce/bug_1.py`](../known_gdb_bug_reproduce/bug_1.py).
+Exit code 0 = bug reproduced (GDB asserted / exited), 1 = not reproduced,
+2 = `gdb`/`g++` not in PATH, 3 = setup diverged.
 
-- `0` — bug confirmed (GDB asserted / exited).
-- `1` — bug not reproduced (GDB completed the final command cleanly).
-- `2` — `gdb` or `g++` not in PATH.
-- `3` — printer behavior diverged from the hypothesis (e.g. no
-  `[contained value]` child for the string-holding variant), so we
-  could not even set up the trigger.
-
-```python
-"""
-Reproducer for GDB std::variant alternative-switch crash.
-
-Hypothesis under test:
-  When -var-create is used on a std::variant and -var-list-children
-  registers a child named ``[contained value]`` while the variant
-  holds a string-like alternative, then the variant is reassigned to
-  a vector<int> alternative and -var-update reports the new array-
-  indexed shape, a follow-up -var-list-children on the same varobj
-  crashes GDB at gdb/varobj.c:install_new_value.
-
-Driver: spawn ``gdb --interpreter=mi``, drive it with tokenized MI
-commands.  After each command, read until the matching tokenized
-response (^done/^error/^running/^exit) arrives.  Track *stopped
-events separately so we can wait for inferior stops after exec
-commands.
-"""
-
-from __future__ import annotations
-
-import os
-import re
-import shutil
-import subprocess
-import sys
-import tempfile
-import textwrap
-import time
-
-
-CPP_SOURCE = textwrap.dedent("""
-    #include <string>
-    #include <vector>
-    #include <variant>
-
-    int main()
-    {
-        std::variant<std::string, std::vector<int>> v {};
-        v = std::string{"string"};
-        v = std::vector<int>{1,2,3};
-        return 0;
-    }
-""").lstrip()
-
-
-def compile_test(cpp_path: str, exe_path: str) -> None:
-    subprocess.run(
-        ["g++", "-O0", "-g", "-std=c++17", "-o", exe_path, cpp_path],
-        check=True,
-    )
-
-
-_RESULT_RE = re.compile(r"^(\d+)\^(done|error|running|exit|connected)\b")
-
-
-class MISession:
-    def __init__(self, exe_path: str) -> None:
-        self.proc = subprocess.Popen(
-            [
-                "gdb",
-                "--interpreter=mi",
-                "--quiet",
-                "-ex", "set debuginfod enabled off",
-                "-ex", "set print pretty on",
-                exe_path,
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        self._token = 0
-        self._buf: list[str] = []
-        self._stopped_pending = False
-        self._drain_initial()
-
-    def _readline(self, timeout: float = 5.0) -> str | None:
-        # Synchronous readline with a wall-clock deadline driven by
-        # poll().  Returns None on EOF / timeout.
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if self.proc.poll() is not None:
-                # Drain remaining buffered output then return.
-                line = self.proc.stdout.readline()
-                return line if line else None
-            line = self.proc.stdout.readline()
-            if line:
-                return line
-        return None
-
-    def _drain_initial(self) -> None:
-        # Read until the first (gdb) prompt.
-        while True:
-            line = self._readline()
-            if line is None:
-                return
-            line = line.rstrip("\n")
-            self._buf.append(line)
-            if line.startswith("(gdb)"):
-                return
-
-    def cmd(self, mi_cmd: str, timeout: float = 5.0) -> tuple[str, str]:
-        """Send an MI command; return (result_class, full_response_line)."""
-        self._token += 1
-        token = self._token
-        line = f"{token}{mi_cmd}\n"
-        assert self.proc.stdin is not None
-        try:
-            self.proc.stdin.write(line)
-            self.proc.stdin.flush()
-        except (BrokenPipeError, OSError):
-            return ("exit", "")
-
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            ln = self._readline(timeout=max(0.1, deadline - time.monotonic()))
-            if ln is None:
-                if self.proc.poll() is not None:
-                    return ("exit", "")
-                continue
-            ln = ln.rstrip("\n")
-            self._buf.append(ln)
-            if ln.startswith("*stopped"):
-                self._stopped_pending = True
-            m = _RESULT_RE.match(ln)
-            if m and int(m.group(1)) == token:
-                return (m.group(2), ln)
-        return ("timeout", "")
-
-    def wait_for_stop(self, timeout: float = 5.0) -> bool:
-        """Block until a *stopped event has arrived since the last call."""
-        if self._stopped_pending:
-            self._stopped_pending = False
-            return True
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            ln = self._readline(timeout=max(0.1, deadline - time.monotonic()))
-            if ln is None:
-                if self.proc.poll() is not None:
-                    return False
-                continue
-            ln = ln.rstrip("\n")
-            self._buf.append(ln)
-            if ln.startswith("*stopped"):
-                return True
-        return False
-
-    def is_alive(self) -> bool:
-        return self.proc.poll() is None
-
-    def joined_output(self) -> str:
-        return "\n".join(self._buf)
-
-    def shutdown(self) -> None:
-        try:
-            if self.proc.stdin and not self.proc.stdin.closed:
-                self.proc.stdin.write("9999-gdb-exit\n")
-                self.proc.stdin.flush()
-        except (BrokenPipeError, OSError):
-            pass
-        try:
-            self.proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-
-
-def main() -> int:
-    if shutil.which("gdb") is None or shutil.which("g++") is None:
-        print("gdb and g++ required in PATH", file=sys.stderr)
-        return 2
-
-    tmpdir = tempfile.mkdtemp(prefix="variant-repro-")
-    cpp = os.path.join(tmpdir, "v.cpp")
-    exe = os.path.join(tmpdir, "v")
-    with open(cpp, "w") as fh:
-        fh.write(CPP_SOURCE)
-    compile_test(cpp, exe)
-    print(f"# test binary: {exe}")
-    print(f"# CPP_SOURCE: {cpp}")
-
-    s = MISession(exe)
-    try:
-        s.cmd("-enable-pretty-printing")
-        s.cmd("-break-insert main")
-        s.cmd("-exec-run")
-        s.wait_for_stop()
-        s.cmd("-exec-next")          # step past entry brace
-        s.wait_for_stop()
-        s.cmd("-exec-next")          # past the variant declaration -> at line 8
-        s.wait_for_stop()
-        s.cmd("-exec-next")          # past `v = std::string{"string"}` -> at line 9, v holds string
-        s.wait_for_stop()
-
-        cls, ln = s.cmd('-var-create vv * "v"')
-        print(f"[1] var-create  ({cls}): {ln}")
-        if cls != "done":
-            print("FAIL: var-create did not return ^done")
-            return 3
-
-        cls, ln = s.cmd("-var-list-children --all-values vv")
-        print(f"[2] var-list-children (string state) ({cls}): {ln}")
-        if cls != "done" or "[contained value]" not in ln:
-            print("FAIL: expected '[contained value]' child for string-holding variant")
-            return 3
-
-        s.cmd("-exec-next")          # past `v = std::vector<int>{1,2,3}` -> alternative flips
-        s.wait_for_stop()
-
-        cls, ln = s.cmd("-var-update --all-values vv")
-        print(f"[3] var-update (after vector assignment) ({cls}): {ln}")
-        if cls != "done" or "new_num_children" not in ln:
-            print("FAIL: expected new_num_children in var-update reply")
-            return 3
-
-        # The crash trigger.
-        cls, ln = s.cmd("-var-list-children --all-values vv 0 10", timeout=4.0)
-        print(f"[4] var-list-children (post-transition) ({cls}): {ln}")
-
-        joined = s.joined_output()
-        crashed = (
-            "internal-error" in joined
-            or "install_new_value" in joined
-            or "var->value->lazy" in joined
-            or "!print_value.empty" in joined
-            or not s.is_alive()
-        )
-        if crashed:
-            m = re.search(r"varobj\.c:\d+:\s*internal-error:\s*[^\\]+", joined)
-            print()
-            print("CONFIRMED: GDB internal-error reproduced.")
-            if m:
-                print(f"  -> {m.group(0)}")
-            print(f"  GDB process alive: {s.is_alive()}")
-            return 0
-
-        print()
-        print("NOT REPRODUCED: var-list-children completed without crash.")
-        return 1
-    finally:
-        s.shutdown()
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
 
 ### Sample successful reproduction
 
@@ -463,12 +215,12 @@ Create a core file of GDB? (y or n) [answered Y; ...]
 ### Affected versions
 
 Confirmed on the same Ubuntu 24.04 GDB / libstdc++ build that hits
-Bug 1.  Reproduced 2026-05-09 against a real workload (the user's
-in-house server source).  We do not yet have a reduced standalone
-reproducer because the trigger depends on the exact class layout
-of the parent type — it has not fired on synthetic test inputs we
-have tried.  When a reduced reproducer is available, append it to
-this entry.
+Bug 1.  First seen 2026-05-09 against a real workload (the user's
+in-house server source).  Reduced standalone reproducer landed
+2026-05-09 once we identified the trigger pattern — see the
+**Reproducer** section below.  The crash is deterministic on the
+affected GDB build: 2/2 element children update cleanly, the
+3rd lands the assertion every time.
 
 ### Related: timeout symptoms before the crash hits
 
@@ -508,13 +260,26 @@ on such a child can still hit it — that is on the user.
 
 ### Reproducer
 
-We do not have a runnable reproducer yet.  The crash has only
-been observed against a real workload; minimal test programs that
-exercise `std::vector<std::vector<long>>` inside a class with
-public access have not reproduced it on the same GDB build.  The
-class layout in the failing case likely has additional structure
-(multiple inheritance, anonymous unions, base-class fields,
-template depth) that confuses GDB's c-varobj access tracking.
+Run [`../known_gdb_bug_reproduce/bug_2.py`](../known_gdb_bug_reproduce/bug_2.py).
+Exit code 0 = bug reproduced (GDB asserted / exited), 1 = not reproduced,
+2 = `gdb`/`g++` not in PATH, 3 = setup diverged.
 
-When a reduced reproducer is available, replace this section with
-a self-contained script following the format of Bug 1.
+The reproducer synthesises a minimal class:
+
+```cpp
+struct Container
+{
+    int mask;
+    int connector;
+    int offset;
+    std::vector<std::vector<long>> index;
+};
+```
+
+with three populated `index` entries (lengths 3, 0, 2), then walks the
+locals-pane MI sequence that tgdb itself used to issue:
+``-var-create``, recurse `-var-list-children` down through the synthetic
+`.public` access node into `index`, then `-var-update` each
+``vv.public.index.[N]`` element child sequentially.  On the affected
+GDB build the third such update lands the assertion
+deterministically (`[0]` and `[1]` succeed, `[2]` crashes).
