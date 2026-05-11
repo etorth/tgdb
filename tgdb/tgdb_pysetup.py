@@ -130,6 +130,20 @@ def _is_builtin_local_name(name):
 
 
 def get_locals_b64():
+    # Set print elements/characters to unlimited so that GDB does not truncate
+    # variable values or the base64 return string.  Done here (inside the
+    # convenience function) rather than from tgdb via MI commands so that the
+    # unlimited setting is atomic with the result formatting — eliminating a
+    # race when two publish-locals tasks overlap.
+    try:
+        gdb.execute("set print elements unlimited", to_string=True)
+    except gdb.error:
+        pass
+    try:
+        gdb.execute("set print characters unlimited", to_string=True)
+    except gdb.error:
+        pass
+
     try:
         frame = gdb.selected_frame()
         block = frame.block()

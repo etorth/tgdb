@@ -111,27 +111,17 @@ class VarobjMixin:
         The function is registered by ``tgdb_pysetup.py`` at GDB startup.
         It returns a base64-encoded JSON array of variable dicts which we
         decode here and return as ``list[dict]``.
-        """
-        await self.mi_command_async("-gdb-set print elements unlimited", raise_on_error=False)
-        try:
-            await self.mi_command_async("-gdb-set print characters unlimited", raise_on_error=True)
-        except RuntimeError:
-            pass  # older GDB without separate print characters setting
 
+        The ``print elements`` / ``print characters`` settings are now
+        managed inside the GDB-side convenience function itself so that
+        the unlimited setting is atomic with result formatting — no race
+        when two publish-locals tasks overlap.
+        """
         try:
             raw = await self._eval_expr_raw("$get_locals_b64()")
         except RuntimeError as exc:
             _log.debug(f"get_locals failed: {exc}")
             return []
-        finally:
-            try:
-                await self.mi_command_async("-gdb-set print elements 200", raise_on_error=False)
-            except RuntimeError:
-                pass
-            try:
-                await self.mi_command_async("-gdb-set print characters elements", raise_on_error=False)
-            except RuntimeError:
-                pass
 
         encoded = raw.strip().strip('"')
         if not encoded:
