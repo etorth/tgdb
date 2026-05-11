@@ -279,7 +279,7 @@ class TGDBScreen:
 
 
     async def _do_attach(self, address: list[int], pane_type: Pane) -> None:
-        from .workspace import PaneContainer
+        from .workspace import EmptyPane, PaneContainer
 
         app = self._app
         if app is None:
@@ -292,6 +292,54 @@ class TGDBScreen:
         pane_widget = app._create_pane(pane_kind)
         if pane_widget is None:
             return
+
+        # Non-multi-instance descriptors (source, gdb, locals, registers,
+        # stack, threads, evaluate) return a SINGLETON widget — the same
+        # Python instance regardless of how many times the user re-attaches.
+        # Textual's ``Widget.mount`` short-circuits to a no-op when the
+        # widget passed is already in ``app._registry`` (i.e. attached to
+        # any parent in the DOM, including a stale parent left over from a
+        # previous attach).  That short-circuit caused the layout breakage
+        # reported when the user ran:
+        #
+        #     await tgdb.screen.close_all_panes()
+        #     await tgdb.screen.split([], mode=HORIZONTAL)
+        #     await tgdb.screen.split([0], mode=VERTICAL)
+        #     await tgdb.screen.get_pane([0,0]).attach(Pane.SOURCE)
+        #     await tgdb.screen.get_pane([0,1]).attach(Pane.GDB)   # <- broke
+        #
+        # The GDB singleton was still registered against its prior parent
+        # (the pre-close_all root) when ``replace_item`` issued
+        # ``mount(gdb_widget, after=empty_C)``; the mount silently
+        # no-op'd because the registry hit, then ``empty_C.remove()``
+        # detached the placeholder, leaving the vertical sub-container
+        # with no DOM children and the GDB widget rendering at its old
+        # location (or freshly orphaned during the pending prune).
+        #
+        # Detach the singleton from any prior location BEFORE handing it
+        # to ``replace_item`` so the upcoming mount actually attaches it
+        # to the new parent.  Two cases:
+        #
+        #   1. Singleton is mounted under another ``PaneContainer``:
+        #      replace it there with a fresh EmptyPane so the user's old
+        #      slot does not collapse.
+        #   2. Singleton is attached to something else (an intermediate
+        #      detach-but-not-unregister state, or a non-PaneContainer
+        #      parent): call ``remove()`` directly.  The ``AwaitRemove``
+        #      is awaited to guarantee the registry entry is gone before
+        #      the new mount runs.
+        #
+        # If the singleton's destination slot is itself (e.g. attaching
+        # it back to where it already lives), there is no work to do.
+        if pane_widget is widget:
+            return
+        if pane_widget.is_mounted:
+            old_parent = pane_widget.parent
+            if isinstance(old_parent, PaneContainer):
+                await old_parent.replace_item(pane_widget, EmptyPane(app.hl))
+            elif old_parent is not None:
+                await pane_widget.remove()
+
         parent = widget.parent
         if isinstance(parent, PaneContainer):
             await parent.replace_item(widget, pane_widget)
