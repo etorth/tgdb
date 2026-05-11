@@ -228,20 +228,38 @@ class PaneContainer(Widget):
             # Append after the current last item.
             prev_item = self._items[n - 2]
             if is_horizontal:
+                # Two-widget mount in a single call.  An earlier
+                # implementation issued two separate ``await
+                # self.mount(...)`` calls — first the splitter,
+                # then the item ``after=splitter``.  That left a
+                # window between the two awaits during which a
+                # pending ``call_later`` (for example the one
+                # scheduled by ``PaneContainer.set_orientation``)
+                # could run a ``_rebuild`` whose
+                # ``remove_children`` detached the just-mounted
+                # splitter; the second mount then raised
+                # ``MountError: ... has no parent``.  Mounting
+                # both widgets in one call makes the addition
+                # atomic from the caller's perspective: there is
+                # no intervening ``await`` point that could let a
+                # pending rebuild rip the splitter back out.
                 splitter = Splitter(self.hl, draggable=True)
                 splitter.set_orientation(True)
-                await self.mount(splitter, after=prev_item)
-                await self.mount(item, after=splitter)
+                await self.mount(splitter, item, after=prev_item)
             else:
                 await self.mount(item)
         else:
             # Insert before the item that was previously at position `index`.
             next_item = self._items[index + 1]
             if is_horizontal:
+                # Single atomic mount — see comment in the
+                # ``elif index == n - 1`` branch above for why
+                # combining what used to be two separate ``mount``
+                # awaits avoids ``MountError`` from races with
+                # pending ``call_later`` callbacks.
                 splitter = Splitter(self.hl, draggable=True)
                 splitter.set_orientation(True)
-                await self.mount(item, before=next_item)
-                await self.mount(splitter, after=item)
+                await self.mount(item, splitter, before=next_item)
             else:
                 await self.mount(item, before=next_item)
 
