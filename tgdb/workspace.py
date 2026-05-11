@@ -193,12 +193,42 @@ class PaneContainer(Widget):
 
 
     def set_orientation(self, orientation: str) -> None:
+        """Synchronous orientation change for callers that cannot ``await``.
+
+        Sets the orientation immediately and schedules ``_rebuild`` via
+        ``call_later`` so the DOM is reshuffled on the next frame.  Use
+        ``set_orientation_async`` instead when the caller is already in
+        an async context and is about to perform further DOM mutations
+        on this container — the ``call_later`` rebuild would otherwise
+        fire during those subsequent ``await`` points, racing against
+        the caller's mutations (see ``set_orientation_async`` docstring
+        and ``insert_item`` for the failure mode that motivated this
+        split).
+        """
         if self.orientation == orientation:
             return
         self.orientation = orientation
-        # _rebuild is async and correctly adds/removes Splitter widgets.
-        # Schedule it for the next frame; callers can proceed synchronously.
         self.call_later(self._rebuild)
+
+
+    async def set_orientation_async(self, orientation: str) -> None:
+        """Async orientation change — sets state and awaits the rebuild.
+
+        The synchronous ``set_orientation`` defers the actual DOM
+        rebuild to ``call_later`` so that sync callers (e.g.
+        ``layout.py::on_resize``) can return without awaiting.  In an
+        async caller that immediately performs further DOM mutations on
+        the same container — most notably ``insert_item`` — the deferred
+        rebuild fires during one of the caller's ``await`` points and
+        runs ``remove_children`` mid-mutation, detaching widgets the
+        caller just mounted and producing ``MountError: ... has no
+        parent``.  Awaiting the rebuild inline here makes the
+        orientation-change-then-insert pattern safe.
+        """
+        if self.orientation == orientation:
+            return
+        self.orientation = orientation
+        await self._rebuild()
 
 
     async def set_items(self, items: list[Widget]) -> None:

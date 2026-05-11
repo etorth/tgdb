@@ -249,17 +249,22 @@ class TGDBScreen:
             direction = "down"
 
         if not pane:
-            # Operate on the root container: ensure orientation, add cell
+            # Operate on the root container: ensure orientation, add cell.
+            # ``set_orientation_async`` (rather than the sync variant) so
+            # the rebuild completes inline; otherwise the sync variant's
+            # ``call_later(_rebuild)`` fires during ``insert_item``'s
+            # ``await`` and detaches widgets mid-mount.
             root = app.query_one("#split-container", PaneContainer)
             if root.orientation != orientation:
-                root.set_orientation(orientation)
+                await root.set_orientation_async(orientation)
             await root.insert_item(len(root.items), EmptyPane(app.hl))
         else:
             widget = self._get_widget_at(pane)
             if isinstance(widget, PaneContainer):
-                # Directly address a sub-container: add a child to it
+                # Directly address a sub-container: add a child to it.
+                # Same async-orientation rationale as the root branch.
                 if widget.orientation != orientation:
-                    widget.set_orientation(orientation)
+                    await widget.set_orientation_async(orientation)
                 await widget.insert_item(len(widget.items), EmptyPane(app.hl))
             else:
                 await app._apply_context_menu_action(widget, direction)
