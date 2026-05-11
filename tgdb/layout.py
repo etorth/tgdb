@@ -232,9 +232,9 @@ class LayoutMixin:
             src_is_root_child = src.parent is container
             gdb_is_root_child = gdb.parent is container
             apply_sizes = src_is_root_child and gdb_is_root_child
-            if is_horizontal:
-                container.styles.layout = "horizontal"
-                if apply_sizes:
+            if apply_sizes:
+                if is_horizontal:
+                    container.styles.layout = "horizontal"
                     if src_size <= 0:
                         src.styles.display = "none"
                     else:
@@ -247,9 +247,8 @@ class LayoutMixin:
                     src.styles.height = "1fr"
                     gdb.styles.width = gdb_size
                     gdb.styles.height = "1fr"
-            else:
-                container.styles.layout = "vertical"
-                if apply_sizes:
+                else:
+                    container.styles.layout = "vertical"
                     if src_size <= 0:
                         src.styles.display = "none"
                     else:
