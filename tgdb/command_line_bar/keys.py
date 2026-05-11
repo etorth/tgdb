@@ -6,7 +6,23 @@ from textual import events
 
 from .messages import CommandCancel, CommandSubmit, MessageDismissed
 
-_HEREDOC_RE = re.compile(r"^(python|py)\s+<<\s+(\S+)\s*$", re.IGNORECASE)
+# Heredoc-trigger pattern for the interactive command line, harmonised
+# with the heredoc body-extraction regex in ``tgdb/config/execution.py``:
+#
+#     re.match(r"^<<\s*(\S+)\s*\n(.*)", raw_arg, re.DOTALL)
+#
+# All four whitespace placements use ``\s*`` so every shell-style heredoc
+# form opens multiline mode:
+#
+#     python << EOF          # space-space
+#     python <<EOF           # tight before marker
+#     python<< EOF           # tight after command
+#     python<<EOF            # fully tight (bash/zsh accept this too)
+#
+# False-match safety: ``^(python|py)`` is followed by literal ``<<``,
+# so commands that merely start with ``py`` (``pyfile``, ``py3``, etc.)
+# fail the ``<<`` step and are not swallowed as the heredoc form.
+_HEREDOC_RE = re.compile(r"^(python|py)\s*<<\s*(\S+)\s*$", re.IGNORECASE)
 
 
 class CommandLineKeyMixin:
