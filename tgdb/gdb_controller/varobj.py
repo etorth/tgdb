@@ -25,10 +25,18 @@ class VarobjMixin:
 
     # -- varobj commands ---------------------------------------------------
 
-    async def _eval_expr_raw(self, expr: str) -> str:
-        """Evaluate a GDB expression and return its raw value string."""
+    async def _eval_expr_raw(self, expr: str, *, timeout: float | None = 5.0) -> str:
+        """Evaluate a GDB expression and return its raw value string.
+
+        *timeout* is forwarded to ``mi_command_async``.  Callers that
+        invoke long-running convenience functions (e.g.
+        ``$get_locals_b64()`` against slow remote / emulation targets)
+        should pass a larger value than the 5 s default — the default
+        is kept for ad-hoc single-value evaluations.
+        """
         result = await self.mi_command_async(
             f"-data-evaluate-expression {quote_mi_string(expr)}",
+            timeout=timeout,
             raise_on_error=True,
         )
         payload = result.get("payload") or {}
@@ -105,6 +113,24 @@ class VarobjMixin:
             pass
 
 
+    # Timeout for $get_locals_b64() evaluation.  The GDB-side function
+    # calls ``str(val)`` on every local in scope, which on a slow remote
+    # target (emulation servers, qemu-system stubs, on-chip JTAG probes)
+    # can take several seconds *per variable* as values are paged in
+    # over the wire.  The default 5 s in ``mi_command_async`` was
+    # nowhere near enough for those targets — every step would timeout,
+    # produce 0 locals, trigger a reconciliation pass that then fires
+    # ``-var-evaluate-expression`` and ``-var-update`` individually on
+    # every previously-tracked varobj (each also timing out at 5–10 s),
+    # so each step took 60–120 s of wall time with the locals pane
+    # eventually emptying.  See ``/home/anhong/win_desktop/tgdb.bug.log``
+    # at 2026-05-10 04:47:57 for the diagnostic trace.  30 s is enough
+    # for the emulation workload we have seen and still bounded enough
+    # to keep the pane responsive on a local inferior gone temporarily
+    # unresponsive (signal handler, page-fault storm, etc.).
+    _GET_LOCALS_TIMEOUT = 30.0
+
+
     async def get_locals(self) -> list[dict]:
         """Fetch local variables from GDB via the ``$get_locals_b64()`` convenience function.
 
@@ -118,7 +144,9 @@ class VarobjMixin:
         when two publish-locals tasks overlap.
         """
         try:
-            raw = await self._eval_expr_raw("$get_locals_b64()")
+            raw = await self._eval_expr_raw(
+                "$get_locals_b64()", timeout=self._GET_LOCALS_TIMEOUT,
+            )
         except RuntimeError as exc:
             _log.debug(f"get_locals failed: {exc}")
             return []
