@@ -146,9 +146,15 @@ def get_locals_b64():
 
     try:
         frame = gdb.selected_frame()
-        block = frame.block()
     except gdb.error:
         return base64.b64encode(b"[]").decode("ascii")
+
+    try:
+        block = frame.block()
+    except (gdb.error, RuntimeError) as exc:
+        if "Cannot locate block" in str(exc):
+            return base64.b64encode(b"[]").decode("ascii")
+        raise
 
     # Only show variables declared before the current executing line.
     # sal.line is 0 when no line info is available; in that case we fall back
