@@ -1,6 +1,7 @@
 import gdb
 import json
 import os
+import struct
 import zlib
 
 # Lift GDB's memory read limit so str(val) never fails for large variables.
@@ -10,86 +11,83 @@ except gdb.error:
     pass
 
 
-_event_notify_fd = None
+_pipe_fd = None
 _event_handlers_connected = False
 
 
-def register_event_notify_fd(fd):
-    """Wire GDB Python events to the inheritable notify pipe.
+def register_pipe_fd(fd):
+    """Wire GDB Python events and data collection to a single pipe.
 
-    tgdb opens an inheritable pipe before forking GDB and passes the write
-    end's fd number here. Each event is encoded as a single newline-
-    terminated line so tgdb can parse them out of the byte stream. The
-    line format is ``<TAG><payload>\\n`` where TAG is a single uppercase
-    ASCII char:
+    tgdb opens one inheritable pipe before forking GDB and passes the write
+    end's fd number here.  All communication uses a uniform binary frame
+    format so lightweight events and bulk data share the same channel:
 
-      ``P``         before_prompt — refresh selected frame in source pane.
-      ``R<regnum>`` register_changed — user wrote a register
-                    (e.g. ``set $rax=…``).  GDB has no MI async record
-                    for this; without the hook the register pane would
-                    only update on the next ``*stopped``.
-      ``O``         new_objfile — a shared library was just loaded.
-                    Coalesced; the dispatcher fires once per burst.
-      ``F``         free_objfile — a shared library was unloaded.
-      ``C``         clear_objfiles — program space was wiped (e.g. ``kill``).
-      ``Ipre``      inferior_call_pre — user expression about to call into
-                    the inferior (``print foo()``); freeze polling state.
-      ``Ipost``     inferior_call_post — call returned; refresh locals,
-                    registers, and memory because the inferior just ran.
-      ``X``         gdb_exiting — GDB's main loop is tearing down.  Lets
-                    tgdb shut down promptly instead of waiting for PTY EOF.
+    Frame format: ``[1-byte tag][4-byte BE payload_length][payload]``
 
-    Calling this again with a different fd just retargets the existing
-    handlers (the new fd is what the next event writes to).  Handlers are
-    connected to GDB's event registries exactly once per Python process
-    so a re-call cannot accumulate duplicates.
+    Lightweight events (payload_length = 0, 5 bytes total):
+      ``P``  before_prompt — refresh selected frame in source pane.
+      ``O``  new_objfile — a shared library was just loaded.
+      ``F``  free_objfile — a shared library was unloaded.
+      ``C``  clear_objfiles — program space was wiped (e.g. ``kill``).
+      ``X``  gdb_exiting — GDB's main loop is tearing down.
 
-    Handlers are deliberately tiny — they run on GDB's main thread and a
-    slow handler would stall the next prompt.  Errors writing the pipe
-    are swallowed so a dead/closed reader can't kill GDB.
+    Events with small payload:
+      ``R``  register_changed — 4-byte signed BE regnum (-1 = all).
+      ``I``  inferior_call — 1 byte (0x00 = pre, 0x01 = post).
+
+    Bulk data events (payload = zlib-compressed JSON):
+      ``l``  local variables
+      ``s``  stack frames
+      ``t``  thread info
+      ``r``  register values
+
+    Calling this again with a different fd retargets the existing handlers.
+    Handlers are connected to GDB's event registries exactly once per
+    Python process so a re-call cannot accumulate duplicates.
     """
-    global _event_notify_fd, _event_handlers_connected
-    _event_notify_fd = fd
+    global _pipe_fd, _event_handlers_connected
+    _pipe_fd = fd
     if _event_handlers_connected:
         return
     _event_handlers_connected = True
 
-    def _emit(line_bytes):
-        active_fd = _event_notify_fd
+    def _emit(tag_byte, payload=b""):
+        active_fd = _pipe_fd
         if active_fd is None:
             return
+        header = tag_byte + struct.pack(">I", len(payload)) + payload
         try:
-            os.write(active_fd, line_bytes)
+            os.write(active_fd, header)
         except (BlockingIOError, OSError):
             pass
 
     def _on_before_prompt():
-        _emit(b"P\n")
+        _emit(b"P")
 
     def _on_register_changed(event):
         try:
             regnum = int(event.regnum)
         except (AttributeError, ValueError, TypeError):
             regnum = -1
-        _emit(f"R{regnum}\n".encode())
+        _emit(b"R", struct.pack(">i", regnum))
 
     def _on_new_objfile(_event):
-        _emit(b"O\n")
+        _emit(b"O")
 
     def _on_free_objfile(_event):
-        _emit(b"F\n")
+        _emit(b"F")
 
     def _on_clear_objfiles(_event):
-        _emit(b"C\n")
+        _emit(b"C")
 
     def _on_inferior_call(event):
         if isinstance(event, gdb.InferiorCallPreEvent):
-            _emit(b"Ipre\n")
+            _emit(b"I", b"\x00")
         else:
-            _emit(b"Ipost\n")
+            _emit(b"I", b"\x01")
 
     def _on_gdb_exiting(_event):
-        _emit(b"X\n")
+        _emit(b"X")
 
     gdb.events.before_prompt.connect(_on_before_prompt)
     _try_connect("register_changed", _on_register_changed)
@@ -111,38 +109,22 @@ def _try_connect(event_name, handler):
         pass
 
 
-_data_pipe_fd = None
-
-
-def register_data_pipe_fd(fd):
-    """Register the data pipe fd for bulk data transfer to tgdb.
-
-    tgdb opens a second inheritable pipe dedicated to large payloads.
-    The GDB-side collection functions serialize data as JSON, compress
-    it with zlib, and write length-prefixed frames to this fd.  The
-    event-notify pipe stays separate for lightweight event lines.
-
-    Frame format: ``[4-byte BE length][1-byte tag][zlib-compressed JSON]``.
-    """
-    global _data_pipe_fd
-    _data_pipe_fd = fd
-
-
 def _send_pipe_payload(tag, data):
     """Serialize *data* as JSON, zlib-compress, and write a framed payload.
 
+    Uses the same unified pipe as lightweight events.  *tag* must be a
+    single lowercase ASCII character (``l``, ``s``, ``t``, or ``r``).
     Returns True on success, False if the pipe is not registered or the
     write fails.
     """
-    fd = _data_pipe_fd
+    fd = _pipe_fd
     if fd is None:
         return False
     json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
     compressed = zlib.compress(json_bytes)
     tag_byte = tag.encode("ascii")[:1] if isinstance(tag, str) else tag[:1]
-    payload = tag_byte + compressed
-    header = len(payload).to_bytes(4, "big")
-    buf = header + payload
+    header = tag_byte + struct.pack(">I", len(compressed))
+    buf = header + compressed
     try:
         written = 0
         while written < len(buf):
@@ -201,14 +183,14 @@ def _collect_locals():
     try:
         frame = gdb.selected_frame()
     except gdb.error:
-        _send_pipe_payload("L", [])
+        _send_pipe_payload("l", [])
         return "ok"
 
     try:
         block = frame.block()
     except (gdb.error, RuntimeError) as exc:
         if "Cannot locate block" in str(exc):
-            _send_pipe_payload("L", [])
+            _send_pipe_payload("l", [])
             return "ok"
         raise
 
@@ -289,7 +271,7 @@ def _collect_locals():
         block = block.superblock
         depth += 1
 
-    _send_pipe_payload("L", all_vars)
+    _send_pipe_payload("l", all_vars)
     return "ok"
 
 
@@ -299,7 +281,7 @@ def _collect_stack():
     try:
         frame = gdb.newest_frame()
     except gdb.error:
-        _send_pipe_payload("S", [])
+        _send_pipe_payload("s", [])
         return "ok"
 
     level = 0
@@ -337,7 +319,7 @@ def _collect_stack():
         except gdb.error:
             break
 
-    _send_pipe_payload("S", frames)
+    _send_pipe_payload("s", frames)
     return "ok"
 
 
@@ -347,7 +329,7 @@ def _collect_threads():
         inferior = gdb.selected_inferior()
         thread_list = list(inferior.threads())
     except gdb.error:
-        _send_pipe_payload("T", {"threads": [], "current-thread-id": ""})
+        _send_pipe_payload("t", {"threads": [], "current-thread-id": ""})
         return "ok"
 
     try:
@@ -405,7 +387,7 @@ def _collect_threads():
         except gdb.error:
             pass
 
-    _send_pipe_payload("T", {
+    _send_pipe_payload("t", {
         "threads": threads,
         "current-thread-id": current_thread_id,
     })
@@ -418,7 +400,7 @@ def _collect_registers():
         frame = gdb.selected_frame()
         arch = frame.architecture()
     except gdb.error:
-        _send_pipe_payload("R", [])
+        _send_pipe_payload("r", [])
         return "ok"
 
     registers = []
@@ -441,10 +423,10 @@ def _collect_registers():
                 "number": number,
             })
     except (gdb.error, AttributeError):
-        _send_pipe_payload("R", [])
+        _send_pipe_payload("r", [])
         return "ok"
 
-    _send_pipe_payload("R", registers)
+    _send_pipe_payload("r", registers)
     return "ok"
 
 

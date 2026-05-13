@@ -1,25 +1,37 @@
-"""Pipe-based data handlers for ``GDBController``.
+"""Unified pipe reader for ``GDBController``.
 
-Provides ``PipeDataMixin``, which processes length-prefixed binary frames
-from the GDB→tgdb data pipe.  Each frame carries zlib-compressed JSON for
-one of the heavy data payloads (locals, stack, threads, registers) that
-used to travel over the MI channel.
+Provides ``PipeDataMixin``, which reads binary frames from the single
+GDB→tgdb pipe.  The pipe carries both lightweight events (before-prompt,
+register-changed, objfile, inferior-call, gdb-exiting) and bulk data
+payloads (locals, stack, threads, registers) in one stream.
 
 Frame format
 ~~~~~~~~~~~~
-``[4-byte BE length][1-byte tag][zlib-compressed JSON]``
+``[1-byte tag][4-byte BE payload_length][payload]``
 
-Tags:
-  ``L`` — local variables
-  ``S`` — stack frames
-  ``T`` — thread info (dict with ``threads`` list + ``current-thread-id``)
-  ``R`` — register values
+Lightweight event tags (payload_length = 0):
+  ``P`` — before_prompt
+  ``O`` — new_objfile
+  ``F`` — free_objfile
+  ``C`` — clear_objfiles
+  ``X`` — gdb_exiting
+
+Event tags with small payload:
+  ``R`` — register_changed (4-byte signed BE regnum, -1 = all)
+  ``I`` — inferior_call (1 byte: 0x00 = pre, 0x01 = post)
+
+Bulk data tags (payload = zlib-compressed JSON):
+  ``l`` — local variables
+  ``s`` — stack frames
+  ``t`` — thread info (dict with ``threads`` list + ``current-thread-id``)
+  ``r`` — register values
 """
 
 import asyncio
 import json
 import logging
 import os
+import struct
 import zlib
 
 from .types import (
@@ -35,95 +47,164 @@ _log = logging.getLogger("tgdb.gdb_controller")
 # Maximum buffer size for incoming pipe data.  16 MB is generous;
 # individual frames should rarely exceed a few hundred KB even for
 # programs with thousands of threads and locals.
-_DATA_BUF_MAX_BYTES = 16 * 1024 * 1024
+_PIPE_BUF_MAX_BYTES = 16 * 1024 * 1024
+
+# Tags that carry no payload (5 bytes total: tag + 4 zero bytes).
+_ZERO_PAYLOAD_TAGS = frozenset(b"POFCX")
+
+# Tags with fixed-size payloads.
+_FIXED_PAYLOAD = {
+    ord(b"R"): 4,   # 4-byte signed BE regnum
+    ord(b"I"): 1,   # 1-byte pre/post flag
+}
+
+# Tags that carry variable-length zlib-compressed JSON payloads.
+_DATA_TAGS = frozenset(b"lstr")
 
 
 class PipeDataMixin:
-    """Mixin providing data-pipe frame parsing and dispatch.
+    """Mixin providing unified pipe frame parsing and dispatch.
 
-    Expects the host class to set ``self._data_pipe_r`` (read fd) and
-    ``self._data_buf`` (bytes buffer) before the asyncio reader is
+    Expects the host class to set ``self._pipe_r`` (read fd) and
+    ``self._pipe_buf`` (bytes buffer) before the asyncio reader is
     registered.  The host also provides the standard controller callbacks
-    (``on_locals``, ``on_stack``, ``on_threads``, ``on_registers``) and
-    state attributes (``_inferior_running``, ``current_thread_id``, etc.).
+    (``on_locals``, ``on_stack``, ``on_threads``, ``on_registers``,
+    ``on_cli_prompt``, ``on_register_changed``, ``on_objfiles_changed``,
+    ``on_inferior_call_pre``, ``on_inferior_call_post``, ``on_gdb_exiting``)
+    and state attributes (``_inferior_running``, ``current_thread_id``, etc.).
     """
 
-    def _on_data_pipe_readable(self) -> None:
-        """Drain the data pipe and process complete frames."""
+    def _on_pipe_readable(self) -> None:
+        """Drain the pipe and process complete frames."""
         try:
             while True:
-                chunk = os.read(self._data_pipe_r, 65536)
+                chunk = os.read(self._pipe_r, 65536)
                 if not chunk:
-                    self._unregister_data_pipe()
+                    self._unregister_pipe()
                     return
-                self._data_buf += chunk
+                self._pipe_buf += chunk
                 if len(chunk) < 65536:
                     break
         except BlockingIOError:
             pass
         except OSError as exc:
-            _log.warning(f"data pipe read failed: {exc!r}")
-            self._unregister_data_pipe()
+            _log.warning(f"pipe read failed: {exc!r}")
+            self._unregister_pipe()
             return
 
-        if len(self._data_buf) > _DATA_BUF_MAX_BYTES:
+        if len(self._pipe_buf) > _PIPE_BUF_MAX_BYTES:
             _log.warning(
-                f"data pipe buffer exceeded {_DATA_BUF_MAX_BYTES} bytes; resetting"
+                f"pipe buffer exceeded {_PIPE_BUF_MAX_BYTES} bytes; resetting"
             )
-            self._data_buf = b""
+            self._pipe_buf = b""
             return
 
-        self._process_data_frames()
+        self._process_pipe_frames()
 
 
-    def _unregister_data_pipe(self) -> None:
-        """Remove the data-pipe asyncio reader and discard buffer."""
+    def _unregister_pipe(self) -> None:
+        """Remove the pipe asyncio reader and discard buffer."""
         try:
-            asyncio.get_running_loop().remove_reader(self._data_pipe_r)
+            asyncio.get_running_loop().remove_reader(self._pipe_r)
         except Exception:
             pass
-        self._data_buf = b""
+        self._pipe_buf = b""
 
 
-    def _process_data_frames(self) -> None:
-        """Parse and dispatch complete length-prefixed frames."""
-        while len(self._data_buf) >= 5:
-            frame_size = int.from_bytes(self._data_buf[:4], "big")
-            if frame_size < 1 or frame_size > _DATA_BUF_MAX_BYTES:
-                _log.warning(f"data pipe: invalid frame size {frame_size}; resetting")
-                self._data_buf = b""
+    def _process_pipe_frames(self) -> None:
+        """Parse and dispatch complete frames from the unified pipe.
+
+        Frame format: ``[1-byte tag][4-byte BE payload_length][payload]``.
+        """
+        prompt_pending = False
+        objfiles_pending = False
+        pending_regnums: set[int] = set()
+
+        while len(self._pipe_buf) >= 5:
+            tag_byte = self._pipe_buf[0]
+            payload_len = struct.unpack_from(">I", self._pipe_buf, 1)[0]
+            total = 5 + payload_len
+            if payload_len > _PIPE_BUF_MAX_BYTES:
+                _log.warning(f"pipe: invalid payload size {payload_len}; resetting")
+                self._pipe_buf = b""
                 return
 
-            total = 4 + frame_size
-            if len(self._data_buf) < total:
+            if len(self._pipe_buf) < total:
                 break
 
-            tag = self._data_buf[4:5]
-            compressed = self._data_buf[5:total]
-            self._data_buf = self._data_buf[total:]
+            payload = self._pipe_buf[5:total]
+            self._pipe_buf = self._pipe_buf[total:]
 
+            if tag_byte in _ZERO_PAYLOAD_TAGS:
+                if tag_byte == ord(b"P"):
+                    prompt_pending = True
+                elif tag_byte in (ord(b"O"), ord(b"F"), ord(b"C")):
+                    objfiles_pending = True
+                elif tag_byte == ord(b"X"):
+                    try:
+                        self.on_gdb_exiting()
+                    except Exception:
+                        _log.debug("gdb_exiting callback raised", exc_info=True)
+            elif tag_byte == ord(b"R"):
+                if len(payload) >= 4:
+                    regnum = struct.unpack(">i", payload[:4])[0]
+                    if regnum < 0:
+                        regnum = -1
+                    pending_regnums.add(regnum)
+            elif tag_byte == ord(b"I"):
+                try:
+                    if payload and payload[0] == 0:
+                        self.on_inferior_call_pre()
+                    else:
+                        self.on_inferior_call_post()
+                except Exception:
+                    _log.debug("inferior_call callback raised", exc_info=True)
+            elif tag_byte in _DATA_TAGS:
+                try:
+                    json_bytes = zlib.decompress(payload)
+                    data = json.loads(json_bytes)
+                except Exception as exc:
+                    _log.warning(f"pipe: frame decode failed (tag={chr(tag_byte)!r}): {exc!r}")
+                    continue
+                self._dispatch_pipe_data(tag_byte, data)
+            else:
+                _log.debug(f"pipe: unknown tag 0x{tag_byte:02x}")
+
+        # Coalesced event dispatch — at most one callback per tag per read.
+        if objfiles_pending:
             try:
-                json_bytes = zlib.decompress(compressed)
-                data = json.loads(json_bytes)
-            except Exception as exc:
-                _log.warning(f"data pipe: frame decode failed: {exc!r}")
-                continue
+                self.on_objfiles_changed()
+            except Exception:
+                _log.debug("on_objfiles_changed callback raised", exc_info=True)
 
-            self._dispatch_pipe_data(tag, data)
+        if pending_regnums:
+            if -1 in pending_regnums:
+                pending_regnums = {-1}
+            for regnum in pending_regnums:
+                try:
+                    self.on_register_changed(regnum)
+                except Exception:
+                    _log.debug("on_register_changed callback raised", exc_info=True)
+
+        if prompt_pending:
+            try:
+                self.on_cli_prompt()
+            except Exception:
+                _log.debug("on_cli_prompt callback raised", exc_info=True)
 
 
-    def _dispatch_pipe_data(self, tag: bytes, data) -> None:
-        """Route a decoded pipe frame to the appropriate handler."""
-        if tag == b"L":
+    def _dispatch_pipe_data(self, tag_byte: int, data) -> None:
+        """Route a decoded pipe data frame to the appropriate handler."""
+        if tag_byte == ord(b"l"):
             self._handle_pipe_locals(data)
-        elif tag == b"S":
+        elif tag_byte == ord(b"s"):
             self._handle_pipe_stack(data)
-        elif tag == b"T":
+        elif tag_byte == ord(b"t"):
             self._handle_pipe_threads(data)
-        elif tag == b"R":
+        elif tag_byte == ord(b"r"):
             self._handle_pipe_registers(data)
         else:
-            _log.debug(f"data pipe: unknown tag {tag!r}")
+            _log.debug(f"pipe: unknown data tag {chr(tag_byte)!r}")
 
 
     def _handle_pipe_locals(self, data: list) -> None:

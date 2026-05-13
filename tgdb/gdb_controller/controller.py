@@ -116,20 +116,14 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._mi_master_fd: int = -1
         self._mi_slave_fd: int = -1  # kept open to prevent master EIO
         # Inheritable pipe used by GDB-side Python (``tgdb_pysetup.py``)
-        # to notify tgdb whenever the GDB CLI is about to display a
-        # prompt. Lets us refresh the source pane after CLI ``up``/
-        # ``down``/``frame N``, which GDB does not broadcast over MI.
-        # The write end is inherited into GDB; the read end is watched
-        # by tgdb's asyncio loop.
-        self._prompt_pipe_r: int = -1
-        self._prompt_pipe_w: int = -1
-        # Second inheritable pipe dedicated to bulk data payloads.  The
-        # GDB-side collection functions (``_collect_locals`` etc.) write
-        # length-prefixed zlib-compressed JSON frames to the write end;
-        # tgdb reads them on the read end via asyncio.
-        self._data_pipe_r: int = -1
-        self._data_pipe_w: int = -1
-        self._data_buf: bytes = b""
+        # for all GDB→tgdb communication: lightweight events (before-prompt,
+        # register-changed, objfile, inferior-call, gdb-exiting) and bulk
+        # data payloads (locals, stack, threads, registers).  Both share a
+        # uniform binary frame format.  The write end is inherited into GDB;
+        # the read end is watched by tgdb's asyncio loop.
+        self._pipe_r: int = -1
+        self._pipe_w: int = -1
+        self._pipe_buf: bytes = b""
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
@@ -212,28 +206,18 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._mi_master_fd = mi_master_fd
         self._mi_slave_fd = mi_slave_fd
 
-        # Create the prompt-notify pipe. The write end is inherited by GDB
-        # (via pass_fds) and clear-on-exec is removed so it survives execv.
-        # Set O_NONBLOCK on the write end so a slow tgdb reader can never
-        # stall GDB on a single-byte write.
-        prompt_pipe_r, prompt_pipe_w = os.pipe()
-        self._prompt_pipe_r = prompt_pipe_r
-        self._prompt_pipe_w = prompt_pipe_w
-        os.set_inheritable(prompt_pipe_w, True)
-        flags = fcntl.fcntl(prompt_pipe_w, fcntl.F_GETFL)
-        fcntl.fcntl(prompt_pipe_w, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-        # Create the data pipe for bulk payloads (locals, registers,
-        # threads, stack).  The write end stays blocking so the GDB-side
-        # Python retry loop can complete large writes; the read end is
-        # watched by asyncio.  Enlarge the kernel buffer to 1 MB so
-        # compressed frames don't stall the writer.
-        data_pipe_r, data_pipe_w = os.pipe()
-        self._data_pipe_r = data_pipe_r
-        self._data_pipe_w = data_pipe_w
-        os.set_inheritable(data_pipe_w, True)
+        # Create the unified pipe for all GDB→tgdb communication.  The write
+        # end is inherited by GDB (via pass_fds); the read end is watched by
+        # asyncio.  The write end stays blocking so the GDB-side Python retry
+        # loop can complete large data frames; lightweight event frames (5
+        # bytes) complete instantly even on a blocking fd.  Enlarge the kernel
+        # buffer to 1 MB so compressed payloads don't stall the writer.
+        pipe_r, pipe_w = os.pipe()
+        self._pipe_r = pipe_r
+        self._pipe_w = pipe_w
+        os.set_inheritable(pipe_w, True)
         try:
-            fcntl.fcntl(data_pipe_r, 1031, 1024 * 1024)  # F_SETPIPE_SZ
+            fcntl.fcntl(pipe_r, 1031, 1024 * 1024)  # F_SETPIPE_SZ
         except OSError:
             pass
 
@@ -261,7 +245,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self._proc = ptyprocess.PtyProcess.spawn(
                 cmd,
                 dimensions=(rows, cols),
-                pass_fds=[prompt_pipe_w, data_pipe_w],
+                pass_fds=[pipe_w],
             )
         except Exception:
             _log.error(f"GDB spawn failed, cmd={cmd!r}")
@@ -327,10 +311,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 fds.append(fd)
         if self._mi_master_fd >= 0:
             fds.append(self._mi_master_fd)
-        if self._prompt_pipe_r >= 0:
-            fds.append(self._prompt_pipe_r)
-        if self._data_pipe_r >= 0:
-            fds.append(self._data_pipe_r)
+        if self._pipe_r >= 0:
+            fds.append(self._pipe_r)
         return fds
 
 
@@ -390,7 +372,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 except Exception:
                     pass
 
-        for attr in ("_mi_master_fd", "_mi_slave_fd", "_prompt_pipe_r", "_prompt_pipe_w", "_data_pipe_r", "_data_pipe_w"):
+        for attr in ("_mi_master_fd", "_mi_slave_fd", "_pipe_r", "_pipe_w"):
             fd = getattr(self, attr, -1)
             if fd >= 0:
                 try:
@@ -420,19 +402,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # with zero polling delay (unlike asyncio.sleep(0.02)).
         loop.add_reader(self._proc.fd, self._on_console_readable, loop)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
-        # Watch the event-notify pipe written by ``register_event_notify_fd``
-        # inside GDB's embedded Python.  Per-tag state for coalescing.
-        self._notify_buf: bytes = b""
-        self._prompt_refresh_pending: bool = False
-        self._objfiles_refresh_pending: bool = False
-        self._dispatch_scheduled: bool = False
-        # Pending register-changed regnums.  -1 means "all registers" (e.g.
-        # the event lacked a regnum).
-        self._pending_regnums: set[int] = set()
-        if self._prompt_pipe_r >= 0:
-            loop.add_reader(self._prompt_pipe_r, self._on_notify_pipe_readable)
-        if self._data_pipe_r >= 0:
-            loop.add_reader(self._data_pipe_r, self._on_data_pipe_readable)
+        # Watch the unified pipe written by ``register_pipe_fd`` inside GDB's
+        # embedded Python.  Carries both lightweight events and bulk data.
+        if self._pipe_r >= 0:
+            loop.add_reader(self._pipe_r, self._on_pipe_readable)
         _log.info("MI reader started")
 
         # Load tgdb's embedded GDB/Python helpers before stop handling needs
@@ -442,14 +415,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # Tell GDB which fd to ping on every event we care about. Sent after
         # pysetup so the helper is defined; MI commands are FIFO so ordering
         # holds.
-        if self._prompt_pipe_w >= 0:
+        if self._pipe_w >= 0:
             self.mi_command(
-                f'-interpreter-exec console "python register_event_notify_fd({self._prompt_pipe_w})"',
-                report_error=False,
-            )
-        if self._data_pipe_w >= 0:
-            self.mi_command(
-                f'-interpreter-exec console "python register_data_pipe_fd({self._data_pipe_w})"',
+                f'-interpreter-exec console "python register_pipe_fd({self._pipe_w})"',
                 report_error=False,
             )
 
@@ -466,157 +434,15 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 loop.remove_reader(self._mi_master_fd)
             except Exception:
                 pass
-            if self._prompt_pipe_r >= 0:
+            if self._pipe_r >= 0:
                 try:
-                    loop.remove_reader(self._prompt_pipe_r)
-                except Exception:
-                    pass
-            if self._data_pipe_r >= 0:
-                try:
-                    loop.remove_reader(self._data_pipe_r)
+                    loop.remove_reader(self._pipe_r)
                 except Exception:
                     pass
             _log.info("GDB exited")
             self.on_exit()
 
 
-
-
-    # Cap the partial-line buffer so a runaway writer (or a peer that
-    # somehow stops emitting newlines) cannot grow it without bound.
-    # Notify lines are tiny (single tag plus a small int); 64 KiB is a
-    # comfortable ceiling that still lets us absorb very large bursts.
-    _NOTIFY_BUF_MAX_BYTES = 64 * 1024
-
-
-    def _on_notify_pipe_readable(self) -> None:
-        """Drain the event-notify pipe and dispatch tagged event lines.
-
-        Each event from ``tgdb_pysetup.register_event_notify_fd`` is a
-        single ``\\n``-terminated line.  We read everything available,
-        accumulate a partial-line buffer between wake-ups, and then
-        coalesce (so a burst of N lines results in at most one dispatch
-        per tag per asyncio cycle).
-        """
-        try:
-            while True:
-                chunk = os.read(self._prompt_pipe_r, 4096)
-                if not chunk:
-                    self._unregister_notify_pipe()
-                    return
-                self._notify_buf += chunk
-                if len(chunk) < 4096:
-                    break
-        except BlockingIOError:
-            pass
-        except OSError as exc:
-            _log.warning(f"notify pipe read failed: {exc!r}")
-            self._unregister_notify_pipe()
-            return
-
-        if len(self._notify_buf) > self._NOTIFY_BUF_MAX_BYTES:
-            _log.warning(
-                f"notify buffer exceeded {self._NOTIFY_BUF_MAX_BYTES} bytes; resetting"
-            )
-            self._notify_buf = b""
-            return
-
-        if b"\n" not in self._notify_buf:
-            return
-        lines = self._notify_buf.split(b"\n")
-        # Last element is whatever came after the final newline (possibly
-        # an incomplete line we keep for the next read).
-        self._notify_buf = lines[-1]
-        for raw in lines[:-1]:
-            if raw:
-                self._consume_notify_line(raw)
-
-        if not self._dispatch_scheduled:
-            self._dispatch_scheduled = True
-            asyncio.get_running_loop().call_soon(self._dispatch_pending_events)
-
-
-    def _unregister_notify_pipe(self) -> None:
-        """Remove the notify-pipe asyncio reader and drop any partial line.
-
-        Called on EOF (GDB closed its end) or on read errors that would
-        otherwise busy-loop the event loop by leaving a dead fd registered.
-        """
-        try:
-            asyncio.get_running_loop().remove_reader(self._prompt_pipe_r)
-        except Exception:
-            pass
-        self._notify_buf = b""
-
-
-    def _consume_notify_line(self, raw: bytes) -> None:
-        """Update per-tag pending state for a single notify line."""
-        tag = raw[:1]
-        if tag == b"P":
-            self._prompt_refresh_pending = True
-        elif tag == b"R":
-            try:
-                regnum = int(raw[1:])
-            except ValueError:
-                regnum = -1
-            # Negative values other than the documented ``-1`` sentinel
-            # ("refresh all") have no meaning as regnums but ``int()``
-            # accepts them happily — collapse them onto the sentinel so
-            # ``-5`` and ``-1`` produce identical refresh-all dispatches
-            # instead of one valid sentinel and one stray fake regnum.
-            if regnum < 0:
-                regnum = -1
-            self._pending_regnums.add(regnum)
-        elif tag in (b"O", b"F", b"C"):
-            self._objfiles_refresh_pending = True
-        elif tag == b"I":
-            # Inferior calls aren't coalesced — pre/post are paired and
-            # callers care about both edges.  Fire synchronously here so
-            # ordering relative to other pending events is preserved.
-            try:
-                if raw == b"Ipre":
-                    self.on_inferior_call_pre()
-                elif raw == b"Ipost":
-                    self.on_inferior_call_post()
-            except Exception:
-                _log.debug("inferior_call callback raised", exc_info=True)
-        elif tag == b"X":
-            try:
-                self.on_gdb_exiting()
-            except Exception:
-                _log.debug("gdb_exiting callback raised", exc_info=True)
-
-
-    def _dispatch_pending_events(self) -> None:
-        """Fire one batch of coalesced callbacks per asyncio cycle."""
-        self._dispatch_scheduled = False
-
-        if self._objfiles_refresh_pending:
-            self._objfiles_refresh_pending = False
-            try:
-                self.on_objfiles_changed()
-            except Exception:
-                _log.debug("on_objfiles_changed callback raised", exc_info=True)
-
-        if self._pending_regnums:
-            regnums = self._pending_regnums
-            self._pending_regnums = set()
-            # If any event lacked a regnum, treat as "refresh all" and
-            # collapse to a single -1 dispatch.
-            if -1 in regnums:
-                regnums = {-1}
-            for regnum in regnums:
-                try:
-                    self.on_register_changed(regnum)
-                except Exception:
-                    _log.debug("on_register_changed callback raised", exc_info=True)
-
-        if self._prompt_refresh_pending:
-            self._prompt_refresh_pending = False
-            try:
-                self.on_cli_prompt()
-            except Exception:
-                _log.debug("on_cli_prompt callback raised", exc_info=True)
 
 
     def _on_console_readable(self, loop: asyncio.AbstractEventLoop) -> None:

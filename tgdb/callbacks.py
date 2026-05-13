@@ -442,8 +442,7 @@ class CallbacksMixin:
     def _ui_on_cli_prompt(self) -> None:
         """GDB is about to redisplay its CLI prompt — refresh selected frame.
 
-        Wired off the inheritable notify pipe written by
-        ``register_event_notify_fd`` in ``tgdb_pysetup.py``.  Most prompts
+        Wired off the unified pipe written by ``register_pipe_fd`` in
         follow no-op user input, but typed CLI ``up``/``down``/``frame N``
         and similar silently move the selected frame, and GDB has no MI
         async record for that.  We issue ``-stack-info-frame`` on every
