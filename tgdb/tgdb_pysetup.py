@@ -310,7 +310,7 @@ def _collect_stack():
             addr = hex(frame.pc())
             if sal.symtab:
                 file_name = sal.symtab.filename or ""
-                fullname = sal.symtab.fullname or ""
+                fullname = sal.symtab.fullname() or ""
             else:
                 file_name = ""
                 fullname = ""
@@ -384,7 +384,7 @@ def _collect_threads():
                     "func": frame.name() or "",
                     "addr": hex(frame.pc()),
                     "file": sal.symtab.filename if sal.symtab else "",
-                    "fullname": sal.symtab.fullname if sal.symtab else "",
+                    "fullname": sal.symtab.fullname() if sal.symtab else "",
                     "line": sal.line,
                 }
             except gdb.error:
