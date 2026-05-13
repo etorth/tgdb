@@ -19,27 +19,10 @@ def register_pipe_fd(fd):
     """Wire GDB Python events and data collection to a single pipe.
 
     tgdb opens one inheritable pipe before forking GDB and passes the write
-    end's fd number here.  All communication uses a uniform binary frame
-    format so lightweight events and bulk data share the same channel:
+    end's fd number here.  All communication uses a tag-driven binary frame
+    format so lightweight events and bulk data share the same channel.
 
-    Frame format: ``[1-byte tag][4-byte BE payload_length][payload]``
-
-    Lightweight events (payload_length = 0, 5 bytes total):
-      ``P``  before_prompt — refresh selected frame in source pane.
-      ``O``  new_objfile — a shared library was just loaded.
-      ``F``  free_objfile — a shared library was unloaded.
-      ``C``  clear_objfiles — program space was wiped (e.g. ``kill``).
-      ``X``  gdb_exiting — GDB's main loop is tearing down.
-
-    Events with small payload:
-      ``R``  register_changed — 4-byte signed BE regnum (-1 = all).
-      ``I``  inferior_call — 1 byte (0x00 = pre, 0x01 = post).
-
-    Bulk data events (payload = zlib-compressed JSON):
-      ``l``  local variables
-      ``s``  stack frames
-      ``t``  thread info
-      ``r``  register values
+    See ``docs/pipe-protocol.md`` for the full protocol specification.
 
     Calling this again with a different fd retargets the existing handlers.
     Handlers are connected to GDB's event registries exactly once per
@@ -115,7 +98,8 @@ def _send_pipe_payload(tag, data):
     """Serialize *data* as JSON, zlib-compress, and write a framed payload.
 
     Uses the same unified pipe as lightweight events.  *tag* must be a
-    single lowercase ASCII character (``l``, ``s``, ``t``, or ``r``).
+    single lowercase ASCII character (one of ``l``, ``s``, ``t``, ``r``,
+    ``f``, ``b``).  Frame format: ``[tag][8-byte BE length][payload]``.
     Returns True on success, False if the pipe is not registered or the
     write fails.
     """
