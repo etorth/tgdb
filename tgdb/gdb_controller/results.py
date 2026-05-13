@@ -33,8 +33,6 @@ class GDBResultMixin:
         report = bool(meta.get("report_error", True))
         if kind == "current-location":
             self.request_source_file(report_error=report)
-        elif kind == "pipe-collect-frame-info":
-            self.request_source_file(report_error=report)
         elif kind == "stack-locals":
             self.locals = []
             self.on_locals([])
@@ -169,7 +167,7 @@ class GDBResultMixin:
         else:
             self.request_source_file(report_error=report)
 
-        self.request_current_frame_locals(report_error=False)
-        self.request_current_stack_frames(report_error=False)
-        self.request_current_threads(report_error=False)
-        self.request_current_registers(report_error=False)
+        supervise(self.request_current_frame_locals(report_error=False), name="frame-result-locals")
+        supervise(self.request_current_stack_frames(report_error=False), name="frame-result-stack")
+        supervise(self.request_current_threads(report_error=False), name="frame-result-threads")
+        supervise(self.request_current_registers(report_error=False), name="frame-result-registers")

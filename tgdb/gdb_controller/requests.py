@@ -153,43 +153,45 @@ class GDBRequestMixin:
         self.mi_command("-file-list-exec-source-file", report_error=report_error)
 
 
-    def request_current_location(self, *, report_error: bool = True) -> None:
-        self.mi_command(
+    async def request_current_location(self, *, report_error: bool = True) -> None:
+        await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info()"',
-            report_error=report_error,
-            kind="pipe-collect-frame-info",
+            timeout=10.0,
         )
 
 
-    def request_current_frame_locals(self, *, report_error: bool = False) -> None:
-        self.mi_command(
+    async def request_current_frame_locals(self, *, report_error: bool = False) -> None:
+        await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_locals()"',
-            report_error=report_error,
-            kind="pipe-collect-locals",
+            timeout=10.0,
         )
 
 
-    def request_current_stack_frames(self, *, report_error: bool = False) -> None:
-        self.mi_command(
+    async def request_current_stack_frames(self, *, report_error: bool = False) -> None:
+        await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_stack()"',
-            report_error=report_error,
-            kind="pipe-collect-stack",
+            timeout=10.0,
         )
 
 
-    def request_current_threads(self, *, report_error: bool = False) -> None:
-        self.mi_command(
+    async def request_current_threads(self, *, report_error: bool = False) -> None:
+        await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_threads()"',
-            report_error=report_error,
-            kind="pipe-collect-threads",
+            timeout=10.0,
         )
 
 
-    def request_current_registers(self, *, report_error: bool = False) -> None:
-        self.mi_command(
+    async def request_current_registers(self, *, report_error: bool = False) -> None:
+        await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_registers()"',
-            report_error=report_error,
-            kind="pipe-collect-registers",
+            timeout=10.0,
+        )
+
+
+    async def request_breakpoints(self, *, report_error: bool = False) -> None:
+        await self.mi_command_async(
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
+            timeout=10.0,
         )
 
 
@@ -214,10 +216,7 @@ class GDBRequestMixin:
             await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             return
-        self.mi_command(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
-            kind="pipe-collect-breakpoints",
-        )
+        await self.request_breakpoints()
 
 
     def delete_breakpoint(self, number: int) -> None:

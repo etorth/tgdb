@@ -455,7 +455,10 @@ class CallbacksMixin:
         if self.gdb is None or self.gdb._inferior_running:
             return
         try:
-            self.gdb.request_current_location(report_error=False)
+            supervise(
+                self.gdb.request_current_location(report_error=False),
+                name="cli-prompt-location",
+            )
         except Exception:
             pass
 
@@ -475,7 +478,10 @@ class CallbacksMixin:
         if self._register_pane is None or self._register_pane.parent is None:
             return
         try:
-            self.gdb.request_current_registers(report_error=False)
+            supervise(
+                self.gdb.request_current_registers(report_error=False),
+                name="register-changed-refresh",
+            )
         except Exception:
             pass
 
@@ -524,12 +530,18 @@ class CallbacksMixin:
         if self.gdb is None or self.gdb._inferior_running:
             return
         try:
-            self.gdb.request_current_frame_locals(report_error=False)
+            supervise(
+                self.gdb.request_current_frame_locals(report_error=False),
+                name="inferior-call-post-locals",
+            )
         except Exception:
             pass
         if self._register_pane is not None and self._register_pane.parent is not None:
             try:
-                self.gdb.request_current_registers(report_error=False)
+                supervise(
+                    self.gdb.request_current_registers(report_error=False),
+                    name="inferior-call-post-registers",
+                )
             except Exception:
                 pass
         if self._evaluate_pane is not None:
@@ -627,7 +639,10 @@ class CallbacksMixin:
 
     def _flush_memory_changed(self) -> None:
         self._memory_changed_pending = False
-        self.gdb.request_current_frame_locals(report_error=False)
+        supervise(
+            self.gdb.request_current_frame_locals(report_error=False),
+            name="memory-changed-locals",
+        )
         if self._evaluate_pane is not None:
             supervise(
                 self._evaluate_pane.refresh_all(),
@@ -640,10 +655,7 @@ class CallbacksMixin:
 
     async def _refresh_breakpoints_async(self) -> None:
         await asyncio.sleep(0.15)
-        self.gdb.mi_command(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
-            kind="pipe-collect-breakpoints",
-        )
+        await self.gdb.request_breakpoints()
 
 
     def _ui_on_running(self) -> None:
@@ -728,7 +740,7 @@ class CallbacksMixin:
     async def _request_initial_location(self) -> None:
         """Mirror cgdb startup: query current location without surfacing noise."""
         await asyncio.sleep(0.5)
-        self.gdb.request_current_location(report_error=False)
+        await self.gdb.request_current_location(report_error=False)
 
 
     def _ui_gdb_exit(self) -> None:

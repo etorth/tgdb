@@ -47,20 +47,10 @@ class ParsingMixin:
             path = frame.file or frame.fullname
             _log.info(f"stopped reason={reason} frame={path}:{frame.line}")
             self.on_stopped(frame)
-            self.request_current_stack_frames(report_error=False)
-            self.request_current_threads(report_error=False)
-            self.request_current_registers(report_error=False)
-            # Silence transient ``-break-list`` errors — they occur on
-            # every stop during inferior restart, file-load races, and
-            # similar transitions where the breakpoint table is briefly
-            # in an inconsistent state.  Surfacing them via ``on_error``
-            # produces user-visible noise on essentially every stop in
-            # those windows; the next stop's break-list will succeed.
-            self.mi_command(
-                '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
-                report_error=False,
-                kind="pipe-collect-breakpoints",
-            )
+            await self.request_current_stack_frames(report_error=False)
+            await self.request_current_threads(report_error=False)
+            await self.request_current_registers(report_error=False)
+            await self.request_breakpoints(report_error=False)
         elif cls == "running":
             self._inferior_running = True
             self.current_frame = None
@@ -81,12 +71,12 @@ class ParsingMixin:
             self.on_running()
         elif cls in ("thread-created", "thread-exited"):
             if not self._inferior_running:
-                self.request_current_threads(report_error=False)
+                await self.request_current_threads(report_error=False)
         elif cls == "thread-selected":
             thread_id = results.get("id") or results.get("thread-id")
             if isinstance(thread_id, str):
                 self.current_thread_id = thread_id
-            self.request_current_location(report_error=False)
+            await self.request_current_location(report_error=False)
         elif cls == "memory-changed":
             _log.info(
                 f"memory-changed addr={results.get('addr', '?')} "

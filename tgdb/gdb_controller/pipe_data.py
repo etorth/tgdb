@@ -37,6 +37,7 @@ import os
 import struct
 import zlib
 
+from ..async_util import supervise
 from .types import (
     Breakpoint,
     Frame,
@@ -392,10 +393,10 @@ class PipeDataMixin:
         else:
             self.request_source_file(report_error=False)
 
-        self.request_current_frame_locals(report_error=False)
-        self.request_current_stack_frames(report_error=False)
-        self.request_current_threads(report_error=False)
-        self.request_current_registers(report_error=False)
+        supervise(self.request_current_frame_locals(report_error=False), name="pipe-frame-locals")
+        supervise(self.request_current_stack_frames(report_error=False), name="pipe-frame-stack")
+        supervise(self.request_current_threads(report_error=False), name="pipe-frame-threads")
+        supervise(self.request_current_registers(report_error=False), name="pipe-frame-registers")
 
 
     def _handle_pipe_breakpoints(self, data: list) -> None:
