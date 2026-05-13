@@ -1,16 +1,13 @@
 """
 VarobjMixin — varobj-related async MI commands.
 
-Provides var_create, var_list_children, var_delete, var_update, and the
-get_locals helper that drives ``LocalVariablePane``. Mixed into
-``GDBController``.
+Provides var_create, var_list_children, var_delete, var_update, and
+get_decl_lines.  Mixed into ``GDBController``.
 """
 
-import base64
-import json
 import logging
 
-from .types import LocalVariable, normalize_addr, quote_mi_string
+from .types import quote_mi_string
 
 _log = logging.getLogger("tgdb.gdb_varobj")
 
@@ -28,10 +25,7 @@ class VarobjMixin:
     async def _eval_expr_raw(self, expr: str, *, timeout: float | None = 5.0) -> str:
         """Evaluate a GDB expression and return its raw value string.
 
-        *timeout* is forwarded to ``mi_command_async``.  Callers that
-        invoke long-running convenience functions (e.g.
-        ``$get_locals_b64()`` against slow remote / emulation targets)
-        should pass a larger value than the 5 s default — the default
+        *timeout* is forwarded to ``mi_command_async``.  The default 5 s
         is kept for ad-hoc single-value evaluations.
         """
         result = await self.mi_command_async(
@@ -113,115 +107,13 @@ class VarobjMixin:
             pass
 
 
-    # Timeout for $get_locals_b64() evaluation.  The GDB-side function
-    # calls ``str(val)`` on every local in scope, which on a slow remote
-    # target (emulation servers, qemu-system stubs, on-chip JTAG probes)
-    # can take several seconds *per variable* as values are paged in
-    # over the wire.  The default 5 s in ``mi_command_async`` was
-    # nowhere near enough for those targets — every step would timeout,
-    # produce 0 locals, trigger a reconciliation pass that then fires
-    # ``-var-evaluate-expression`` and ``-var-update`` individually on
-    # every previously-tracked varobj (each also timing out at 5–10 s),
-    # so each step took 60–120 s of wall time with the locals pane
-    # eventually emptying.  See ``/home/anhong/win_desktop/tgdb.bug.log``
-    # at 2026-05-10 04:47:57 for the diagnostic trace.  30 s is enough
-    # for the emulation workload we have seen and still bounded enough
-    # to keep the pane responsive on a local inferior gone temporarily
-    # unresponsive (signal handler, page-fault storm, etc.).
-    _GET_LOCALS_TIMEOUT = 30.0
-
-
-    async def get_locals(self) -> list[dict]:
-        """Fetch local variables from GDB via the ``$get_locals_b64()`` convenience function.
-
-        The function is registered by ``tgdb_pysetup.py`` at GDB startup.
-        It returns a base64-encoded JSON array of variable dicts which we
-        decode here and return as ``list[dict]``.
-
-        The ``print elements`` / ``print characters`` settings are now
-        managed inside the GDB-side convenience function itself so that
-        the unlimited setting is atomic with result formatting — no race
-        when two publish-locals tasks overlap.
-        """
-        try:
-            raw = await self._eval_expr_raw(
-                "$_tgdb_RSVD_get_locals_base64()", timeout=self._GET_LOCALS_TIMEOUT,
-            )
-        except RuntimeError as exc:
-            _log.debug(f"get_locals failed: {exc}")
-            return []
-
-        encoded = raw.strip().strip('"')
-        if not encoded:
-            return []
-
-        try:
-            locals_list = json.loads(base64.b64decode(encoded).decode("utf-8"))
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
-            _log.debug(f"get_locals decode failed: {exc}")
-            return []
-
-        if isinstance(locals_list, list):
-            return locals_list
-
-        _log.debug(f"get_locals: unexpected payload type {type(locals_list).__name__}")
-        return []
-
-
-    async def _publish_locals_async(self) -> None:
-        """Fetch locals via get_locals() and publish them through on_locals().
-
-        Called instead of ``request_current_frame_locals()`` so that
-        ``-stack-list-variables`` is never sent.  The richer ``LocalVariable``
-        objects produced here carry ``addr`` and ``is_shadowed`` directly from
-        GDB Python, which lets ``LocalVariablePane`` build its binding keys
-        without an extra ``&name`` evaluation round-trip.
-        """
-        # Capture the epoch at task start.  ``*stopped`` and ``*running``
-        # both bump ``_locals_epoch`` (see ``ParsingMixin._handle_async``),
-        # so any change between here and the final ``on_locals`` dispatch
-        # means the snapshot is stale and must not reach the UI.
-        epoch = self._locals_epoch
-        try:
-            dicts = await self.get_locals()
-        except Exception as exc:
-            _log.debug(f"_publish_locals_async failed: {exc}")
-            if self._locals_epoch == epoch:
-                self.on_locals([])
-            return
-
-        if self._locals_epoch != epoch:
-            _log.debug("_publish_locals_async: dropping stale snapshot (epoch advanced during fetch)")
-            return
-
-        variables = [
-            LocalVariable(
-                name=d.get("name", ""),
-                value=d.get("value", ""),
-                type=d.get("type", ""),
-                is_arg=bool(d.get("is_arg", False)),
-                addr=normalize_addr(d.get("addr", "")),
-                is_shadowed=bool(d.get("is_shadowed", False)),
-                is_reference=bool(d.get("is_reference", False)),
-                line=int(d.get("line", 0)),
-                depth=int(d.get("depth", 0)),
-            )
-            for d in dicts
-            if d.get("name")
-        ]
-        _log.debug(f"_publish_locals_async: {len(variables)} variables")
-        self.on_locals(variables)
-
-
     async def get_decl_lines(self) -> dict[str, int]:
         """Stub kept for backward compatibility — always returns empty dict.
 
-        Declaration-line filtering is now done inside ``get_locals_b64()`` in
-        ``tgdb_pysetup.py``, which uses ``frame.find_sal().line`` to skip
-        variables declared after the current executing line before the result
-        even leaves GDB.  The ``get_decl_lines`` callback is no longer wired
-        into ``LocalVariablePane``; this method remains so callers that
-        reference ``self.gdb.get_decl_lines`` do not get an AttributeError.
+        Declaration-line filtering is now done inside the GDB-side collection
+        functions in ``tgdb_pysetup.py``, which use ``frame.find_sal().line``
+        to skip variables declared after the current executing line before
+        the result even leaves GDB.
         """
         return {}
 
