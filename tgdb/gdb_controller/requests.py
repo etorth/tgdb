@@ -155,9 +155,9 @@ class GDBRequestMixin:
 
     def request_current_location(self, *, report_error: bool = True) -> None:
         self.mi_command(
-            "-stack-info-frame",
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info()"',
             report_error=report_error,
-            kind="current-location",
+            kind="pipe-collect-frame-info",
         )
 
 
@@ -214,7 +214,10 @@ class GDBRequestMixin:
             await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             return
-        self.mi_command("-break-list")
+        self.mi_command(
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
+            kind="pipe-collect-breakpoints",
+        )
 
 
     def delete_breakpoint(self, number: int) -> None:

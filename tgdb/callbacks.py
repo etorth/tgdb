@@ -640,7 +640,10 @@ class CallbacksMixin:
 
     async def _refresh_breakpoints_async(self) -> None:
         await asyncio.sleep(0.15)
-        self.gdb.mi_command("-break-list")
+        self.gdb.mi_command(
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
+            kind="pipe-collect-breakpoints",
+        )
 
 
     def _ui_on_running(self) -> None:

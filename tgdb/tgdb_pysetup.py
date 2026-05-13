@@ -430,6 +430,91 @@ def _collect_registers():
     return "ok"
 
 
+def _collect_frame_info():
+    """Collect current frame info and send via data pipe (tag ``f``).
+
+    Mirrors the data that ``-stack-info-frame`` returns: level, func,
+    addr, file, fullname, line, arch.
+    """
+    try:
+        frame = gdb.selected_frame()
+    except gdb.error:
+        _send_pipe_payload("f", {})
+        return "ok"
+
+    try:
+        sal = frame.find_sal()
+        func_name = frame.name() or ""
+        addr = hex(frame.pc())
+        if sal.symtab:
+            file_name = sal.symtab.filename or ""
+            fullname = sal.symtab.fullname() or ""
+        else:
+            file_name = ""
+            fullname = ""
+        line = sal.line
+    except gdb.error:
+        _send_pipe_payload("f", {})
+        return "ok"
+
+    try:
+        arch_name = frame.architecture().name()
+    except (gdb.error, AttributeError):
+        arch_name = ""
+
+    _send_pipe_payload("f", {
+        "level": 0,
+        "func": func_name,
+        "addr": addr,
+        "file": file_name,
+        "fullname": fullname,
+        "line": line,
+        "arch": arch_name,
+    })
+    return "ok"
+
+
+def _collect_breakpoints():
+    """Collect breakpoint info and send via data pipe (tag ``b``).
+
+    Mirrors the data that ``-break-list`` returns.
+    """
+    breakpoints = []
+    for bp in gdb.breakpoints():
+        if not bp.is_valid():
+            continue
+        loc = bp.location or ""
+        fullname = ""
+        file_name = ""
+        line_num = 0
+
+        if bp.location:
+            try:
+                sal = gdb.decode_line(bp.location)
+                if sal and sal[1]:
+                    first_sal = sal[1][0]
+                    if first_sal.symtab:
+                        file_name = first_sal.symtab.filename or ""
+                        fullname = first_sal.symtab.fullname() or ""
+                    line_num = first_sal.line
+            except (gdb.error, IndexError, TypeError):
+                pass
+
+        breakpoints.append({
+            "number": bp.number,
+            "file": file_name,
+            "fullname": fullname,
+            "line": line_num,
+            "addr": "",
+            "enabled": bp.enabled,
+            "temporary": bp.temporary,
+            "location": loc,
+        })
+
+    _send_pipe_payload("b", breakpoints)
+    return "ok"
+
+
 # ---------------------------------------------------------------------------
 # Convenience function registrations for pipe-based collection
 # ---------------------------------------------------------------------------
@@ -479,7 +564,31 @@ class _CollectRegistersFunc(gdb.Function):
         return _collect_registers()
 
 
+class _CollectFrameInfoFunc(gdb.Function):
+    """``$_tgdb_RSVD_collect_frame_info()`` — collect current frame via data pipe."""
+
+    def __init__(self):
+        super().__init__("_tgdb_RSVD_collect_frame_info")
+
+
+    def invoke(self):
+        return _collect_frame_info()
+
+
+class _CollectBreakpointsFunc(gdb.Function):
+    """``$_tgdb_RSVD_collect_breakpoints()`` — collect breakpoints via data pipe."""
+
+    def __init__(self):
+        super().__init__("_tgdb_RSVD_collect_breakpoints")
+
+
+    def invoke(self):
+        return _collect_breakpoints()
+
+
 _CollectLocalsFunc()
 _CollectStackFunc()
 _CollectThreadsFunc()
 _CollectRegistersFunc()
+_CollectFrameInfoFunc()
+_CollectBreakpointsFunc()

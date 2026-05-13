@@ -56,7 +56,11 @@ class ParsingMixin:
             # in an inconsistent state.  Surfacing them via ``on_error``
             # produces user-visible noise on essentially every stop in
             # those windows; the next stop's break-list will succeed.
-            self.mi_command("-break-list", report_error=False)
+            self.mi_command(
+                '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
+                report_error=False,
+                kind="pipe-collect-breakpoints",
+            )
         elif cls == "running":
             self._inferior_running = True
             self.current_frame = None

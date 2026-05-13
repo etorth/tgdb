@@ -25,6 +25,8 @@ Bulk data tags (payload = zlib-compressed JSON):
   ``s`` — stack frames
   ``t`` — thread info (dict with ``threads`` list + ``current-thread-id``)
   ``r`` — register values
+  ``f`` — current frame info (dict with level/func/addr/file/fullname/line)
+  ``b`` — breakpoint list
 """
 
 import asyncio
@@ -35,6 +37,7 @@ import struct
 import zlib
 
 from .types import (
+    Breakpoint,
     Frame,
     LocalVariable,
     RegisterInfo,
@@ -59,7 +62,7 @@ _FIXED_PAYLOAD = {
 }
 
 # Tags that carry variable-length zlib-compressed JSON payloads.
-_DATA_TAGS = frozenset(b"lstr")
+_DATA_TAGS = frozenset(b"lstrbf")
 
 
 class PipeDataMixin:
@@ -203,6 +206,10 @@ class PipeDataMixin:
             self._handle_pipe_threads(data)
         elif tag_byte == ord(b"r"):
             self._handle_pipe_registers(data)
+        elif tag_byte == ord(b"f"):
+            self._handle_pipe_frame_info(data)
+        elif tag_byte == ord(b"b"):
+            self._handle_pipe_breakpoints(data)
         else:
             _log.debug(f"pipe: unknown data tag {chr(tag_byte)!r}")
 
@@ -336,3 +343,66 @@ class PipeDataMixin:
         self._register_values = values
         self.registers = registers
         self.on_registers(list(registers))
+
+
+    def _handle_pipe_frame_info(self, data: dict) -> None:
+        """Parse frame info from pipe JSON and drive the frame-changed chain.
+
+        Mirrors ``_handle_frame_result`` in ``results.py``: sets
+        ``current_frame``, fires ``on_frame_changed`` / ``on_source_file``,
+        and kicks off locals/stack/threads/registers collection.
+        """
+        if self._inferior_running:
+            return
+        if not isinstance(data, dict) or not data:
+            self.request_source_file(report_error=False)
+            return
+
+        parsed = Frame(
+            level=int(data.get("level", 0)),
+            file=data.get("file", ""),
+            fullname=data.get("fullname", ""),
+            line=int(data.get("line", 0)),
+            func=data.get("func", ""),
+            addr=data.get("addr", ""),
+        )
+        _log.debug(f"pipe frame: {parsed.func} {parsed.file}:{parsed.line}")
+        self.current_frame = parsed
+        path = parsed.fullname or parsed.file
+        self.on_frame_changed(parsed)
+        if path:
+            self.on_source_file(path, parsed.line)
+        else:
+            self.request_source_file(report_error=False)
+
+        self.request_current_frame_locals(report_error=False)
+        self.request_current_stack_frames(report_error=False)
+        self.request_current_threads(report_error=False)
+        self.request_current_registers(report_error=False)
+
+
+    def _handle_pipe_breakpoints(self, data: list) -> None:
+        """Parse breakpoint list from pipe JSON and fire ``on_breakpoints``."""
+        if not isinstance(data, list):
+            return
+
+        new_bps: list[Breakpoint] = []
+        for raw in data:
+            if not isinstance(raw, dict):
+                continue
+            num = int(raw.get("number", 0))
+            if num:
+                new_bps.append(
+                    Breakpoint(
+                        number=num,
+                        file=raw.get("file", ""),
+                        fullname=raw.get("fullname", ""),
+                        line=int(raw.get("line", 0)),
+                        addr=raw.get("addr", ""),
+                        enabled=bool(raw.get("enabled", True)),
+                        temporary=bool(raw.get("temporary", False)),
+                    )
+                )
+        _log.info(f"pipe breaklist: {len(new_bps)} breakpoints")
+        self.breakpoints = new_bps
+        self.on_breakpoints(list(self.breakpoints))

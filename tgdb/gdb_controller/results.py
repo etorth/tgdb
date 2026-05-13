@@ -33,6 +33,8 @@ class GDBResultMixin:
         report = bool(meta.get("report_error", True))
         if kind == "current-location":
             self.request_source_file(report_error=report)
+        elif kind == "pipe-collect-frame-info":
+            self.request_source_file(report_error=report)
         elif kind == "stack-locals":
             self.locals = []
             self.on_locals([])
