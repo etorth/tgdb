@@ -145,7 +145,7 @@ class VarobjMixin:
         """
         try:
             raw = await self._eval_expr_raw(
-                "$get_locals_b64()", timeout=self._GET_LOCALS_TIMEOUT,
+                "$_tgdb_RSVD_get_locals_base64()", timeout=self._GET_LOCALS_TIMEOUT,
             )
         except RuntimeError as exc:
             _log.debug(f"get_locals failed: {exc}")

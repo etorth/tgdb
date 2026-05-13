@@ -163,39 +163,33 @@ class GDBRequestMixin:
 
     def request_current_frame_locals(self, *, report_error: bool = False) -> None:
         self.mi_command(
-            "-stack-list-variables --all-values",
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_locals()"',
             report_error=report_error,
-            kind="stack-locals",
+            kind="pipe-collect-locals",
         )
 
 
     def request_current_stack_frames(self, *, report_error: bool = False) -> None:
         self.mi_command(
-            "-stack-list-frames",
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_stack()"',
             report_error=report_error,
-            kind="stack-frames",
+            kind="pipe-collect-stack",
         )
 
 
     def request_current_threads(self, *, report_error: bool = False) -> None:
         self.mi_command(
-            "-thread-info",
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_threads()"',
             report_error=report_error,
-            kind="thread-info",
+            kind="pipe-collect-threads",
         )
 
 
     def request_current_registers(self, *, report_error: bool = False) -> None:
-        if not self.register_names:
-            self.mi_command(
-                "-data-list-register-names",
-                report_error=report_error,
-                kind="register-names",
-            )
         self.mi_command(
-            "-data-list-register-values x",
+            '-data-evaluate-expression "$_tgdb_RSVD_collect_registers()"',
             report_error=report_error,
-            kind="register-values",
+            kind="pipe-collect-registers",
         )
 
 

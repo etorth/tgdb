@@ -34,6 +34,7 @@ from .types import (  # noqa: F401 — re-exported
 )
 from .varobj import VarobjMixin
 from .parsing import ParsingMixin
+from .pipe_data import PipeDataMixin
 # GDB/MI output parser — uses GDBMIParser extracted from pygdbmi
 # ---------------------------------------------------------------------------
 
@@ -52,7 +53,7 @@ _MI_BUF_MAX_BYTES = 16 * 1024 * 1024
 # ---------------------------------------------------------------------------
 
 
-class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
+class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, PipeDataMixin):
     """Drive GDB through a console PTY plus a structured MI PTY.
 
     Public interface
@@ -122,6 +123,13 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         # by tgdb's asyncio loop.
         self._prompt_pipe_r: int = -1
         self._prompt_pipe_w: int = -1
+        # Second inheritable pipe dedicated to bulk data payloads.  The
+        # GDB-side collection functions (``_collect_locals`` etc.) write
+        # length-prefixed zlib-compressed JSON frames to the write end;
+        # tgdb reads them on the read end via asyncio.
+        self._data_pipe_r: int = -1
+        self._data_pipe_w: int = -1
+        self._data_buf: bytes = b""
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
@@ -224,6 +232,20 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         flags = fcntl.fcntl(prompt_pipe_w, fcntl.F_GETFL)
         fcntl.fcntl(prompt_pipe_w, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
+        # Create the data pipe for bulk payloads (locals, registers,
+        # threads, stack).  The write end stays blocking so the GDB-side
+        # Python retry loop can complete large writes; the read end is
+        # watched by asyncio.  Enlarge the kernel buffer to 1 MB so
+        # compressed frames don't stall the writer.
+        data_pipe_r, data_pipe_w = os.pipe()
+        self._data_pipe_r = data_pipe_r
+        self._data_pipe_w = data_pipe_w
+        os.set_inheritable(data_pipe_w, True)
+        try:
+            fcntl.fcntl(data_pipe_r, 1031, 1024 * 1024)  # F_SETPIPE_SZ
+        except OSError:
+            pass
+
         cmd: list[str] = []
         try:
             # Disable echo on MI slave so our written commands don't echo back
@@ -248,7 +270,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             self._proc = ptyprocess.PtyProcess.spawn(
                 cmd,
                 dimensions=(rows, cols),
-                pass_fds=[prompt_pipe_w],
+                pass_fds=[prompt_pipe_w, data_pipe_w],
             )
         except Exception:
             _log.error(f"GDB spawn failed, cmd={cmd!r}")
@@ -316,6 +338,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             fds.append(self._mi_master_fd)
         if self._prompt_pipe_r >= 0:
             fds.append(self._prompt_pipe_r)
+        if self._data_pipe_r >= 0:
+            fds.append(self._data_pipe_r)
         return fds
 
 
@@ -375,7 +399,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
                 except Exception:
                     pass
 
-        for attr in ("_mi_master_fd", "_mi_slave_fd", "_prompt_pipe_r", "_prompt_pipe_w"):
+        for attr in ("_mi_master_fd", "_mi_slave_fd", "_prompt_pipe_r", "_prompt_pipe_w", "_data_pipe_r", "_data_pipe_w"):
             fd = getattr(self, attr, -1)
             if fd >= 0:
                 try:
@@ -416,6 +440,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         self._pending_regnums: set[int] = set()
         if self._prompt_pipe_r >= 0:
             loop.add_reader(self._prompt_pipe_r, self._on_notify_pipe_readable)
+        if self._data_pipe_r >= 0:
+            loop.add_reader(self._data_pipe_r, self._on_data_pipe_readable)
         _log.info("MI reader started")
 
         # Load tgdb's embedded GDB/Python helpers before stop handling needs
@@ -428,6 +454,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
         if self._prompt_pipe_w >= 0:
             self.mi_command(
                 f'-interpreter-exec console "python register_event_notify_fd({self._prompt_pipe_w})"',
+                report_error=False,
+            )
+        if self._data_pipe_w >= 0:
+            self.mi_command(
+                f'-interpreter-exec console "python register_data_pipe_fd({self._data_pipe_w})"',
                 report_error=False,
             )
 
@@ -447,6 +478,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin):
             if self._prompt_pipe_r >= 0:
                 try:
                     loop.remove_reader(self._prompt_pipe_r)
+                except Exception:
+                    pass
+            if self._data_pipe_r >= 0:
+                try:
+                    loop.remove_reader(self._data_pipe_r)
                 except Exception:
                     pass
             _log.info("GDB exited")

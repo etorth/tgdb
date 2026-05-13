@@ -167,7 +167,7 @@ class GDBResultMixin:
         else:
             self.request_source_file(report_error=report)
 
-        supervise(self._publish_locals_async(), name="publish-locals")
+        self.request_current_frame_locals(report_error=False)
         self.request_current_stack_frames(report_error=False)
         self.request_current_threads(report_error=False)
         self.request_current_registers(report_error=False)

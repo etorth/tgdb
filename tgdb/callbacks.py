@@ -628,10 +628,7 @@ class CallbacksMixin:
 
     def _flush_memory_changed(self) -> None:
         self._memory_changed_pending = False
-        supervise(
-            self.gdb._publish_locals_async(),
-            name="locals-after-memory-changed",
-        )
+        self.gdb.request_current_frame_locals(report_error=False)
         if self._evaluate_pane is not None:
             supervise(
                 self._evaluate_pane.refresh_all(),

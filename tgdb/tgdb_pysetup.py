@@ -2,6 +2,7 @@ import gdb
 import json
 import base64
 import os
+import zlib
 
 # Lift GDB's memory read limit so str(val) never fails for large variables.
 try:
@@ -111,6 +112,63 @@ def _try_connect(event_name, handler):
         pass
 
 
+_data_pipe_fd = None
+
+
+def register_data_pipe_fd(fd):
+    """Register the data pipe fd for bulk data transfer to tgdb.
+
+    tgdb opens a second inheritable pipe dedicated to large payloads.
+    The GDB-side collection functions serialize data as JSON, compress
+    it with zlib, and write length-prefixed frames to this fd.  The
+    event-notify pipe stays separate for lightweight event lines.
+
+    Frame format: ``[4-byte BE length][1-byte tag][zlib-compressed JSON]``.
+    """
+    global _data_pipe_fd
+    _data_pipe_fd = fd
+
+
+def _send_pipe_payload(tag, data):
+    """Serialize *data* as JSON, zlib-compress, and write a framed payload.
+
+    Returns True on success, False if the pipe is not registered or the
+    write fails.
+    """
+    fd = _data_pipe_fd
+    if fd is None:
+        return False
+    json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
+    compressed = zlib.compress(json_bytes)
+    tag_byte = tag.encode("ascii")[:1] if isinstance(tag, str) else tag[:1]
+    payload = tag_byte + compressed
+    header = len(payload).to_bytes(4, "big")
+    buf = header + payload
+    try:
+        written = 0
+        while written < len(buf):
+            n = os.write(fd, buf[written:])
+            if n <= 0:
+                return False
+            written += n
+        return True
+    except OSError:
+        return False
+
+
+def _format_value(val):
+    """Format a gdb.Value with unlimited elements per-call.
+
+    Uses ``format_string(max_elements=0)`` when available (GDB 9.1+)
+    to avoid contaminating global ``set print elements`` settings.
+    Falls back to ``str(val)`` on older builds.
+    """
+    try:
+        return val.format_string(max_elements=0)
+    except (TypeError, AttributeError):
+        return str(val)
+
+
 def _is_builtin_local_name(name):
     """Return True for compiler-generated locals we should hide.
 
@@ -129,7 +187,7 @@ def _is_builtin_local_name(name):
     return name.startswith("__for_")
 
 
-def get_locals_b64():
+def _tgdb_RSVD_get_locals_base64():
     # Set print elements/characters to unlimited so that GDB does not truncate
     # variable values or the base64 return string.  Done here (inside the
     # convenience function) rather than from tgdb via MI commands so that the
@@ -250,19 +308,337 @@ def get_locals_b64():
     return base64.b64encode(json.dumps(all_vars, indent=2).encode()).decode("ascii")
 
 
-class _GetLocalsB64Func(gdb.Function):
-    """GDB convenience function ``$get_locals_b64()`` backed by get_locals_b64().
+class _GetLocalsBase64Func(gdb.Function):
+    """GDB convenience function ``$_tgdb_RSVD_get_locals_base64()`` backed by
+    _tgdb_RSVD_get_locals_base64().
 
-    Instantiating this class registers ``$get_locals_b64`` with GDB's Python
-    runtime as a side effect of gdb.Function.__init__().
+    Instantiating this class registers ``$_tgdb_RSVD_get_locals_base64`` with
+    GDB's Python runtime as a side effect of gdb.Function.__init__().
     """
 
     def __init__(self):
-        super().__init__("get_locals_b64")
+        super().__init__("_tgdb_RSVD_get_locals_base64")
 
 
     def invoke(self):
-        return get_locals_b64()
+        return _tgdb_RSVD_get_locals_base64()
 
 
-_GetLocalsB64Func()
+_GetLocalsBase64Func()
+
+
+# ---------------------------------------------------------------------------
+# Pipe-based collection functions
+#
+# Each function collects data using GDB's Python API, serializes it as
+# JSON, zlib-compresses the bytes, and writes a length-prefixed frame to
+# the data pipe.  The MI return value is a tiny "ok" string so the MI
+# channel is never congested by the payload.
+# ---------------------------------------------------------------------------
+
+
+def _collect_locals():
+    """Collect local variables and send via data pipe (tag ``L``)."""
+    try:
+        frame = gdb.selected_frame()
+    except gdb.error:
+        _send_pipe_payload("L", [])
+        return "ok"
+
+    try:
+        block = frame.block()
+    except (gdb.error, RuntimeError) as exc:
+        if "Cannot locate block" in str(exc):
+            _send_pipe_payload("L", [])
+            return "ok"
+        raise
+
+    sal = frame.find_sal()
+    current_line = sal.line
+
+    depth = 0
+    all_vars = []
+    seen_names = set()
+
+    while block:
+        for symbol in block:
+            if not (symbol.is_variable or symbol.is_argument):
+                continue
+
+            name = symbol.name
+            if _is_builtin_local_name(name):
+                continue
+
+            decl_line = symbol.line
+            if current_line > 0 and not symbol.is_argument:
+                if decl_line > 0 and decl_line >= current_line:
+                    continue
+
+            type_obj = symbol.type.strip_typedefs()
+
+            is_lref = type_obj.code == gdb.TYPE_CODE_REF
+            is_rref = type_obj.code == gdb.TYPE_CODE_RVALUE_REF
+            is_reference = is_lref or is_rref
+
+            try:
+                val = symbol.value(frame)
+                val_str = _format_value(val)
+
+                if is_reference:
+                    try:
+                        addr_str = str(val.referenced_value().address)
+                    except Exception:
+                        addr_str = "unknown (referenced target)"
+                else:
+                    addr_str = str(val.address) if val.address else "register"
+
+            except Exception:
+                val_str = "<optimized out>"
+                addr_str = "unknown"
+
+            is_shadowed = name in seen_names
+
+            if is_lref:
+                ref_kind = "lvalue (&)"
+            elif is_rref:
+                ref_kind = "rvalue (&&)"
+            else:
+                ref_kind = None
+
+            all_vars.append({
+                "name": name,
+                "value": val_str,
+                "type": str(symbol.type),
+                "is_arg": symbol.is_argument,
+                "is_reference": is_reference,
+                "ref_kind": ref_kind,
+                "line": decl_line,
+                "addr": addr_str,
+                "depth": depth,
+                "is_shadowed": is_shadowed,
+                "scope_start": hex(block.start),
+            })
+
+            seen_names.add(name)
+
+        if block.superblock is None:
+            break
+
+        if block.function is not None:
+            break
+
+        block = block.superblock
+        depth += 1
+
+    _send_pipe_payload("L", all_vars)
+    return "ok"
+
+
+def _collect_stack():
+    """Collect stack frames and send via data pipe (tag ``S``)."""
+    frames = []
+    try:
+        frame = gdb.newest_frame()
+    except gdb.error:
+        _send_pipe_payload("S", [])
+        return "ok"
+
+    level = 0
+    while frame:
+        try:
+            sal = frame.find_sal()
+            func_name = frame.name() or ""
+            addr = hex(frame.pc())
+            if sal.symtab:
+                file_name = sal.symtab.filename or ""
+                fullname = sal.symtab.fullname or ""
+            else:
+                file_name = ""
+                fullname = ""
+            line = sal.line
+        except gdb.error:
+            func_name = ""
+            addr = "0x0"
+            file_name = ""
+            fullname = ""
+            line = 0
+
+        frames.append({
+            "level": level,
+            "func": func_name,
+            "addr": addr,
+            "file": file_name,
+            "fullname": fullname,
+            "line": line,
+        })
+
+        level += 1
+        try:
+            frame = frame.older()
+        except gdb.error:
+            break
+
+    _send_pipe_payload("S", frames)
+    return "ok"
+
+
+def _collect_threads():
+    """Collect thread info and send via data pipe (tag ``T``)."""
+    try:
+        inferior = gdb.selected_inferior()
+        thread_list = list(inferior.threads())
+    except gdb.error:
+        _send_pipe_payload("T", {"threads": [], "current-thread-id": ""})
+        return "ok"
+
+    try:
+        original_thread = gdb.selected_thread()
+    except gdb.error:
+        original_thread = None
+
+    current_thread_id = ""
+    if original_thread:
+        current_thread_id = str(original_thread.global_num)
+
+    threads = []
+    for thread in thread_list:
+        tid = str(thread.global_num)
+
+        try:
+            target_id = thread.ptid_string
+        except AttributeError:
+            pid, lwp, _tid = thread.ptid
+            target_id = f"LWP {lwp}" if lwp else f"process {pid}"
+
+        name = thread.name or ""
+        is_stopped = thread.is_stopped()
+        state = "stopped" if is_stopped else "running"
+
+        frame_info = None
+        if is_stopped:
+            try:
+                thread.switch()
+                frame = gdb.selected_frame()
+                sal = frame.find_sal()
+                frame_info = {
+                    "level": 0,
+                    "func": frame.name() or "",
+                    "addr": hex(frame.pc()),
+                    "file": sal.symtab.filename if sal.symtab else "",
+                    "fullname": sal.symtab.fullname if sal.symtab else "",
+                    "line": sal.line,
+                }
+            except gdb.error:
+                pass
+
+        threads.append({
+            "id": tid,
+            "target-id": target_id,
+            "name": name,
+            "state": state,
+            "core": "",
+            "frame": frame_info,
+        })
+
+    if original_thread:
+        try:
+            original_thread.switch()
+        except gdb.error:
+            pass
+
+    _send_pipe_payload("T", {
+        "threads": threads,
+        "current-thread-id": current_thread_id,
+    })
+    return "ok"
+
+
+def _collect_registers():
+    """Collect register values and send via data pipe (tag ``R``)."""
+    try:
+        frame = gdb.selected_frame()
+        arch = frame.architecture()
+    except gdb.error:
+        _send_pipe_payload("R", [])
+        return "ok"
+
+    registers = []
+    try:
+        for number, reg in enumerate(arch.registers()):
+            if not reg.name:
+                continue
+            try:
+                val = frame.read_register(reg)
+                try:
+                    val_str = val.format_string(format="x")
+                except (TypeError, AttributeError):
+                    val_str = str(val)
+            except gdb.error:
+                val_str = ""
+
+            registers.append({
+                "name": reg.name,
+                "value": val_str,
+                "number": number,
+            })
+    except (gdb.error, AttributeError):
+        _send_pipe_payload("R", [])
+        return "ok"
+
+    _send_pipe_payload("R", registers)
+    return "ok"
+
+
+# ---------------------------------------------------------------------------
+# Convenience function registrations for pipe-based collection
+# ---------------------------------------------------------------------------
+
+
+class _CollectLocalsFunc(gdb.Function):
+    """``$_tgdb_RSVD_collect_locals()`` — collect locals via data pipe."""
+
+    def __init__(self):
+        super().__init__("_tgdb_RSVD_collect_locals")
+
+
+    def invoke(self):
+        return _collect_locals()
+
+
+class _CollectStackFunc(gdb.Function):
+    """``$_tgdb_RSVD_collect_stack()`` — collect stack frames via data pipe."""
+
+    def __init__(self):
+        super().__init__("_tgdb_RSVD_collect_stack")
+
+
+    def invoke(self):
+        return _collect_stack()
+
+
+class _CollectThreadsFunc(gdb.Function):
+    """``$_tgdb_RSVD_collect_threads()`` — collect thread info via data pipe."""
+
+    def __init__(self):
+        super().__init__("_tgdb_RSVD_collect_threads")
+
+
+    def invoke(self):
+        return _collect_threads()
+
+
+class _CollectRegistersFunc(gdb.Function):
+    """``$_tgdb_RSVD_collect_registers()`` — collect register values via data pipe."""
+
+    def __init__(self):
+        super().__init__("_tgdb_RSVD_collect_registers")
+
+
+    def invoke(self):
+        return _collect_registers()
+
+
+_CollectLocalsFunc()
+_CollectStackFunc()
+_CollectThreadsFunc()
+_CollectRegistersFunc()

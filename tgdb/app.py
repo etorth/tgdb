@@ -202,10 +202,7 @@ class TGDBApp(
                 "Locals",
                 self._make_local_variable_pane,
                 lambda: self._locals_pane,
-                lambda: supervise(
-                    self.gdb._publish_locals_async(),
-                    name="publish-locals-from-pane",
-                ),
+                lambda: self.gdb.request_current_frame_locals(report_error=False),
             ),
             "registers": PaneDescriptor(
                 "Registers",
