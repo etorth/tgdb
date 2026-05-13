@@ -55,9 +55,11 @@ def register_pipe_fd(fd):
         active_fd = _pipe_fd
         if active_fd is None:
             return
-        header = tag_byte + struct.pack(">I", len(payload)) + payload
         try:
-            os.write(active_fd, header)
+            if payload:
+                os.write(active_fd, tag_byte + payload)
+            else:
+                os.write(active_fd, tag_byte)
         except (BlockingIOError, OSError):
             pass
 
@@ -123,7 +125,7 @@ def _send_pipe_payload(tag, data):
     json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
     compressed = zlib.compress(json_bytes)
     tag_byte = tag.encode("ascii")[:1] if isinstance(tag, str) else tag[:1]
-    header = tag_byte + struct.pack(">I", len(compressed))
+    header = tag_byte + struct.pack(">Q", len(compressed))
     buf = header + compressed
     try:
         written = 0

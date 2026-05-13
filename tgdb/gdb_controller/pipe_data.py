@@ -3,25 +3,26 @@
 Provides ``PipeDataMixin``, which reads binary frames from the single
 GDB→tgdb pipe.  The pipe carries both lightweight events (before-prompt,
 register-changed, objfile, inferior-call, gdb-exiting) and bulk data
-payloads (locals, stack, threads, registers) in one stream.
+payloads (locals, stack, threads, registers, frame info, breakpoints)
+in one stream.
 
 Frame format
 ~~~~~~~~~~~~
-``[1-byte tag][4-byte BE payload_length][payload]``
+The tag byte alone determines the frame structure:
 
-Lightweight event tags (payload_length = 0):
+No-payload tags (1 byte total):
   ``P`` — before_prompt
   ``O`` — new_objfile
   ``F`` — free_objfile
   ``C`` — clear_objfiles
   ``X`` — gdb_exiting
 
-Event tags with small payload:
+Fixed-payload tags (tag + fixed-size payload, no length field):
   ``R`` — register_changed (4-byte signed BE regnum, -1 = all)
   ``I`` — inferior_call (1 byte: 0x00 = pre, 0x01 = post)
 
-Bulk data tags (payload = zlib-compressed JSON):
-  ``l`` — local variables
+Bulk data tags (``[1-byte tag][8-byte BE payload_length][payload]``):
+  ``l`` — local variables (zlib-compressed JSON)
   ``s`` — stack frames
   ``t`` — thread info (dict with ``threads`` list + ``current-thread-id``)
   ``r`` — register values
@@ -52,16 +53,17 @@ _log = logging.getLogger("tgdb.gdb_controller")
 # programs with thousands of threads and locals.
 _PIPE_BUF_MAX_BYTES = 16 * 1024 * 1024
 
-# Tags that carry no payload (5 bytes total: tag + 4 zero bytes).
+# Tags that carry no payload (1 byte total — tag only).
 _ZERO_PAYLOAD_TAGS = frozenset(b"POFCX")
 
-# Tags with fixed-size payloads.
+# Tags with fixed-size payloads (tag + payload, no length field).
 _FIXED_PAYLOAD = {
     ord(b"R"): 4,   # 4-byte signed BE regnum
     ord(b"I"): 1,   # 1-byte pre/post flag
 }
 
 # Tags that carry variable-length zlib-compressed JSON payloads.
+# Frame: [1-byte tag][8-byte BE payload_length][payload]
 _DATA_TAGS = frozenset(b"lstrbf")
 
 
@@ -117,28 +119,20 @@ class PipeDataMixin:
     def _process_pipe_frames(self) -> None:
         """Parse and dispatch complete frames from the unified pipe.
 
-        Frame format: ``[1-byte tag][4-byte BE payload_length][payload]``.
+        The tag byte determines the frame structure:
+        - No-payload tags: 1 byte total (tag only).
+        - Fixed-payload tags: 1 + N bytes (tag + known payload size).
+        - Data tags: 1 + 8 + payload_length bytes (tag + 8-byte BE length + payload).
         """
         prompt_pending = False
         objfiles_pending = False
         pending_regnums: set[int] = set()
 
-        while len(self._pipe_buf) >= 5:
+        while self._pipe_buf:
             tag_byte = self._pipe_buf[0]
-            payload_len = struct.unpack_from(">I", self._pipe_buf, 1)[0]
-            total = 5 + payload_len
-            if payload_len > _PIPE_BUF_MAX_BYTES:
-                _log.warning(f"pipe: invalid payload size {payload_len}; resetting")
-                self._pipe_buf = b""
-                return
-
-            if len(self._pipe_buf) < total:
-                break
-
-            payload = self._pipe_buf[5:total]
-            self._pipe_buf = self._pipe_buf[total:]
 
             if tag_byte in _ZERO_PAYLOAD_TAGS:
+                self._pipe_buf = self._pipe_buf[1:]
                 if tag_byte == ord(b"P"):
                     prompt_pending = True
                 elif tag_byte in (ord(b"O"), ord(b"F"), ord(b"C")):
@@ -148,21 +142,42 @@ class PipeDataMixin:
                         self.on_gdb_exiting()
                     except Exception:
                         _log.debug("gdb_exiting callback raised", exc_info=True)
-            elif tag_byte == ord(b"R"):
-                if len(payload) >= 4:
+
+            elif tag_byte in _FIXED_PAYLOAD:
+                fixed_size = _FIXED_PAYLOAD[tag_byte]
+                total = 1 + fixed_size
+                if len(self._pipe_buf) < total:
+                    break
+                payload = self._pipe_buf[1:total]
+                self._pipe_buf = self._pipe_buf[total:]
+
+                if tag_byte == ord(b"R"):
                     regnum = struct.unpack(">i", payload[:4])[0]
                     if regnum < 0:
                         regnum = -1
                     pending_regnums.add(regnum)
-            elif tag_byte == ord(b"I"):
-                try:
-                    if payload and payload[0] == 0:
-                        self.on_inferior_call_pre()
-                    else:
-                        self.on_inferior_call_post()
-                except Exception:
-                    _log.debug("inferior_call callback raised", exc_info=True)
+                elif tag_byte == ord(b"I"):
+                    try:
+                        if payload[0] == 0:
+                            self.on_inferior_call_pre()
+                        else:
+                            self.on_inferior_call_post()
+                    except Exception:
+                        _log.debug("inferior_call callback raised", exc_info=True)
+
             elif tag_byte in _DATA_TAGS:
+                if len(self._pipe_buf) < 9:
+                    break
+                payload_len = struct.unpack_from(">Q", self._pipe_buf, 1)[0]
+                if payload_len > _PIPE_BUF_MAX_BYTES:
+                    _log.warning(f"pipe: invalid payload size {payload_len}; resetting")
+                    self._pipe_buf = b""
+                    return
+                total = 9 + payload_len
+                if len(self._pipe_buf) < total:
+                    break
+                payload = self._pipe_buf[9:total]
+                self._pipe_buf = self._pipe_buf[total:]
                 try:
                     json_bytes = zlib.decompress(payload)
                     data = json.loads(json_bytes)
@@ -170,8 +185,10 @@ class PipeDataMixin:
                     _log.warning(f"pipe: frame decode failed (tag={chr(tag_byte)!r}): {exc!r}")
                     continue
                 self._dispatch_pipe_data(tag_byte, data)
+
             else:
                 _log.debug(f"pipe: unknown tag 0x{tag_byte:02x}")
+                self._pipe_buf = self._pipe_buf[1:]
 
         # Coalesced event dispatch — at most one callback per tag per read.
         if objfiles_pending:
