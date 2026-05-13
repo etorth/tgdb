@@ -283,3 +283,135 @@ locals-pane MI sequence that tgdb itself used to issue:
 ``vv.public.index.[N]`` element child sequentially.  On the affected
 GDB build the third such update lands the assertion
 deterministically (`[0]` and `[1]` succeed, `[2]` crashes).
+
+---
+
+## Bug 3: `call_function_by_hand_dummy` FSM assertion crash
+
+### Symptom
+
+GDB aborts with an internal error during a tgdb session.  The user sees
+the debug session terminate abruptly; tgdb logs `GDB process exited`
+warnings and the MI channel goes dead.
+
+### Trigger
+
+The crash is a dual-UI race condition.  tgdb creates a secondary MI
+channel via `new-ui mi <pty>`.  GDB then has two active UIs:
+
+- **UI-0 (primary console PTY)**: receives user keystrokes
+- **UI-1 (new-ui MI channel)**: receives tgdb's MI commands
+
+The race sequence observed in production (`tgdb.bug.log`):
+
+1. The inferior is stopped at a frame with complex C++ locals
+   (smart pointers, futures, lambdas — 107 locals total).
+2. tgdb sends `-stack-list-variables --all-values` on the MI channel
+   (UI-1).  For certain C++ types, GDB's value-printing path
+   internally calls `call_function_by_hand` (e.g. for operator
+   evaluation, xmethod dispatch, or pretty-printer callbacks).
+3. Inside `call_function_by_hand_dummy`, GDB saves the current
+   thread FSM, creates a new one (`sm`), and enters
+   `run_inferior_call` → `wait_sync_command_done` → event loop.
+4. Critically, `run_inferior_call` only unregisters the **current**
+   UI's file handler (`current_ui->unregister_file_handler()`),
+   leaving UI-0's input handler active in the event loop.
+5. The user presses Enter on the primary console (repeating the
+   last `next` command).  The event loop dispatches the console
+   input handler → GDB executes `next` → `clear_proceed_status(1)`
+   → `clear_proceed_status_thread()` iterates all threads in
+   all-stop mode → `release_thread_fsm()` destroys `sm`.
+6. Back in `call_function_by_hand_dummy`, the assertion
+   `call_thread->thread_fsm() == sm` fails because `sm` has been
+   released.
+
+The race is timing-dependent: the console input must arrive and be
+processed during the narrow window where `wait_sync_command_done` is
+in its event loop.
+
+### Crash signature
+
+```
+infcall.c:1594: internal-error: call_function_by_hand_dummy:
+  Assertion `call_thread->thread_fsm () == sm' failed.
+```
+
+(line number varies by GDB build).  Followed by:
+
+```
+A problem internal to GDB has been detected, further debugging may
+prove unreliable.
+
+Quit this debugging session? (y or n) [answered Y; ...]
+Create a core file of GDB? (y or n) [answered Y; ...]
+```
+
+### Affected versions
+
+Confirmed on Ubuntu 24.04 GDB (likely 14.x / 15.x) with libstdc++
+pretty-printers enabled.  First observed 2026-05-11 in production log
+(`tgdb.bug.log`) when the user's binary had 107 locals at the stopped
+frame.  The log shows the user repeatedly pressing Enter on the
+console while tgdb was sending MI commands on the secondary channel.
+The crashing sequence was:
+
+```
+MI->: b'1597-stack-list-variables --all-values'     (triggers call_function_by_hand)
+GDB input: b'\r'                                     (console Enter, repeats "next")
+MI<-: &"infcall.c:1594: internal-error: ..."         (assertion failure)
+```
+
+### GDB source analysis
+
+The bug is in `gdb/infcall.c` (`call_function_by_hand_dummy`) and
+`gdb/infcall.c` (`run_inferior_call`):
+
+- Line 808: `current_ui->unregister_file_handler()` — only the
+  current UI (MI), not the console UI.
+- Line 813: `clear_proceed_status(0)` — clears old FSMs.
+- Line 817: `set_thread_fsm(sm)` — installs new infcall FSM.
+- Line 835: `proceed()` → line 853: `wait_sync_command_done()` →
+  event loop via `gdb_do_one_event()`.
+- The event loop (`gdbsupport/event-loop.cc:189`) processes I/O from
+  **all** registered file descriptors (all UIs), round-robin.
+- If console input arrives during this loop, it dispatches the
+  console handler → step/next → `clear_proceed_status(1)` →
+  `clear_proceed_status_thread()` at `infrun.c:3078` calls
+  `release_thread_fsm()` on every thread → destroys `sm`.
+- Back in `call_function_by_hand_dummy` at line 1594:
+  `gdb_assert(call_thread->thread_fsm() == sm)` fails.
+
+### tgdb workaround
+
+From tgdb's side, two mitigations reduce exposure:
+
+1. **Remove `-stack-list-variables --all-values`**: this command is the
+   primary trigger because it internally invokes `call_function_by_hand`
+   for complex C++ types.  Using `get_locals_b64()` (GDB-side Python)
+   instead avoids the inferior call path.
+
+2. **Cancel-and-replace for heavy MI commands**: only one in-flight
+   heavy command at a time prevents MI queue pile-up.
+
+Planned architectural fix: move all heavy data collection to the
+existing pipe between tgdb and GDB (json → zlib → pipe), keeping the
+MI channel for lightweight control commands only.
+
+### Reproducer
+
+Run [`../known_gdb_bug_reproduce/bug_3.py`](../known_gdb_bug_reproduce/bug_3.py).
+Exit code 0 = bug reproduced (GDB asserted / exited), 1 = not reproduced,
+2 = `gdb`/`g++` not in PATH, 3 = setup diverged.
+
+The reproducer creates a binary with `std::string` locals, stops at a
+breakpoint, then simultaneously:
+- sends `-data-evaluate-expression "s1 + s2 + s3"` on the MI channel
+  (triggers `call_function_by_hand` via `operator+`)
+- spams Enter on the primary console (repeats `next`)
+
+**Status**: the race window is extremely narrow with simple types.
+The reproducer has not yet reliably triggered the crash.  In production,
+the crash appears to require complex C++ types (smart pointers, futures,
+lambdas) whose value-printing takes long enough to widen the timing
+window.  The reproducer is provided as a starting point for further
+investigation with more complex test binaries.
