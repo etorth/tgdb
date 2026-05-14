@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from ..async_util import supervise
-from .types import quote_mi_string
+from .types import PendingEntry, quote_mi_string
 
 _log = logging.getLogger("tgdb.gdb_controller")
 
@@ -112,8 +112,15 @@ class GDBRequestMixin:
 
         When *expect_socket* is true, the Future waits for **both** the MI
         result and the socket data payload tagged with this token before
-        resolving.  Used for convenience function calls that return their
-        real payload through the AF_UNIX socketpair.
+        resolving.  The MI value determines the outcome:
+
+        - ``"done"``   — wait for socket data, resolve with socket payload
+        - ``"failed"`` — ``RuntimeError("gdb failed")``
+        - ``"cancelled"`` — ``asyncio.CancelledError("cancelled")``
+
+        On timeout, a cancel token is sent to GDB (for ``expect_socket``
+        commands) and the entry is removed from ``_pending`` so any
+        late-arriving MI/socket response is silently dropped.
         """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
@@ -122,51 +129,57 @@ class GDBRequestMixin:
             if raise_on_error:
                 raise RuntimeError("MI channel not open")
             return {}
+
         if expect_socket:
             self._request_meta[token]["expect_socket"] = True
-        self._pending[token] = future
-        # No ``asyncio.shield`` here: shielding the future kept it alive when
-        # the caller's task was cancelled, leaving an entry in ``_pending``
-        # forever and never resolving the inner future.  Letting the future
-        # cancel together with the caller — and guaranteeing cleanup via the
-        # finally block below — keeps the bookkeeping in lockstep with task
-        # lifetime.  PTY EOF and ``terminate()`` also reject pending futures
-        # via ``_fail_pending_futures``; that exception surfaces here as a
-        # RuntimeError out of the await and is propagated to the caller.
+        entry = PendingEntry(future=future, expect_socket=expect_socket)
+        self._pending[token] = entry
+
+        timeout_handle: asyncio.TimerHandle | None = None
+        if timeout is not None:
+            def _on_timeout() -> None:
+                e = self._pending.pop(token, None)
+                self._request_meta.pop(token, None)
+                if e is not None and not e.future.done():
+                    e.future.set_exception(
+                        TimeoutError("MI command timed out — GDB may be busy")
+                    )
+                    if e.expect_socket:
+                        self.send_cancel_token(token)
+            timeout_handle = loop.call_later(timeout, _on_timeout)
+
         try:
-            if timeout is None:
-                result = await future
-            else:
-                result = await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError as exc:
+            result = await future
+        except TimeoutError:
             if raise_on_error:
-                raise RuntimeError("MI command timed out — GDB may be busy") from exc
+                raise RuntimeError("MI command timed out — GDB may be busy")
             return {}
         except (RuntimeError, asyncio.CancelledError):
-            # Future rejected by _fail_pending_futures (GDB exit / PTY EOF)
-            # or task cancelled during shutdown.  Treat as silent failure
-            # unless the caller explicitly opted into exceptions.
+            # Future rejected by _fail_pending_futures (GDB exit / PTY EOF),
+            # task cancelled during shutdown, or convenience function
+            # returned "failed" / "cancelled".
             if raise_on_error:
                 raise
             return {}
         finally:
-            # Drop bookkeeping in every exit path (timeout, cancel, shutdown
-            # rejection, normal return).  These pops are no-ops on the normal
-            # path because ``_handle_result`` already consumed the entries,
-            # and on the shutdown path because ``_fail_pending_futures``
-            # already cleared both dicts.
+            if timeout_handle is not None:
+                timeout_handle.cancel()
+            # Drop bookkeeping in every exit path.  These pops are no-ops
+            # when the entry was already consumed by _handle_result /
+            # _try_resolve_sock_pending, or removed by _on_timeout /
+            # _fail_pending_futures.
             self._pending.pop(token, None)
             self._request_meta.pop(token, None)
-            self._sock_results.pop(token, None)
-            self._sock_pending_tokens.discard(token)
-        message = result.get("message", "")
-        if message == "error" and raise_on_error:
-            payload = result.get("payload") or {}
-            if isinstance(payload, dict):
-                msg = payload.get("msg", "unknown MI error")
-            else:
-                msg = "unknown MI error"
-            raise RuntimeError(str(msg))
+
+        if not expect_socket:
+            message = result.get("message", "") if isinstance(result, dict) else ""
+            if message == "error" and raise_on_error:
+                payload = result.get("payload") or {}
+                if isinstance(payload, dict):
+                    msg = payload.get("msg", "unknown MI error")
+                else:
+                    msg = "unknown MI error"
+                raise RuntimeError(str(msg))
         return result
 
 

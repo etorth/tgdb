@@ -1,5 +1,6 @@
 """Result-handling helpers for ``GDBController``."""
 
+import asyncio
 import logging
 
 from ..async_util import supervise
@@ -15,47 +16,59 @@ class GDBResultMixin:
         results = rec.get("payload") or {}
         token = rec.get("token")
         meta: dict[str, object] = {}
+
         if token is not None:
-            expect_socket = self._request_meta.get(token, {}).get("expect_socket", False)
-            if expect_socket:
-                # Two-part completion: wait for BOTH MI result and socket data.
-                # Detect cancellation from the MI value — the convenience
-                # function returns "cancelled" as a string, so no socket
-                # data will arrive.
+            entry = self._pending.get(token)
+
+            if entry is not None and entry.expect_socket:
+                # Two-part completion for convenience function calls.
                 mi_value = ""
                 if isinstance(results, dict):
                     mi_value = results.get("value", "")
-                is_cancelled = isinstance(mi_value, str) and mi_value.strip('"') == "cancelled"
+                status = mi_value.strip('"') if isinstance(mi_value, str) else ""
 
-                if cls == "error" or is_cancelled:
-                    # Error or cancelled — resolve immediately.
+                if cls == "error" or status == "failed":
                     meta = self._request_meta.pop(token, {})
-                    future = self._pending.pop(token, None)
-                    if future is not None and not future.done():
-                        future.set_result(rec)
-                elif cls in ("done", "running"):
-                    # Check if socket data already arrived.
-                    sock_data = self._sock_results.pop(token, None)
-                    if sock_data is not None:
-                        # Both parts collected — resolve with MI result.
+                    self._pending.pop(token, None)
+                    if not entry.future.done():
+                        msg = "gdb failed"
+                        if isinstance(results, dict) and results.get("msg"):
+                            msg = str(results["msg"])
+                        entry.future.set_exception(RuntimeError(msg))
+                elif status == "cancelled":
+                    meta = self._request_meta.pop(token, {})
+                    self._pending.pop(token, None)
+                    if not entry.future.done():
+                        entry.future.set_exception(
+                            asyncio.CancelledError("cancelled")
+                        )
+                elif status == "done":
+                    entry.mi_response = rec
+                    if entry.socket_response is not None:
+                        # Both parts collected — resolve with socket data.
                         meta = self._request_meta.pop(token, {})
-                        future = self._pending.pop(token, None)
-                        if future is not None and not future.done():
-                            future.set_result(rec)
-                    else:
-                        # Socket data not yet received — mark as waiting.
-                        self._sock_pending_tokens.add(token)
+                        self._pending.pop(token, None)
+                        if not entry.future.done():
+                            entry.future.set_result(entry.socket_response)
+                    # else: wait for socket data.
                 else:
-                    # Unexpected class — resolve immediately.
+                    # Unexpected status — resolve immediately.
                     meta = self._request_meta.pop(token, {})
-                    future = self._pending.pop(token, None)
-                    if future is not None and not future.done():
-                        future.set_result(rec)
-            else:
+                    self._pending.pop(token, None)
+                    if not entry.future.done():
+                        entry.future.set_result(rec)
+
+            elif entry is not None:
+                # Regular MI command — resolve immediately with MI response.
                 meta = self._request_meta.pop(token, {})
-                future = self._pending.pop(token, None)
-                if future is not None and not future.done():
-                    future.set_result(rec)
+                self._pending.pop(token, None)
+                if not entry.future.done():
+                    entry.future.set_result(rec)
+
+            else:
+                # Fire-and-forget command (no entry in _pending).
+                meta = self._request_meta.pop(token, {})
+
         _log.debug(f"MI result token={token} cls={cls}")
 
         if cls == "error":

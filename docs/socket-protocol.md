@@ -386,47 +386,67 @@ clean up.
 
 For MI commands that invoke convenience functions (`expect_socket=True`),
 the `mi_command_async` Future waits for **both** the MI response and the
-socket data payload before resolving.  This prevents the awaiting
-coroutine from resuming before the bulk data has been received and
-processed.
+socket data payload before resolving.
 
-### State tracking
+### `PendingEntry`
 
-- **`_sock_results`** (`dict[int, object]`): socket data that arrived
-  *before* the MI response for the same token.
-- **`_sock_pending_tokens`** (`set[int]`): tokens whose MI response
-  arrived first (`^done`) but socket data hasn't arrived yet.
+Each in-flight `mi_command_async` is tracked by a `PendingEntry`:
+
+```python
+@dataclass
+class PendingEntry:
+    future: asyncio.Future
+    expect_socket: bool = False
+    mi_response: dict | None = None
+    socket_response: object | None = None
+```
+
+`_pending` maps `token → PendingEntry`.
+
+### MI return values
+
+Convenience functions return one of three strings:
+
+| Value         | Future outcome                      |
+|---------------|-------------------------------------|
+| `"done"`      | Wait for socket data, then resolve  |
+| `"failed"`    | `RuntimeError("gdb failed")`        |
+| `"cancelled"` | `asyncio.CancelledError("cancelled")` |
+
+For regular MI commands (`expect_socket=False`), the Future resolves
+immediately with the MI response dict.
 
 ### Resolution flow
 
 ```
-                 ┌─────────────┐
-  MI response    │ Socket data │
-  arrives first  │ arrives     │
-  ┌──────────────┼─────────────┤
-  │ Add token to │ Find token  │
-  │ _sock_pending│ in set →    │
-  │ _tokens      │ resolve     │
-  │              │ Future      │
-  └──────────────┼─────────────┤
-  Socket data    │ MI response │
-  arrives first  │ arrives     │
-  ┌──────────────┼─────────────┤
-  │ Stash data   │ Find data   │
-  │ in _sock_    │ in map →    │
-  │ results      │ resolve     │
-  │              │ Future      │
-  └──────────────┴─────────────┘
+  MI arrives first          Socket arrives first
+  ┌──────────────────────┐  ┌──────────────────────┐
+  │ "done":              │  │ Set socket_response   │
+  │   set mi_response    │  │                       │
+  │   check socket_resp  │  │ If mi_response set:   │
+  │     → if set: resolve│  │   resolve with data   │
+  │     → else: wait     │  │ Else:                 │
+  │                      │  │   wait for MI         │
+  │ "failed":            │  │                       │
+  │   set_exception(RE)  │  │                       │
+  │                      │  │                       │
+  │ "cancelled":         │  │                       │
+  │   set_exception(CE)  │  │                       │
+  └──────────────────────┘  └──────────────────────┘
 ```
 
-If the MI response is `^error`, the Future resolves immediately without
-waiting for socket data.
+### Timeout
+
+When a timeout fires, `mi_command_async` removes the entry from
+`_pending`, sets `TimeoutError` on the Future, and (for `expect_socket`
+commands) sends a cancel token to GDB.  Any late-arriving MI or socket
+response finds no entry in `_pending` and is silently dropped.
 
 ### Cleanup
 
-`_fail_pending_futures` clears both `_sock_results` and
-`_sock_pending_tokens`.  The `finally` block in `mi_command_async` also
-discards per-token entries on timeout, cancellation, or shutdown.
+`_fail_pending_futures` clears `_pending` and sets exceptions on all
+in-flight Futures.  The `finally` block in `mi_command_async` also
+removes per-token entries on timeout, cancellation, or shutdown.
 
 ## Implementation files
 

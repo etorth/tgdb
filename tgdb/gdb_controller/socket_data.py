@@ -307,32 +307,33 @@ class SocketDataMixin:
     def _try_resolve_sock_pending(self, mi_token: int, tag_byte: int, data) -> None:
         """Correlate socket data with its MI token for two-part completion.
 
-        If the MI result for *mi_token* already arrived (token is in
-        ``_sock_pending_tokens``), resolve the Future now.  Otherwise
-        stash *data* in ``_sock_results`` so ``_handle_result`` can
-        resolve immediately when the MI response comes later.
+        Sets ``socket_response`` on the ``PendingEntry``.  If the MI
+        ``^done`` response already arrived (``entry.mi_response`` is set),
+        resolves the Future with the socket data.  Otherwise the entry
+        waits for ``_handle_result`` to complete the second half.
 
-        A zero *mi_token* means the GDB side sent no token (e.g. a
-        legacy path or a non-convenience-function frame) — skip
+        A zero *mi_token* means the GDB side sent no token — skip
         correlation entirely.
         """
         if mi_token == 0:
             return
 
-        if mi_token in self._sock_pending_tokens:
-            # MI result arrived first — resolve the Future now.
-            self._sock_pending_tokens.discard(mi_token)
-            meta = self._request_meta.pop(mi_token, {})
-            future = self._pending.pop(mi_token, None)
-            if future is not None and not future.done():
-                # Resolve with a synthetic result dict matching the MI
-                # response shape so callers of mi_command_async see a
-                # consistent structure.
-                future.set_result({"message": "done", "payload": None, "token": mi_token})
+        entry = self._pending.get(mi_token)
+        if entry is None:
+            # Token already removed (timeout / cancel / cleanup).
+            _log.debug(f"two-part dropped (no entry): token={mi_token}")
+            return
+
+        entry.socket_response = data
+
+        if entry.mi_response is not None:
+            # MI already arrived with "done" — resolve now.
+            self._pending.pop(mi_token, None)
+            self._request_meta.pop(mi_token, None)
+            if not entry.future.done():
+                entry.future.set_result(data)
             _log.debug(f"two-part resolved (sock-second): token={mi_token}")
         else:
-            # Socket data arrived first — stash for _handle_result.
-            self._sock_results[mi_token] = data
             _log.debug(f"two-part stashed (sock-first): token={mi_token}")
 
 

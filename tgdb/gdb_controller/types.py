@@ -5,6 +5,7 @@ These types are used across the tgdb package to represent debugger state
 (breakpoints, frames, local variables, threads, registers).
 """
 
+import asyncio
 import re
 from dataclasses import dataclass
 
@@ -107,3 +108,27 @@ class RegisterInfo:
     number: int = 0
     name: str = ""
     value: str = ""
+
+
+@dataclass
+class PendingEntry:
+    """Bookkeeping for an in-flight MI command awaited by ``mi_command_async``.
+
+    ``future``
+        The asyncio Future that the caller awaits.
+    ``expect_socket``
+        True for convenience function calls whose real payload arrives
+        through the AF_UNIX socketpair.  The Future is only resolved
+        when *both* the MI response and the socket data have arrived.
+    ``mi_response``
+        Set by ``_handle_result`` when the MI ``^done`` response arrives.
+        ``None`` until then.
+    ``socket_response``
+        Set by ``_try_resolve_sock_pending`` when socket data with this
+        token arrives.  ``None`` until then.
+    """
+
+    future: asyncio.Future
+    expect_socket: bool = False
+    mi_response: dict | None = None
+    socket_response: object | None = None

@@ -29,6 +29,7 @@ from .types import (  # noqa: F401 — re-exported
     Breakpoint,
     Frame,
     LocalVariable,
+    PendingEntry,
     ThreadInfo,
     RegisterInfo,
 )
@@ -138,15 +139,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._sock_buf: bytes = b""
         self._mi_buf: str = ""
         self._token: int = 1
-        self._pending: dict[int, asyncio.Future] = {}
+        self._pending: dict[int, PendingEntry] = {}
         self._request_meta: dict[int, dict[str, object]] = {}
-        # Two-part completion state.
-        # ``_sock_results`` holds socket data that arrived *before* the MI
-        # response for the same token.  ``_sock_pending_tokens`` tracks
-        # tokens whose MI response arrived first (``done``) but socket
-        # data hasn't yet — the Future is still in ``_pending``.
-        self._sock_results: dict[int, object] = {}
-        self._sock_pending_tokens: set[int] = set()
         # Pending debounced -break-list refresh (replaces any in-flight task
         # so rapid set_breakpoint() calls coalesce into one MI request).
         self._break_list_task: asyncio.Task | None = None
@@ -357,11 +351,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         pending = list(self._pending.items())
         self._pending.clear()
         self._request_meta.clear()
-        self._sock_results.clear()
-        self._sock_pending_tokens.clear()
-        for _token, future in pending:
-            if not future.done():
-                future.set_exception(reason)
+        for _token, entry in pending:
+            if not entry.future.done():
+                entry.future.set_exception(reason)
 
 
     def _watched_fds(self) -> list[int]:
