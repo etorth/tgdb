@@ -298,7 +298,7 @@ def _collect_locals():
                         addr_str = str(val.referenced_value().address)
                     except Exception as exc:
                         addr_str = "unknown (referenced target)"
-                        _log.debug("referenced_value().address failed for %s: %s", name, exc)
+                        _log.debug(f"referenced_value().address failed for {name}: {exc}")
                 else:
                     if val.address:
                         addr_str = str(val.address)
@@ -308,7 +308,7 @@ def _collect_locals():
             except Exception as exc:
                 val_str = "<optimized out>"
                 addr_str = "unknown"
-                _log.debug("value eval failed for %s: %s", name, exc)
+                _log.debug(f"value eval failed for {name}: {exc}")
 
             is_shadowed = name in seen
             type_str = str(symbol.type)
