@@ -55,6 +55,30 @@ import tempfile
 import textwrap
 
 
+_BUG_ID = "Bug 3"
+_BUG_TITLE = "block.__iter__() yields duplicate symbols from parent-block merging of sibling scopes"
+
+_EXIT_LABELS = {
+    0: "CONFIRMED",
+    1: "NOT REPRODUCED",
+    2: "TOOLS MISSING",
+    3: "SETUP FAILED",
+}
+
+
+def _verdict(code: int, detail: str = "") -> int:
+    label = _EXIT_LABELS.get(code, "UNKNOWN")
+    print()
+    print("=" * 70)
+    print(f"  {_BUG_ID}: {_BUG_TITLE}")
+    print(f"  Result : {label} (exit code {code})")
+    if detail:
+        for line in detail.splitlines():
+            print(f"  {line}")
+    print("=" * 70)
+    return code
+
+
 CPP_SOURCE = textwrap.dedent("""
     #include <string>
     #include <vector>
@@ -255,8 +279,7 @@ def _print_mi_variables(raw: str, mi_cmd: str) -> None:
 def main() -> int:
     for tool in ("gdb", "g++"):
         if shutil.which(tool) is None:
-            print(f"{tool} not found in PATH", file=sys.stderr)
-            return 2
+            return _verdict(2, f"{tool} not found in PATH")
 
     tmpdir = tempfile.mkdtemp(prefix="gdb_bug3_")
     cpp_path = os.path.join(tmpdir, "test.cpp")
@@ -303,10 +326,9 @@ def main() -> int:
                 break
 
         if symbols is None:
-            print("ERROR: @@SYMBOLS@@ line not found in GDB output", file=sys.stderr)
             print("--- GDB output ---", file=sys.stderr)
             print(stdout, file=sys.stderr)
-            return 3
+            return _verdict(3, "@@SYMBOLS@@ line not found in GDB output")
 
         # Collect MI output lines for comparison.
         mi_lines: list[str] = []
@@ -384,11 +406,15 @@ def main() -> int:
             print()
 
         if found_bug:
-            print("CONFIRMED: GDB block iterator produces duplicate/merged symbols.")
-            return 0
+            detail = (
+                f"block.__iter__() yielded {len(symbols)} symbols, "
+                f"{len(multi_names)} names duplicated\n"
+                f"MI -stack-list-variables returned {len(_parse_mi_variable_list(mi_lines[0])) if mi_lines else '?'} unique variables, no duplicates\n"
+                "Bug is specific to the Python block iterator API, not the MI stack commands."
+            )
+            return _verdict(0, detail)
         else:
-            print("NOT REPRODUCED: all symbols are unique per (name, depth).")
-            return 1
+            return _verdict(1, "all symbols are unique per (name, depth)")
 
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

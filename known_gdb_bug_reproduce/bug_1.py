@@ -38,6 +38,30 @@ import textwrap
 import time
 
 
+_BUG_ID = "Bug 1"
+_BUG_TITLE = "varobj.c:install_new_value assertion on -var-list-children after std::variant switch"
+
+_EXIT_LABELS = {
+    0: "CONFIRMED",
+    1: "NOT REPRODUCED",
+    2: "TOOLS MISSING",
+    3: "SETUP FAILED",
+}
+
+
+def _verdict(code: int, detail: str = "") -> int:
+    label = _EXIT_LABELS.get(code, "UNKNOWN")
+    print()
+    print("=" * 70)
+    print(f"  {_BUG_ID}: {_BUG_TITLE}")
+    print(f"  Result : {label} (exit code {code})")
+    if detail:
+        for line in detail.splitlines():
+            print(f"  {line}")
+    print("=" * 70)
+    return code
+
+
 CPP_SOURCE = textwrap.dedent("""
     #include <string>
     #include <vector>
@@ -171,8 +195,7 @@ class MISession:
 
 def main() -> int:
     if shutil.which("gdb") is None or shutil.which("g++") is None:
-        print("gdb and g++ required in PATH", file=sys.stderr)
-        return 2
+        return _verdict(2, "gdb and g++ required in PATH")
 
     tmpdir = tempfile.mkdtemp(prefix="variant-repro-")
     cpp = os.path.join(tmpdir, "v.cpp")
@@ -199,14 +222,12 @@ def main() -> int:
         cls, ln = s.cmd('-var-create vv * "v"')
         print(f"[1] var-create  ({cls}): {ln}")
         if cls != "done":
-            print("FAIL: var-create did not return ^done")
-            return 3
+            return _verdict(3, "var-create did not return ^done")
 
         cls, ln = s.cmd("-var-list-children --all-values vv")
         print(f"[2] var-list-children (string state) ({cls}): {ln}")
         if cls != "done" or "[contained value]" not in ln:
-            print("FAIL: expected '[contained value]' child for string-holding variant")
-            return 3
+            return _verdict(3, "expected '[contained value]' child for string-holding variant")
 
         s.cmd("-exec-next")          # past `v = std::vector<int>{1,2,3}` -> alternative flips
         s.wait_for_stop()
@@ -214,8 +235,7 @@ def main() -> int:
         cls, ln = s.cmd("-var-update --all-values vv")
         print(f"[3] var-update (after vector assignment) ({cls}): {ln}")
         if cls != "done" or "new_num_children" not in ln:
-            print("FAIL: expected new_num_children in var-update reply")
-            return 3
+            return _verdict(3, "expected new_num_children in var-update reply")
 
         # The crash trigger.
         cls, ln = s.cmd("-var-list-children --all-values vv 0 10", timeout=4.0)
@@ -231,16 +251,12 @@ def main() -> int:
         )
         if crashed:
             m = re.search(r"varobj\.c:\d+:\s*internal-error:\s*[^\\]+", joined)
-            print()
-            print("CONFIRMED: GDB internal-error reproduced.")
+            detail = f"GDB process alive: {s.is_alive()}"
             if m:
-                print(f"  -> {m.group(0)}")
-            print(f"  GDB process alive: {s.is_alive()}")
-            return 0
+                detail = f"{m.group(0)}\n{detail}"
+            return _verdict(0, detail)
 
-        print()
-        print("NOT REPRODUCED: var-list-children completed without crash.")
-        return 1
+        return _verdict(1, "var-list-children completed without crash")
     finally:
         s.shutdown()
 

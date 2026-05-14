@@ -50,6 +50,30 @@ import textwrap
 import time
 
 
+_BUG_ID = "Bug 2"
+_BUG_TITLE = "c-varobj.c:cplus_describe_child assertion on -var-update of vector<vector<long>> children"
+
+_EXIT_LABELS = {
+    0: "CONFIRMED",
+    1: "NOT REPRODUCED",
+    2: "TOOLS MISSING",
+    3: "SETUP FAILED",
+}
+
+
+def _verdict(code: int, detail: str = "") -> int:
+    label = _EXIT_LABELS.get(code, "UNKNOWN")
+    print()
+    print("=" * 70)
+    print(f"  {_BUG_ID}: {_BUG_TITLE}")
+    print(f"  Result : {label} (exit code {code})")
+    if detail:
+        for line in detail.splitlines():
+            print(f"  {line}")
+    print("=" * 70)
+    return code
+
+
 CPP_SOURCE = textwrap.dedent("""
     #include <vector>
 
@@ -215,8 +239,7 @@ def crashed(joined: str, alive: bool) -> bool:
 
 def main() -> int:
     if shutil.which("gdb") is None or shutil.which("g++") is None:
-        print("gdb and g++ required in PATH", file=sys.stderr)
-        return 2
+        return _verdict(2, "gdb and g++ required in PATH")
 
     tmpdir = tempfile.mkdtemp(prefix="cplus-repro-")
     cpp = os.path.join(tmpdir, "v.cpp")
@@ -238,8 +261,7 @@ def main() -> int:
         s.cmd("-break-insert main")
         s.cmd("-exec-run")
         if not s.wait_for_stop(timeout=10):
-            print("FAIL: did not stop at main breakpoint")
-            return 3
+            return _verdict(3, "did not stop at main breakpoint")
         # Step through every assignment + the three push_back calls.
         # ``-exec-finish`` would leave main; ``-exec-next`` repeatedly
         # works in any libstdc++ version.  Iterate generously and
@@ -260,14 +282,13 @@ def main() -> int:
         cls, ln = s.cmd('-var-create vv * "c"')
         print(f"[1] var-create vv:    ({cls}) {ln}")
         if cls != "done":
-            print("FAIL: var-create on c failed")
-            return 3
+            return _verdict(3, "var-create on c failed")
 
         # Walk the children: vv -> vv.public -> vv.public.<field>
         cls, ln = s.cmd("-var-list-children --all-values vv")
         print(f"[2] children of vv:   ({cls}) {ln}")
         if cls != "done":
-            return 3
+            return _verdict(3, "var-list-children on vv failed")
 
         # Find the access-specifier synthetic child name (vv.public).
         m = re.search(r'name="(vv\.public)"', ln)
@@ -281,25 +302,23 @@ def main() -> int:
             cls, ln = s.cmd(f'-var-list-children --all-values "{access_name}"')
             print(f"[3] children of {access_name}: ({cls}) {ln}")
             if cls != "done":
-                return 3
+                return _verdict(3, f"var-list-children on {access_name} failed")
 
         # Find the ``index`` child name and walk it.
         m = re.search(r'name="([^"]*\.index)"', ln)
         if not m:
-            print("FAIL: did not find an .index child under access node")
-            return 3
+            return _verdict(3, "did not find an .index child under access node")
         index_name = m.group(1)
         cls, ln = s.cmd(f'-var-list-children --all-values "{index_name}"')
         print(f"[4] children of {index_name}: ({cls}) {ln}")
         if cls != "done":
-            return 3
+            return _verdict(3, f"var-list-children on {index_name} failed")
 
         # Children should be ``<index_name>.[0]``, ``[1]``, ``[2]``.
         child_names = re.findall(rf'name="({re.escape(index_name)}\.\[\d+\])"', ln)
         print(f"    -> tracked element children: {child_names}")
         if len(child_names) < 3:
-            print("FAIL: expected at least 3 element children of index")
-            return 3
+            return _verdict(3, "expected at least 3 element children of index")
 
         # Now exercise the exact crash trigger: -var-update on each
         # element child, sequentially, in the same order tgdb does.
@@ -314,23 +333,19 @@ def main() -> int:
                         r"c-varobj\.c:\d+:\s*internal-error:\s*[^\\]+",
                         joined,
                     )
-                    print()
-                    print("CONFIRMED: cplus_describe_child crash reproduced.")
+                    detail = f"GDB process alive: {alive}"
                     if m:
-                        print(f"  -> {m.group(0)}")
-                    print(f"  GDB process alive: {alive}")
-                    return 0
-                print("FAIL: var-update returned non-done without "
-                      "matching the assertion signature")
-                return 3
+                        detail = f"{m.group(0)}\n{detail}"
+                    return _verdict(0, detail)
+                return _verdict(3, "var-update returned non-done without matching the assertion signature")
 
-        print()
-        print("NOT REPRODUCED: all element var-updates completed cleanly.")
-        print("  This is the expected outcome on GDB builds whose")
-        print("  c-varobj.c::cplus_describe_child handles vector-of-vector")
-        print("  member layouts without asserting.  See docs/known_gdb_bug.md")
-        print("  Bug 2 for what triggers it on affected builds.")
-        return 1
+        return _verdict(
+            1,
+            "all element var-updates completed cleanly\n"
+            "This is the expected outcome on GDB builds whose\n"
+            "c-varobj.c::cplus_describe_child handles vector-of-vector\n"
+            "member layouts without asserting.  See docs/known_gdb_bug.md Bug 2.",
+        )
     finally:
         s.shutdown()
 
