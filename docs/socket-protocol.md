@@ -101,6 +101,23 @@ decompresses if set, regardless of size.
 | `b` | 0x62  | JSON         | Breakpoint list (`$_tgdb_RSVD_collect_breakpoints()`) |
 | `D` | 0x44  | Raw UTF-8    | Diagnostic log message from GDB Python          |
 
+#### MI token in data payloads
+
+Data tags (`l`, `s`, `r`, `f`, `b`) embed a varint **MI token** at the
+start of their payload so the tgdb side can correlate the data with the
+MI command that triggered the collection.  The log tag (`D`) does not
+carry a token.
+
+After decompression (if applicable), the payload layout for data tags is:
+
+```
+┌─────────────────────┬──────────────────────────────┐
+│ mi_token (varint)   │ JSON bytes                   │
+└─────────────────────┴──────────────────────────────┘
+```
+
+A token of `0` means no MI correlation (legacy / non-convenience path).
+
 ## Why thread info is not on the socket
 
 Thread info is fetched via MI `-thread-info` instead of a socket convenience
@@ -335,8 +352,11 @@ Each convenience function receives a cancel token as its first argument
 (default `0` = no cancellation).  At key checkpoints the function calls
 `_is_cancelled(token)` to test the set.  When cancelled:
 
-1. The function calls `_finish_token(token)` to remove the token from the set.
-2. Returns `"cancelled"` — no data is sent through the socket.
+1. The function calls `_send_sock_payload(tag, [], token)` to send an empty
+   payload with the MI token — this ensures the tgdb-side Future resolves
+   even when the function was cancelled.
+2. The function calls `_finish_token(token)` to remove the token from the set.
+3. Returns `"cancelled"` as the MI result.
 
 When completed normally, the function also calls `_finish_token(token)` to
 clean up.
@@ -361,6 +381,52 @@ clean up.
 - The tgdb side stores the latest cancel token per request type
   (`_locals_cancel_token`, `_stack_cancel_token`, etc.) so it knows
   which token to cancel when superseding an in-flight request.
+
+## Two-part Future completion
+
+For MI commands that invoke convenience functions (`expect_socket=True`),
+the `mi_command_async` Future waits for **both** the MI response and the
+socket data payload before resolving.  This prevents the awaiting
+coroutine from resuming before the bulk data has been received and
+processed.
+
+### State tracking
+
+- **`_sock_results`** (`dict[int, object]`): socket data that arrived
+  *before* the MI response for the same token.
+- **`_sock_pending_tokens`** (`set[int]`): tokens whose MI response
+  arrived first (`^done`) but socket data hasn't arrived yet.
+
+### Resolution flow
+
+```
+                 ┌─────────────┐
+  MI response    │ Socket data │
+  arrives first  │ arrives     │
+  ┌──────────────┼─────────────┤
+  │ Add token to │ Find token  │
+  │ _sock_pending│ in set →    │
+  │ _tokens      │ resolve     │
+  │              │ Future      │
+  └──────────────┼─────────────┤
+  Socket data    │ MI response │
+  arrives first  │ arrives     │
+  ┌──────────────┼─────────────┤
+  │ Stash data   │ Find data   │
+  │ in _sock_    │ in map →    │
+  │ results      │ resolve     │
+  │              │ Future      │
+  └──────────────┴─────────────┘
+```
+
+If the MI response is `^error`, the Future resolves immediately without
+waiting for socket data.
+
+### Cleanup
+
+`_fail_pending_futures` clears both `_sock_results` and
+`_sock_pending_tokens`.  The `finally` block in `mi_command_async` also
+discards per-token entries on timeout, cancellation, or shutdown.
 
 ## Implementation files
 

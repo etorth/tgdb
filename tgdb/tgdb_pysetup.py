@@ -297,16 +297,22 @@ def _try_connect(event_name, handler):
         pass
 
 
-def _send_sock_payload(tag, data):
+def _send_sock_payload(tag, data, token=0):
     """Serialize *data* as JSON and write a framed payload to the socket.
 
     Uses the unified variable-length frame format.  *tag* must be a single
     ASCII character (one of ``l``, ``s``, ``r``, ``f``, ``b``).
     Compression is applied automatically when the JSON exceeds the threshold.
+
+    When *token* is non-zero, a varint-encoded MI token is prepended to
+    the payload so the tgdb side can correlate this data with the MI
+    command that triggered the collection.
+
     Returns True on success, False if the socket is closed or the write fails.
     """
     json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return _send_sock_frame(tag, json_bytes)
+    payload = _encode_varint(token) + json_bytes
+    return _send_sock_frame(tag, payload)
 
 
 def _format_value(val):
@@ -387,17 +393,18 @@ def _collect_locals(cancel_token=0):
     """Collect local variables and send via data socket (tag ``l``).
 
     If *cancel_token* is non-zero and has been cancelled by tgdb, the
-    function aborts early and returns ``"cancelled"`` without sending
-    any data through the socket.
+    function aborts early, sends an empty payload (so the tgdb-side
+    Future resolves), and returns ``"cancelled"``.
     """
     if _is_cancelled(cancel_token):
+        _send_sock_payload("l", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
     try:
         frame = gdb.selected_frame()
     except gdb.error:
-        _send_sock_payload("l", [])
+        _send_sock_payload("l", [], cancel_token)
         _finish_token(cancel_token)
         return "ok"
 
@@ -405,7 +412,7 @@ def _collect_locals(cancel_token=0):
         block = frame.block()
     except (gdb.error, RuntimeError) as exc:
         if "Cannot locate block" in str(exc):
-            _send_sock_payload("l", [])
+            _send_sock_payload("l", [], cancel_token)
             _finish_token(cancel_token)
             return "ok"
         raise
@@ -424,6 +431,7 @@ def _collect_locals(cancel_token=0):
 
     while block:
         if _is_cancelled(cancel_token):
+            _send_sock_payload("l", [], cancel_token)
             _finish_token(cancel_token)
             return "cancelled"
 
@@ -521,6 +529,7 @@ def _collect_locals(cancel_token=0):
         depth += 1
 
     if _is_cancelled(cancel_token):
+        _send_sock_payload("l", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
@@ -544,7 +553,7 @@ def _collect_locals(cancel_token=0):
             if deduped[prev_idx]["value"] == "<optimized out>":
                 deduped[prev_idx] = entry
 
-    _send_sock_payload("l", deduped)
+    _send_sock_payload("l", deduped, cancel_token)
     _finish_token(cancel_token)
     return "ok"
 
@@ -552,6 +561,7 @@ def _collect_locals(cancel_token=0):
 def _collect_stack(cancel_token=0):
     """Collect stack frames and send via data socket (tag ``s``)."""
     if _is_cancelled(cancel_token):
+        _send_sock_payload("s", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
@@ -559,13 +569,14 @@ def _collect_stack(cancel_token=0):
     try:
         frame = gdb.newest_frame()
     except gdb.error:
-        _send_sock_payload("s", [])
+        _send_sock_payload("s", [], cancel_token)
         _finish_token(cancel_token)
         return "ok"
 
     level = 0
     while frame:
         if level % 50 == 0 and _is_cancelled(cancel_token):
+            _send_sock_payload("s", [], cancel_token)
             _finish_token(cancel_token)
             return "cancelled"
 
@@ -602,7 +613,7 @@ def _collect_stack(cancel_token=0):
         except gdb.error:
             break
 
-    _send_sock_payload("s", frames)
+    _send_sock_payload("s", frames, cancel_token)
     _finish_token(cancel_token)
     return "ok"
 
@@ -610,6 +621,7 @@ def _collect_stack(cancel_token=0):
 def _collect_registers(cancel_token=0):
     """Collect register values and send via data socket (tag ``r``)."""
     if _is_cancelled(cancel_token):
+        _send_sock_payload("r", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
@@ -617,7 +629,7 @@ def _collect_registers(cancel_token=0):
         frame = gdb.selected_frame()
         arch = frame.architecture()
     except gdb.error:
-        _send_sock_payload("r", [])
+        _send_sock_payload("r", [], cancel_token)
         _finish_token(cancel_token)
         return "ok"
 
@@ -641,11 +653,11 @@ def _collect_registers(cancel_token=0):
                 "number": number,
             })
     except (gdb.error, AttributeError):
-        _send_sock_payload("r", [])
+        _send_sock_payload("r", [], cancel_token)
         _finish_token(cancel_token)
         return "ok"
 
-    _send_sock_payload("r", registers)
+    _send_sock_payload("r", registers, cancel_token)
     _finish_token(cancel_token)
     return "ok"
 
@@ -659,7 +671,7 @@ def _collect_frame_info(cancel_token=0):
     try:
         frame = gdb.selected_frame()
     except gdb.error:
-        _send_sock_payload("f", {})
+        _send_sock_payload("f", {}, cancel_token)
         _finish_token(cancel_token)
         return "ok"
 
@@ -675,7 +687,7 @@ def _collect_frame_info(cancel_token=0):
             fullname = ""
         line = sal.line
     except gdb.error:
-        _send_sock_payload("f", {})
+        _send_sock_payload("f", {}, cancel_token)
         _finish_token(cancel_token)
         return "ok"
 
@@ -692,7 +704,7 @@ def _collect_frame_info(cancel_token=0):
         "fullname": fullname,
         "line": line,
         "arch": arch_name,
-    })
+    }, cancel_token)
     _finish_token(cancel_token)
     return "ok"
 
@@ -734,7 +746,7 @@ def _collect_breakpoints(cancel_token=0):
             "location": loc,
         })
 
-    _send_sock_payload("b", breakpoints)
+    _send_sock_payload("b", breakpoints, cancel_token)
     _finish_token(cancel_token)
     return "ok"
 

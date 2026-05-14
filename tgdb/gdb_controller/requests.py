@@ -96,6 +96,7 @@ class GDBRequestMixin:
         *,
         raise_on_error: bool = False,
         token: int | None = None,
+        expect_socket: bool = False,
     ) -> dict:
         """Send an MI command and await the decoded response.
 
@@ -108,6 +109,11 @@ class GDBRequestMixin:
         that value is used as the MI command prefix instead of allocating a
         new one.  This lets the caller reuse the same integer as a cancel
         token for convenience functions.
+
+        When *expect_socket* is true, the Future waits for **both** the MI
+        result and the socket data payload tagged with this token before
+        resolving.  Used for convenience function calls that return their
+        real payload through the AF_UNIX socketpair.
         """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
@@ -116,6 +122,8 @@ class GDBRequestMixin:
             if raise_on_error:
                 raise RuntimeError("MI channel not open")
             return {}
+        if expect_socket:
+            self._request_meta[token]["expect_socket"] = True
         self._pending[token] = future
         # No ``asyncio.shield`` here: shielding the future kept it alive when
         # the caller's task was cancelled, leaving an entry in ``_pending``
@@ -149,6 +157,8 @@ class GDBRequestMixin:
             # already cleared both dicts.
             self._pending.pop(token, None)
             self._request_meta.pop(token, None)
+            self._sock_results.pop(token, None)
+            self._sock_pending_tokens.discard(token)
         message = result.get("message", "")
         if message == "error" and raise_on_error:
             payload = result.get("payload") or {}
@@ -176,6 +186,7 @@ class GDBRequestMixin:
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info({token})"',
             timeout=30.0,
             token=token,
+            expect_socket=True,
         )
 
 
@@ -190,6 +201,7 @@ class GDBRequestMixin:
                 f'-data-evaluate-expression "$_tgdb_RSVD_collect_locals({token})"',
                 timeout=30.0,
                 token=token,
+                expect_socket=True,
             )
         finally:
             self._locals_request_inflight = False
@@ -202,6 +214,7 @@ class GDBRequestMixin:
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_stack({token})"',
             timeout=30.0,
             token=token,
+            expect_socket=True,
         )
 
 
@@ -228,6 +241,7 @@ class GDBRequestMixin:
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_registers({token})"',
             timeout=30.0,
             token=token,
+            expect_socket=True,
         )
 
 
@@ -238,6 +252,7 @@ class GDBRequestMixin:
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints({token})"',
             timeout=30.0,
             token=token,
+            expect_socket=True,
         )
 
 

@@ -16,10 +16,38 @@ class GDBResultMixin:
         token = rec.get("token")
         meta: dict[str, object] = {}
         if token is not None:
-            meta = self._request_meta.pop(token, {})
-            future = self._pending.pop(token, None)
-            if future is not None and not future.done():
-                future.set_result(rec)
+            expect_socket = self._request_meta.get(token, {}).get("expect_socket", False)
+            if expect_socket:
+                # Two-part completion: wait for BOTH MI result and socket data.
+                if cls == "error":
+                    # Error — resolve immediately, no socket data expected.
+                    meta = self._request_meta.pop(token, {})
+                    future = self._pending.pop(token, None)
+                    if future is not None and not future.done():
+                        future.set_result(rec)
+                elif cls in ("done", "running"):
+                    # Check if socket data already arrived.
+                    sock_data = self._sock_results.pop(token, None)
+                    if sock_data is not None:
+                        # Both parts collected — resolve with MI result.
+                        meta = self._request_meta.pop(token, {})
+                        future = self._pending.pop(token, None)
+                        if future is not None and not future.done():
+                            future.set_result(rec)
+                    else:
+                        # Socket data not yet received — mark as waiting.
+                        self._sock_pending_tokens.add(token)
+                else:
+                    # Unexpected class — resolve immediately.
+                    meta = self._request_meta.pop(token, {})
+                    future = self._pending.pop(token, None)
+                    if future is not None and not future.done():
+                        future.set_result(rec)
+            else:
+                meta = self._request_meta.pop(token, {})
+                future = self._pending.pop(token, None)
+                if future is not None and not future.done():
+                    future.set_result(rec)
         _log.debug(f"MI result token={token} cls={cls}")
 
         if cls == "error":

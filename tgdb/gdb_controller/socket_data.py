@@ -76,6 +76,10 @@ _VARINT_TAGS = frozenset({ord(b"R")})
 _VAR_LEN_TAGS = frozenset(b"lsrbfD")
 _CTL_COMPRESSED = 0x01
 
+# Data tags that embed a varint MI token at the start of their payload.
+# Log messages (``D``) do not carry a token.
+_DATA_TAGS = frozenset(b"lsrbf")
+
 
 # ---------------------------------------------------------------------------
 # Varint helpers — unsigned LEB128
@@ -236,6 +240,19 @@ class SocketDataMixin:
                     except Exception:
                         msg = "<decode error>"
                     _log.debug(f"SOCK<- gdb-python: {msg}")
+                elif tag_byte in _DATA_TAGS:
+                    # Data tags embed [varint MI token][JSON payload].
+                    mi_token, json_start = _decode_varint(payload, 0)
+                    if mi_token is None:
+                        _log.warning(f"socket: missing MI token (tag={chr(tag_byte)!r})")
+                        continue
+                    try:
+                        data = json.loads(payload[json_start:])
+                    except Exception as exc:
+                        _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
+                        continue
+                    self._try_resolve_sock_pending(mi_token, tag_byte, data)
+                    self._dispatch_sock_data(tag_byte, data)
                 else:
                     try:
                         data = json.loads(payload)
@@ -285,6 +302,38 @@ class SocketDataMixin:
             self._handle_sock_breakpoints(data)
         else:
             _log.debug(f"socket: unknown data tag {chr(tag_byte)!r}")
+
+
+    def _try_resolve_sock_pending(self, mi_token: int, tag_byte: int, data) -> None:
+        """Correlate socket data with its MI token for two-part completion.
+
+        If the MI result for *mi_token* already arrived (token is in
+        ``_sock_pending_tokens``), resolve the Future now.  Otherwise
+        stash *data* in ``_sock_results`` so ``_handle_result`` can
+        resolve immediately when the MI response comes later.
+
+        A zero *mi_token* means the GDB side sent no token (e.g. a
+        legacy path or a non-convenience-function frame) — skip
+        correlation entirely.
+        """
+        if mi_token == 0:
+            return
+
+        if mi_token in self._sock_pending_tokens:
+            # MI result arrived first — resolve the Future now.
+            self._sock_pending_tokens.discard(mi_token)
+            meta = self._request_meta.pop(mi_token, {})
+            future = self._pending.pop(mi_token, None)
+            if future is not None and not future.done():
+                # Resolve with a synthetic result dict matching the MI
+                # response shape so callers of mi_command_async see a
+                # consistent structure.
+                future.set_result({"message": "done", "payload": None, "token": mi_token})
+            _log.debug(f"two-part resolved (sock-second): token={mi_token}")
+        else:
+            # Socket data arrived first — stash for _handle_result.
+            self._sock_results[mi_token] = data
+            _log.debug(f"two-part stashed (sock-first): token={mi_token}")
 
 
     def _handle_sock_locals(self, data: list) -> None:
