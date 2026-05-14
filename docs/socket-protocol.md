@@ -352,11 +352,11 @@ Each convenience function receives a cancel token as its first argument
 (default `0` = no cancellation).  At key checkpoints the function calls
 `_is_cancelled(token)` to test the set.  When cancelled:
 
-1. The function calls `_send_sock_payload(tag, [], token)` to send an empty
-   payload with the MI token — this ensures the tgdb-side Future resolves
-   even when the function was cancelled.
-2. The function calls `_finish_token(token)` to remove the token from the set.
-3. Returns `"cancelled"` as the MI result.
+1. The function calls `_finish_token(token)` to remove the token from the set.
+2. Returns `"cancelled"` as the MI result — no socket data is sent.
+
+The tgdb side detects `"cancelled"` in the MI expression value and resolves
+the Future immediately without waiting for socket data.
 
 When completed normally, the function also calls `_finish_token(token)` to
 clean up.

@@ -19,8 +19,16 @@ class GDBResultMixin:
             expect_socket = self._request_meta.get(token, {}).get("expect_socket", False)
             if expect_socket:
                 # Two-part completion: wait for BOTH MI result and socket data.
-                if cls == "error":
-                    # Error — resolve immediately, no socket data expected.
+                # Detect cancellation from the MI value — the convenience
+                # function returns "cancelled" as a string, so no socket
+                # data will arrive.
+                mi_value = ""
+                if isinstance(results, dict):
+                    mi_value = results.get("value", "")
+                is_cancelled = isinstance(mi_value, str) and mi_value.strip('"') == "cancelled"
+
+                if cls == "error" or is_cancelled:
+                    # Error or cancelled — resolve immediately.
                     meta = self._request_meta.pop(token, {})
                     future = self._pending.pop(token, None)
                     if future is not None and not future.done():

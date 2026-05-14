@@ -393,11 +393,11 @@ def _collect_locals(cancel_token=0):
     """Collect local variables and send via data socket (tag ``l``).
 
     If *cancel_token* is non-zero and has been cancelled by tgdb, the
-    function aborts early, sends an empty payload (so the tgdb-side
-    Future resolves), and returns ``"cancelled"``.
+    function aborts early and returns ``"cancelled"``.  The tgdb side
+    detects ``"cancelled"`` in the MI value and resolves the Future
+    immediately — no socket payload is needed.
     """
     if _is_cancelled(cancel_token):
-        _send_sock_payload("l", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
@@ -431,7 +431,6 @@ def _collect_locals(cancel_token=0):
 
     while block:
         if _is_cancelled(cancel_token):
-            _send_sock_payload("l", [], cancel_token)
             _finish_token(cancel_token)
             return "cancelled"
 
@@ -529,7 +528,6 @@ def _collect_locals(cancel_token=0):
         depth += 1
 
     if _is_cancelled(cancel_token):
-        _send_sock_payload("l", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
@@ -561,7 +559,6 @@ def _collect_locals(cancel_token=0):
 def _collect_stack(cancel_token=0):
     """Collect stack frames and send via data socket (tag ``s``)."""
     if _is_cancelled(cancel_token):
-        _send_sock_payload("s", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
@@ -576,7 +573,6 @@ def _collect_stack(cancel_token=0):
     level = 0
     while frame:
         if level % 50 == 0 and _is_cancelled(cancel_token):
-            _send_sock_payload("s", [], cancel_token)
             _finish_token(cancel_token)
             return "cancelled"
 
@@ -621,7 +617,6 @@ def _collect_stack(cancel_token=0):
 def _collect_registers(cancel_token=0):
     """Collect register values and send via data socket (tag ``r``)."""
     if _is_cancelled(cancel_token):
-        _send_sock_payload("r", [], cancel_token)
         _finish_token(cancel_token)
         return "cancelled"
 
