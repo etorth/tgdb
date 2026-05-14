@@ -21,15 +21,16 @@ Fixed-payload tags (tag + fixed-size payload, no length field):
   ``R`` — register_changed (4-byte signed BE regnum, -1 = all)
   ``I`` — inferior_call (1 byte: 0x00 = pre, 0x01 = post)
 
-Raw variable-length tag (tag + 8-byte BE length + raw UTF-8 payload):
-  ``D`` — diagnostic log message from GDB Python
+Variable-length tags (``[tag 1B][ctl 1B][length 7B BE][payload]``):
+  ``l`` — local variables (JSON, auto-compressed)
+  ``s`` — stack frames (JSON, auto-compressed)
+  ``r`` — register values (JSON, auto-compressed)
+  ``f`` — current frame info (JSON, auto-compressed)
+  ``b`` — breakpoint list (JSON, auto-compressed)
+  ``D`` — diagnostic log message (raw UTF-8)
 
-Bulk data tags (``[1-byte tag][8-byte BE payload_length][payload]``):
-  ``l`` — local variables (zlib-compressed JSON)
-  ``s`` — stack frames
-  ``r`` — register values
-  ``f`` — current frame info (dict with level/func/addr/file/fullname/line)
-  ``b`` — breakpoint list
+The control byte carries bit flags:
+  bit 0 (0x01) — payload is zlib-compressed
 """
 
 import asyncio
@@ -64,13 +65,11 @@ _FIXED_PAYLOAD = {
     ord(b"I"): 1,   # 1-byte pre/post flag
 }
 
-# Tags that carry variable-length zlib-compressed JSON payloads.
-# Frame: [1-byte tag][8-byte BE payload_length][payload]
-_DATA_TAGS = frozenset(b"lsrbf")
-
-# Tag for raw UTF-8 diagnostic log messages from GDB Python.
-# Same frame layout as _DATA_TAGS but payload is plain UTF-8, not zlib/JSON.
-_LOG_TAG = ord(b"D")
+# Tags that carry variable-length payloads.
+# Frame: [1-byte tag][1-byte control][7-byte BE payload_length][payload]
+# Control byte bit 0 (_CTL_COMPRESSED): payload is zlib-compressed.
+_VAR_LEN_TAGS = frozenset(b"lsrbfD")
+_CTL_COMPRESSED = 0x01
 
 
 class PipeDataMixin:
@@ -171,10 +170,11 @@ class PipeDataMixin:
                     except Exception:
                         _log.debug("inferior_call callback raised", exc_info=True)
 
-            elif tag_byte in _DATA_TAGS:
+            elif tag_byte in _VAR_LEN_TAGS:
                 if len(self._pipe_buf) < 9:
                     break
-                payload_len = struct.unpack_from(">Q", self._pipe_buf, 1)[0]
+                ctl = self._pipe_buf[1]
+                payload_len = struct.unpack(">Q", b"\x00" + self._pipe_buf[2:9])[0]
                 if payload_len > _PIPE_BUF_MAX_BYTES:
                     _log.warning(f"pipe: invalid payload size {payload_len}; resetting")
                     self._pipe_buf = b""
@@ -184,32 +184,27 @@ class PipeDataMixin:
                     break
                 payload = self._pipe_buf[9:total]
                 self._pipe_buf = self._pipe_buf[total:]
-                try:
-                    json_bytes = zlib.decompress(payload)
-                    data = json.loads(json_bytes)
-                except Exception as exc:
-                    _log.warning(f"pipe: frame decode failed (tag={chr(tag_byte)!r}): {exc!r}")
-                    continue
-                self._dispatch_pipe_data(tag_byte, data)
 
-            elif tag_byte == _LOG_TAG:
-                if len(self._pipe_buf) < 9:
-                    break
-                payload_len = struct.unpack_from(">Q", self._pipe_buf, 1)[0]
-                if payload_len > _PIPE_BUF_MAX_BYTES:
-                    _log.warning(f"pipe: invalid log payload size {payload_len}; resetting")
-                    self._pipe_buf = b""
-                    return
-                total = 9 + payload_len
-                if len(self._pipe_buf) < total:
-                    break
-                payload = self._pipe_buf[9:total]
-                self._pipe_buf = self._pipe_buf[total:]
-                try:
-                    msg = payload.decode("utf-8", errors="replace").rstrip("\n")
-                except Exception:
-                    msg = "<decode error>"
-                _log.debug(f"gdb-python: {msg}")
+                if ctl & _CTL_COMPRESSED:
+                    try:
+                        payload = zlib.decompress(payload)
+                    except Exception as exc:
+                        _log.warning(f"pipe: decompress failed (tag={chr(tag_byte)!r}): {exc!r}")
+                        continue
+
+                if tag_byte == ord(b"D"):
+                    try:
+                        msg = payload.decode("utf-8", errors="replace").rstrip("\n")
+                    except Exception:
+                        msg = "<decode error>"
+                    _log.debug(f"gdb-python: {msg}")
+                else:
+                    try:
+                        data = json.loads(payload)
+                    except Exception as exc:
+                        _log.warning(f"pipe: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
+                        continue
+                    self._dispatch_pipe_data(tag_byte, data)
 
             else:
                 _log.debug(f"pipe: unknown tag 0x{tag_byte:02x}")

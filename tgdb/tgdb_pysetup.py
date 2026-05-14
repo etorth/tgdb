@@ -14,29 +14,58 @@ except gdb.error:
 _pipe_fd = None
 _event_handlers_connected = False
 
+# Control-byte bit masks for variable-length pipe frames.
+_CTL_COMPRESSED = 0x01
 
-def _log_to_tgdb(msg):
-    """Send a diagnostic log line from GDB Python to tgdb via the pipe.
+# Payloads at or above this size are zlib-compressed automatically.
+_COMPRESS_THRESHOLD = 64
 
-    Uses tag ``D`` with a raw UTF-8 payload (no zlib/JSON).  Frame format:
-    ``[D][8-byte BE length][UTF-8 bytes]``.  tgdb logs the message through
-    its standard Python logging system at DEBUG level.
+
+def _send_pipe_frame(tag, payload):
+    """Write a variable-length frame to the pipe.
+
+    Frame format: ``[tag 1B][ctl 1B][length 7B BE][payload]``.
+
+    *tag* is a single ASCII byte (string or bytes).  *payload* is raw
+    bytes.  If the payload length meets ``_COMPRESS_THRESHOLD``, it is
+    zlib-compressed and the ``_CTL_COMPRESSED`` bit is set in the control
+    byte; otherwise the payload is sent as-is.
+
+    Returns True on success, False if the pipe is closed or the write fails.
     """
     fd = _pipe_fd
     if fd is None:
-        return
-    payload = msg.encode("utf-8", errors="replace")
-    header = b"D" + struct.pack(">Q", len(payload))
-    buf = header + payload
+        return False
+
+    tag_byte = tag.encode("ascii")[:1] if isinstance(tag, str) else tag[:1]
+
+    if len(payload) >= _COMPRESS_THRESHOLD:
+        payload = zlib.compress(payload)
+        ctl = _CTL_COMPRESSED
+    else:
+        ctl = 0x00
+
+    length_bytes = struct.pack(">Q", len(payload))[1:]
+    buf = tag_byte + bytes([ctl]) + length_bytes + payload
     try:
         written = 0
         while written < len(buf):
             n = os.write(fd, buf[written:])
             if n <= 0:
-                return
+                return False
             written += n
+        return True
     except OSError:
-        pass
+        return False
+
+
+def _log_to_tgdb(msg):
+    """Send a diagnostic log line from GDB Python to tgdb via the pipe.
+
+    Uses tag ``D`` with a raw UTF-8 payload.  tgdb logs the message through
+    its standard Python logging system at DEBUG level.
+    """
+    _send_pipe_frame("D", msg.encode("utf-8", errors="replace"))
 
 
 def register_pipe_fd(fd):
@@ -119,32 +148,15 @@ def _try_connect(event_name, handler):
 
 
 def _send_pipe_payload(tag, data):
-    """Serialize *data* as JSON, zlib-compress, and write a framed payload.
+    """Serialize *data* as JSON and write a framed payload to the pipe.
 
-    Uses the same unified pipe as lightweight events.  *tag* must be a
-    single lowercase ASCII character (one of ``l``, ``s``, ``t``, ``r``,
-    ``f``, ``b``).  Frame format: ``[tag][8-byte BE length][payload]``.
-    Returns True on success, False if the pipe is not registered or the
-    write fails.
+    Uses the unified variable-length frame format.  *tag* must be a single
+    ASCII character (one of ``l``, ``s``, ``r``, ``f``, ``b``).
+    Compression is applied automatically when the JSON exceeds the threshold.
+    Returns True on success, False if the pipe is closed or the write fails.
     """
-    fd = _pipe_fd
-    if fd is None:
-        return False
     json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    compressed = zlib.compress(json_bytes)
-    tag_byte = tag.encode("ascii")[:1] if isinstance(tag, str) else tag[:1]
-    header = tag_byte + struct.pack(">Q", len(compressed))
-    buf = header + compressed
-    try:
-        written = 0
-        while written < len(buf):
-            n = os.write(fd, buf[written:])
-            if n <= 0:
-                return False
-            written += n
-        return True
-    except OSError:
-        return False
+    return _send_pipe_frame(tag, json_bytes)
 
 
 def _format_value(val):

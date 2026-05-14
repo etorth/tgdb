@@ -17,13 +17,13 @@ event loop via `loop.add_reader()`.  The kernel pipe buffer is enlarged to
 
 ## Frame format
 
-The **tag byte** alone determines how each frame is parsed.  There is no
-universal header — each tag category has its own layout:
+The **tag byte** alone determines how each frame is parsed.  There are
+three frame categories:
 
 ```
-No-payload tags      [tag]                                      (1 byte)
-Fixed-payload tags   [tag][payload]                             (1 + N bytes)
-Bulk data tags       [tag][8-byte BE payload_length][payload]   (9 + payload_length bytes)
+No-payload tags        [tag]                                        (1 byte)
+Fixed-payload tags     [tag][payload]                               (1 + N bytes)
+Variable-length tags   [tag][ctl][7-byte BE payload_length][payload] (9 + payload_length bytes)
 ```
 
 ### No-payload tags (1 byte total)
@@ -47,39 +47,36 @@ The payload size is implied by the tag — no length field is needed.
 | `R` | 0x52  | 4    | `register_changed` | 4-byte signed big-endian register number (-1 = all) |
 | `I` | 0x49  | 1    | `inferior_call`    | `0x00` = pre-call, `0x01` = post-call            |
 
-### Raw variable-length tags (tag + 8-byte length + raw UTF-8 payload)
+### Variable-length tags (tag + ctl + 7-byte length + payload)
 
-These tags carry variable-length payloads that are **not** compressed or
-JSON-encoded — the payload is raw UTF-8 text.
-
-```
-┌──────────┬──────────────────────────┬───────────────────────┐
-│ tag (1B) │ payload_length (8B, BE)  │ payload (raw UTF-8)   │
-└──────────┴──────────────────────────┴───────────────────────┘
-```
-
-| Tag | ASCII | Description                                                    |
-|-----|-------|----------------------------------------------------------------|
-| `D` | 0x44  | Diagnostic log message from GDB Python; logged at DEBUG level  |
-
-### Bulk data tags (tag + 8-byte length + payload)
-
-These tags carry variable-length payloads.  The payload is always
-**zlib-compressed JSON** (compact separators, UTF-8 encoded).
+These tags carry variable-length payloads with a **control byte** for
+encoding flags and a **7-byte big-endian** payload length (max ~128 PB).
 
 ```
-┌──────────┬──────────────────────────┬───────────────────────┐
-│ tag (1B) │ payload_length (8B, BE)  │ payload (compressed)  │
-└──────────┴──────────────────────────┴───────────────────────┘
+┌──────────┬─────────┬──────────────────────────┬───────────────────────┐
+│ tag (1B) │ ctl(1B) │ payload_length (7B, BE)  │ payload               │
+└──────────┴─────────┴──────────────────────────┴───────────────────────┘
 ```
 
-| Tag | ASCII | Convenience function                    | Description              |
-|-----|-------|-----------------------------------------|--------------------------|
-| `l` | 0x6C  | `$_tgdb_RSVD_collect_locals()`          | Local variables          |
-| `s` | 0x73  | `$_tgdb_RSVD_collect_stack()`           | Stack frames             |
-| `r` | 0x72  | `$_tgdb_RSVD_collect_registers()`       | Register values          |
-| `f` | 0x66  | `$_tgdb_RSVD_collect_frame_info()`      | Current frame info       |
-| `b` | 0x62  | `$_tgdb_RSVD_collect_breakpoints()`     | Breakpoint list          |
+**Control byte bit flags:**
+
+| Bit | Mask | Name             | Description                                    |
+|-----|------|------------------|------------------------------------------------|
+| 0   | 0x01 | `CTL_COMPRESSED` | Payload is zlib-compressed                     |
+| 1–7 |      |                  | Reserved (must be 0)                           |
+
+Compression is applied automatically on the sender side when the raw
+payload is ≥ 64 bytes.  The receiver checks `CTL_COMPRESSED` and
+decompresses if set, regardless of size.
+
+| Tag | ASCII | Payload type | Description                                     |
+|-----|-------|--------------|-------------------------------------------------|
+| `l` | 0x6C  | JSON         | Local variables (`$_tgdb_RSVD_collect_locals()`)    |
+| `s` | 0x73  | JSON         | Stack frames (`$_tgdb_RSVD_collect_stack()`)        |
+| `r` | 0x72  | JSON         | Register values (`$_tgdb_RSVD_collect_registers()`) |
+| `f` | 0x66  | JSON         | Current frame info (`$_tgdb_RSVD_collect_frame_info()`) |
+| `b` | 0x62  | JSON         | Breakpoint list (`$_tgdb_RSVD_collect_breakpoints()`) |
+| `D` | 0x44  | Raw UTF-8    | Diagnostic log message from GDB Python          |
 
 ## Why thread info is not on the pipe
 
@@ -261,7 +258,7 @@ repeated events before dispatching callbacks:
 
 `D` (diagnostic log) fires immediately, writing to the tgdb log at DEBUG level.
 
-Bulk data tags (`l`, `s`, `r`, `f`, `b`) are dispatched immediately in
+Variable-length data tags (`l`, `s`, `r`, `f`, `b`) are dispatched immediately in
 order of arrival.
 
 ## Data collection flow
