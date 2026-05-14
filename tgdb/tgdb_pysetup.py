@@ -289,13 +289,21 @@ def _format_value(val):
 def _is_builtin_local_name(name):
     """Return True for compiler-generated or implicit locals we should hide.
 
-    Filtered families:
+    Exact-match names (``_BUILTIN_LOCAL_NAMES``):
 
-    - ``__for_begin``, ``__for_end``, ``__for_range`` — C++ range-for lowering
-    - ``__func__``, ``__FUNCTION__``, ``__PRETTY_FUNCTION__`` — GCC/Clang
-      implicit string constants (``static const char[]``) injected into
-      every function body
     - ``_`` — intentionally-ignored scratch binding
+    - ``__func__``, ``__FUNCTION__``, ``__PRETTY_FUNCTION__`` — GCC/Clang
+      implicit ``static const char[]`` injected into every function body
+    - ``__FUNCSIG__`` — MSVC equivalent of ``__PRETTY_FUNCTION__``
+    - ``__in_chrg`` — GCC complete-vs-base constructor/destructor flag
+    - ``__vtt_parm`` — GCC virtual table table pointer for virtual bases
+
+    Prefix-match families (``_BUILTIN_LOCAL_PREFIXES``):
+
+    - ``__for_`` — C++ range-for lowering (``__for_begin``, ``__for_end``,
+      ``__for_range``)
+    - ``__range`` — alternate range-for lowering in some compilers
+    - ``__guard`` — static local initialization guard variables
 
     All of these are noise in the locals pane and never useful to inspect.
     """
@@ -305,7 +313,11 @@ def _is_builtin_local_name(name):
     if name in _BUILTIN_LOCAL_NAMES:
         return True
 
-    return name.startswith("__for_")
+    for prefix in _BUILTIN_LOCAL_PREFIXES:
+        if name.startswith(prefix):
+            return True
+
+    return False
 
 
 _BUILTIN_LOCAL_NAMES = frozenset({
@@ -313,7 +325,16 @@ _BUILTIN_LOCAL_NAMES = frozenset({
     "__func__",
     "__FUNCTION__",
     "__PRETTY_FUNCTION__",
+    "__FUNCSIG__",
+    "__in_chrg",
+    "__vtt_parm",
 })
+
+_BUILTIN_LOCAL_PREFIXES = (
+    "__for_",
+    "__range",
+    "__guard",
+)
 
 
 # ---------------------------------------------------------------------------
