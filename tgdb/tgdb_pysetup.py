@@ -217,7 +217,10 @@ def _collect_locals():
                     except Exception:
                         addr_str = "unknown (referenced target)"
                 else:
-                    addr_str = str(val.address) if val.address else "register"
+                    if val.address:
+                        addr_str = str(val.address)
+                    else:
+                        addr_str = f"register@depth{depth}"
 
             except Exception:
                 val_str = "<optimized out>"
