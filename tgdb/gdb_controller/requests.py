@@ -182,8 +182,17 @@ class GDBRequestMixin:
 
 
     async def request_current_threads(self, *, report_error: bool = False) -> None:
+        # Thread info stays on MI instead of the pipe-based collection path
+        # used by locals/stack/registers/frame/breakpoints.  Reason: the GDB
+        # Python API has no way to read another thread's stack frames without
+        # calling thread.switch(), which mutates GDB's selected-thread and
+        # selected-frame state.  Even with save/restore this creates ordering
+        # hazards when other convenience functions run concurrently on the MI
+        # queue (e.g. collect_locals seeing the wrong frame).  The C-level
+        # MI command ``-thread-info`` iterates threads read-only and includes
+        # per-thread frame info without touching the selected context.
         await self.mi_command_async(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_threads()"',
+            "-thread-info",
             timeout=30.0,
         )
 

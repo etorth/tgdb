@@ -310,7 +310,16 @@ def _collect_stack():
 
 
 def _collect_threads():
-    """Collect thread info and send via data pipe (tag ``T``)."""
+    """Collect thread info and send via data pipe (tag ``t``).
+
+    **Not currently registered as a convenience function.**  Kept as reference
+    code showing how to iterate threads via the GDB Python API.  The problem
+    is that ``thread.switch()`` mutates GDB's selected-thread and
+    selected-frame state.  Even with save/restore, this creates ordering
+    hazards when other MI commands (e.g. ``collect_locals``) run concurrently
+    and observe the wrong frame.  Thread info uses MI ``-thread-info`` instead,
+    which iterates threads read-only at the C level.
+    """
     try:
         inferior = gdb.selected_inferior()
         thread_list = list(inferior.threads())
@@ -543,17 +552,6 @@ class _CollectStackFunc(gdb.Function):
         return _collect_stack()
 
 
-class _CollectThreadsFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_threads()`` — collect thread info via data pipe."""
-
-    def __init__(self):
-        super().__init__("_tgdb_RSVD_collect_threads")
-
-
-    def invoke(self):
-        return _collect_threads()
-
-
 class _CollectRegistersFunc(gdb.Function):
     """``$_tgdb_RSVD_collect_registers()`` — collect register values via data pipe."""
 
@@ -589,7 +587,6 @@ class _CollectBreakpointsFunc(gdb.Function):
 
 _CollectLocalsFunc()
 _CollectStackFunc()
-_CollectThreadsFunc()
 _CollectRegistersFunc()
 _CollectFrameInfoFunc()
 _CollectBreakpointsFunc()

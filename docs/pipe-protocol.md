@@ -62,10 +62,14 @@ These tags carry variable-length payloads.  The payload is always
 |-----|-------|-----------------------------------------|--------------------------|
 | `l` | 0x6C  | `$_tgdb_RSVD_collect_locals()`          | Local variables          |
 | `s` | 0x73  | `$_tgdb_RSVD_collect_stack()`           | Stack frames             |
-| `t` | 0x74  | `$_tgdb_RSVD_collect_threads()`         | Thread info              |
 | `r` | 0x72  | `$_tgdb_RSVD_collect_registers()`       | Register values          |
 | `f` | 0x66  | `$_tgdb_RSVD_collect_frame_info()`      | Current frame info       |
 | `b` | 0x62  | `$_tgdb_RSVD_collect_breakpoints()`     | Breakpoint list          |
+
+> **Note:** Thread info uses MI `-thread-info` instead of the pipe.  The GDB
+> Python API requires `thread.switch()` to read another thread's frames, which
+> mutates GDB's selected-thread/frame state.  The C-level MI command iterates
+> threads read-only.
 
 ## JSON payload schemas
 
@@ -130,49 +134,6 @@ Array of frame objects, ordered from newest (level 0) to oldest.
 | `file`     | string | Source file basename                       |
 | `fullname` | string | Absolute source file path                 |
 | `line`     | int    | Source line number (0 if unknown)          |
-
-### `t` — Thread info
-
-Object with a thread list and the currently selected thread ID.
-
-```json
-{
-  "threads": [
-    {
-      "id": "1",
-      "target-id": "LWP 12345",
-      "name": "",
-      "state": "stopped",
-      "core": "",
-      "frame": {
-        "level": 0,
-        "func": "main",
-        "addr": "0x555555555180",
-        "file": "test.cpp",
-        "fullname": "/home/user/test.cpp",
-        "line": 42
-      }
-    }
-  ],
-  "current-thread-id": "1"
-}
-```
-
-| Field               | Type         | Description                                     |
-|---------------------|--------------|-------------------------------------------------|
-| `threads`           | array        | List of thread objects                          |
-| `current-thread-id` | string       | Global number of the selected thread            |
-
-Each thread object:
-
-| Field       | Type          | Description                                      |
-|-------------|---------------|--------------------------------------------------|
-| `id`        | string        | Thread global number                             |
-| `target-id` | string       | OS thread ID (e.g. `"LWP 12345"`)               |
-| `name`      | string        | Thread name (empty if unnamed)                   |
-| `state`     | string        | `"stopped"` or `"running"`                       |
-| `core`      | string        | CPU core (empty if unavailable)                  |
-| `frame`     | object \| null | Topmost frame (null if thread is running)       |
 
 ### `r` — Register values
 

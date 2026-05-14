@@ -24,7 +24,6 @@ Fixed-payload tags (tag + fixed-size payload, no length field):
 Bulk data tags (``[1-byte tag][8-byte BE payload_length][payload]``):
   ``l`` — local variables (zlib-compressed JSON)
   ``s`` — stack frames
-  ``t`` — thread info (dict with ``threads`` list + ``current-thread-id``)
   ``r`` — register values
   ``f`` — current frame info (dict with level/func/addr/file/fullname/line)
   ``b`` — breakpoint list
@@ -43,7 +42,6 @@ from .types import (
     Frame,
     LocalVariable,
     RegisterInfo,
-    ThreadInfo,
     normalize_addr,
 )
 
@@ -65,7 +63,7 @@ _FIXED_PAYLOAD = {
 
 # Tags that carry variable-length zlib-compressed JSON payloads.
 # Frame: [1-byte tag][8-byte BE payload_length][payload]
-_DATA_TAGS = frozenset(b"lstrbf")
+_DATA_TAGS = frozenset(b"lsrbf")
 
 
 class PipeDataMixin:
@@ -220,8 +218,6 @@ class PipeDataMixin:
             self._handle_pipe_locals(data)
         elif tag_byte == ord(b"s"):
             self._handle_pipe_stack(data)
-        elif tag_byte == ord(b"t"):
-            self._handle_pipe_threads(data)
         elif tag_byte == ord(b"r"):
             self._handle_pipe_registers(data)
         elif tag_byte == ord(b"f"):
@@ -283,53 +279,6 @@ class PipeDataMixin:
         _log.debug(f"pipe stack: {len(frames)} frames")
         self.stack = frames
         self.on_stack(list(frames))
-
-
-    def _handle_pipe_threads(self, data: dict) -> None:
-        """Build ``ThreadInfo`` list from pipe JSON and fire ``on_threads``."""
-        if self._inferior_running:
-            return
-        if not isinstance(data, dict):
-            return
-
-        current_thread_id = data.get("current-thread-id", "")
-        if isinstance(current_thread_id, str) and current_thread_id:
-            self.current_thread_id = current_thread_id
-
-        raw_threads = data.get("threads", [])
-        if not isinstance(raw_threads, list):
-            return
-
-        threads = []
-        for raw in raw_threads:
-            if not isinstance(raw, dict):
-                continue
-            frame_data = raw.get("frame")
-            if isinstance(frame_data, dict):
-                parsed_frame = Frame(
-                    level=int(frame_data.get("level", 0)),
-                    file=frame_data.get("file", ""),
-                    fullname=frame_data.get("fullname", ""),
-                    line=int(frame_data.get("line", 0)),
-                    func=frame_data.get("func", ""),
-                    addr=frame_data.get("addr", ""),
-                )
-            else:
-                parsed_frame = None
-            threads.append(
-                ThreadInfo(
-                    id=str(raw.get("id", "")),
-                    target_id=str(raw.get("target-id", "")),
-                    name=str(raw.get("name", "")),
-                    state=str(raw.get("state", "")),
-                    core=str(raw.get("core", "")),
-                    frame=parsed_frame,
-                    is_current=str(raw.get("id", "")) == self.current_thread_id,
-                )
-            )
-        _log.debug(f"pipe threads: {len(threads)} threads")
-        self.threads = threads
-        self._emit_threads()
 
 
     def _handle_pipe_registers(self, data: list) -> None:
