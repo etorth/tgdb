@@ -22,8 +22,8 @@ No-payload tags (1 byte total):
 Fixed-payload tags (tag + fixed-size payload, no length field):
   ``I`` — inferior_call (1 byte: 0x00 = pre, 0x01 = post)
 
-Varint-payload tags (tag + zigzag varint):
-  ``R`` — register_changed (zigzag-encoded signed register number, -1 = all)
+Varint-payload tags (tag + unsigned varint):
+  ``R`` — register_changed (regnum + 1 as unsigned varint; 0 = all)
 
 Variable-length tags (``[tag 1B][ctl 1B][length varint][payload]``):
   ``l`` — local variables (JSON, auto-compressed)
@@ -78,7 +78,7 @@ _CTL_COMPRESSED = 0x01
 
 
 # ---------------------------------------------------------------------------
-# Varint helpers — unsigned LEB128 and zigzag signed decoding
+# Varint helpers — unsigned LEB128
 # ---------------------------------------------------------------------------
 
 def _decode_varint(buf, offset=0):
@@ -98,11 +98,6 @@ def _decode_varint(buf, offset=0):
             return result, offset
         shift += 7
     return None, start
-
-
-def _zigzag_decode(n):
-    """Zigzag-decode unsigned integer *n* back to signed."""
-    return (n >> 1) ^ -(n & 1)
 
 
 class SocketDataMixin:
@@ -206,7 +201,7 @@ class SocketDataMixin:
                 self._sock_buf = self._sock_buf[after:]
 
                 if tag_byte == ord(b"R"):
-                    regnum = _zigzag_decode(raw)
+                    regnum = raw - 1
                     if regnum < 0:
                         regnum = -1
                     pending_regnums.add(regnum)

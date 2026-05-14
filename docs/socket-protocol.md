@@ -24,7 +24,7 @@ four frame categories:
 ```
 No-payload tags        [tag]                                        (1 byte)
 Fixed-payload tags     [tag][payload]                               (1 + N bytes)
-Varint-payload tags    [tag][zigzag varint]                         (1 + 1–N bytes)
+Varint-payload tags    [tag][unsigned varint]                       (1 + 1–N bytes)
 Variable-length tags   [tag][ctl][payload_length varint][payload]   (2 + varint + payload bytes)
 ```
 
@@ -39,9 +39,8 @@ Each byte carries 7 data bits; the MSB is a continuation flag:
 Examples: `0` → `0x00` (1 byte), `127` → `0x7F` (1 byte),
 `128` → `0x80 0x01` (2 bytes), `300` → `0xAC 0x02` (2 bytes).
 
-Signed integers (e.g. register numbers) use **zigzag encoding** first:
-`zigzag(n) = (n << 1) ^ (n >> 63)`, mapping `0 → 0, -1 → 1, 1 → 2, -2 → 3, ...`
-The result is then encoded as an unsigned varint.
+All integers in the protocol are unsigned.  The register-changed tag
+encodes `regnum + 1` so that the sentinel -1 ("all") maps to 0.
 
 ### No-payload tags (1 byte total)
 
@@ -63,14 +62,13 @@ The payload size is implied by the tag — no length field is needed.
 |-----|-------|------|--------------------|--------------------------------------------------|
 | `I` | 0x49  | 1    | `inferior_call`    | `0x00` = pre-call, `0x01` = post-call            |
 
-### Varint-payload tags (tag + zigzag varint)
+### Varint-payload tags (tag + unsigned varint)
 
-The payload is a single zigzag-encoded signed integer in LEB128 varint form.
-Each byte carries 7 data bits; MSB=1 means "more bytes follow".
+The payload is a single unsigned LEB128 varint.
 
 | Tag | ASCII | Event              | Payload format                                          |
 |-----|-------|--------------------|---------------------------------------------------------|
-| `R` | 0x52  | `register_changed` | Zigzag-encoded signed register number (-1 = all)        |
+| `R` | 0x52  | `register_changed` | `regnum + 1` as unsigned varint (0 = all registers)     |
 
 ### Variable-length tags (tag + ctl + varint length + payload)
 

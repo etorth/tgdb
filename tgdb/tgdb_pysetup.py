@@ -38,11 +38,9 @@ _COMPRESS_THRESHOLD = 64
 
 
 # ---------------------------------------------------------------------------
-# Varint helpers — unsigned LEB128 and zigzag signed encoding
+# Varint helpers — unsigned LEB128
 #
 # Each byte carries 7 data bits; MSB=1 means "more bytes follow".
-# Zigzag maps signed integers to unsigned so small negatives stay small:
-#   0 → 0, -1 → 1, 1 → 2, -2 → 3, 2 → 4, ...
 # ---------------------------------------------------------------------------
 
 def _encode_varint(n):
@@ -72,16 +70,6 @@ def _decode_varint(buf, offset=0):
             return result, offset
         shift += 7
     return None, start
-
-
-def _zigzag_encode(n):
-    """Zigzag-encode signed integer *n* to unsigned."""
-    return (n << 1) ^ (n >> 63)
-
-
-def _zigzag_decode(n):
-    """Zigzag-decode unsigned integer *n* back to signed."""
-    return (n >> 1) ^ -(n & 1)
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +257,7 @@ def register_socket_fd(fd, log_enabled=False):
             regnum = int(event.regnum)
         except (AttributeError, ValueError, TypeError):
             regnum = -1
-        _emit(b"R", _encode_varint(_zigzag_encode(regnum)))
+        _emit(b"R", _encode_varint(regnum + 1))
 
     def _on_new_objfile(_event):
         _emit(b"O")
