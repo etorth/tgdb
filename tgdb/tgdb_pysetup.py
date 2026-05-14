@@ -221,7 +221,13 @@ def _collect_locals():
 
     depth = 0
     all_vars = []
-    seen_names = set()
+
+    # Map name → {line, type, has_real_addr} from the shallowest depth seen.
+    # Used to detect GDB Bug 3 noise: a deeper-depth copy of the same
+    # variable (same name, same decl line, same type) whose address is
+    # synthetic register@N is a phantom merged from the parent block.
+    seen: dict[str, dict] = {}
+
     while block:
         block_start = hex(block.start)
         for symbol in block:
@@ -264,15 +270,20 @@ def _collect_locals():
                 addr_str = "unknown"
                 _tgdb_RSVD_log(f"value eval failed for {name}: {exc}\n")
 
-            is_shadowed = name in seen_names
+            is_shadowed = name in seen
+            type_str = str(symbol.type)
 
-            # GDB Bug 3 workaround: a shadowed variable whose address is a
-            # synthetic "register@N" marker is a GDB-merged parent-block copy
-            # already present at a shallower depth with a real stack address.
-            # See docs/known_gdb_bug.md § Bug 3.
+            # GDB Bug 3 workaround: a variable at a deeper depth that has
+            # the same name, declaration line, and type as one already seen
+            # at a shallower depth — but whose address is a synthetic
+            # "register@N" (val.address was None) — is a phantom copy
+            # merged by GDB from the parent function-body block.  The
+            # shallower copy has the real stack address and value; this
+            # deeper copy is noise.  See docs/known_gdb_bug.md § Bug 3.
             if is_shadowed and addr_str.startswith("register@"):
-                seen_names.add(name)
-                continue
+                prev = seen[name]
+                if prev["line"] == decl_line and prev["type"] == type_str and prev["has_real_addr"]:
+                    continue
 
             if is_lref:
                 ref_kind = "lvalue (&)"
@@ -284,7 +295,7 @@ def _collect_locals():
             all_vars.append({
                 "name": name,
                 "value": val_str,
-                "type": str(symbol.type),
+                "type": type_str,
                 "is_arg": symbol.is_argument,
                 "is_reference": is_reference,
                 "ref_kind": ref_kind,
@@ -295,7 +306,12 @@ def _collect_locals():
                 "scope_start": hex(block.start),
             })
 
-            seen_names.add(name)
+            if name not in seen:
+                seen[name] = {
+                    "line": decl_line,
+                    "type": type_str,
+                    "has_real_addr": not addr_str.startswith("register@") and addr_str != "unknown",
+                }
 
         if block.superblock is None:
             break
