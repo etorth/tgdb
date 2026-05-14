@@ -220,7 +220,7 @@ def _collect_locals():
                     if val.address:
                         addr_str = str(val.address)
                     else:
-                        addr_str = f"register@depth{depth}"
+                        addr_str = f"register@{depth}"
 
             except Exception:
                 val_str = "<optimized out>"
@@ -260,7 +260,30 @@ def _collect_locals():
         block = block.superblock
         depth += 1
 
-    _send_pipe_payload("l", all_vars)
+    # Deduplicate register variables with identical (name, addr) keys.
+    #
+    # The compiler can split a variable's lifetime into multiple DWARF
+    # location ranges.  GDB's block iterator yields one symbol per range,
+    # so a single variable may appear multiple times in the same block —
+    # typically once with a real value and once as "<optimized out>".
+    # Stack-allocated variables get unique hex addresses and never collide,
+    # but register variables all share the same synthetic addr
+    # ("register@<depth>"), producing duplicate BindingKeys on the tgdb
+    # side.  Keep only the first entry per (name, addr) that carries a
+    # real value; fall back to the first entry if all are optimized out.
+    deduped: list[dict] = []
+    seen_keys: dict[tuple[str, str], int] = {}
+    for entry in all_vars:
+        key = (entry["name"], entry["addr"])
+        if key not in seen_keys:
+            seen_keys[key] = len(deduped)
+            deduped.append(entry)
+        elif entry["value"] != "<optimized out>":
+            prev_idx = seen_keys[key]
+            if deduped[prev_idx]["value"] == "<optimized out>":
+                deduped[prev_idx] = entry
+
+    _send_pipe_payload("l", deduped)
     return "ok"
 
 
