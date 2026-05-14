@@ -21,12 +21,14 @@ class GDBRequestMixin:
         *,
         report_error: bool = True,
         kind: str | None = None,
+        token: int | None = None,
     ) -> int | None:
         if self._mi_master_fd < 0:
             return None
 
-        token = self._token
-        self._token += 1
+        if token is None:
+            token = self._token
+            self._token += 1
         self._request_meta[token] = {
             "report_error": report_error,
             "kind": kind,
@@ -93,6 +95,7 @@ class GDBRequestMixin:
         timeout: float | None = 5.0,
         *,
         raise_on_error: bool = False,
+        token: int | None = None,
     ) -> dict:
         """Send an MI command and await the decoded response.
 
@@ -100,10 +103,15 @@ class GDBRequestMixin:
         ``{}``, while ``^error`` responses are returned to the caller for
         explicit inspection. When ``raise_on_error`` is true, send failures,
         timeouts, and ``^error`` responses raise ``RuntimeError``.
+
+        When *token* is provided (pre-allocated via ``_next_mi_token``),
+        that value is used as the MI command prefix instead of allocating a
+        new one.  This lets the caller reuse the same integer as a cancel
+        token for convenience functions.
         """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
-        token = self._send_mi_command(cmd, report_error=False)
+        token = self._send_mi_command(cmd, report_error=False, token=token)
         if token is None:
             if raise_on_error:
                 raise RuntimeError("MI channel not open")
@@ -162,11 +170,12 @@ class GDBRequestMixin:
 
     async def request_current_location(self, *, report_error: bool = True) -> None:
         self._frame_request_inflight = True
-        token = self._next_cancel_token()
+        token = self._next_mi_token()
         self._frame_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info({token})"',
             timeout=30.0,
+            token=token,
         )
 
 
@@ -174,23 +183,25 @@ class GDBRequestMixin:
         if self._locals_request_inflight:
             return
         self._locals_request_inflight = True
-        token = self._next_cancel_token()
+        token = self._next_mi_token()
         self._locals_cancel_token = token
         try:
             await self.mi_command_async(
                 f'-data-evaluate-expression "$_tgdb_RSVD_collect_locals({token})"',
                 timeout=30.0,
+                token=token,
             )
         finally:
             self._locals_request_inflight = False
 
 
     async def request_current_stack_frames(self, *, report_error: bool = False) -> None:
-        token = self._next_cancel_token()
+        token = self._next_mi_token()
         self._stack_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_stack({token})"',
             timeout=30.0,
+            token=token,
         )
 
 
@@ -211,20 +222,22 @@ class GDBRequestMixin:
 
 
     async def request_current_registers(self, *, report_error: bool = False) -> None:
-        token = self._next_cancel_token()
+        token = self._next_mi_token()
         self._registers_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_registers({token})"',
             timeout=30.0,
+            token=token,
         )
 
 
     async def request_breakpoints(self, *, report_error: bool = False) -> None:
-        token = self._next_cancel_token()
+        token = self._next_mi_token()
         self._breakpoints_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints({token})"',
             timeout=30.0,
+            token=token,
         )
 
 

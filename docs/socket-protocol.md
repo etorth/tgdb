@@ -288,11 +288,12 @@ order of arrival.
 
 Bulk data is collected by GDB-side Python functions registered as GDB
 convenience functions (e.g. `$_tgdb_RSVD_collect_locals(token)`).  tgdb
-invokes them via `-data-evaluate-expression` on the MI channel, passing a
-cancel token as an integer argument:
+invokes them via `-data-evaluate-expression` on the MI channel, passing
+the **MI command token** as the integer argument — the same token that
+prefixes the MI command on the wire:
 
 ```
--data-evaluate-expression "$_tgdb_RSVD_collect_locals(42)"
+42-data-evaluate-expression "$_tgdb_RSVD_collect_locals(42)"
 ```
 
 The convenience function collects data using GDB's Python API, serializes it
@@ -300,21 +301,23 @@ as JSON, zlib-compresses it, writes the framed payload to the socket, and
 returns `"ok"` as the MI result.  The actual data arrives asynchronously
 through the socket, decoupling bulk data transfer from the MI command stream.
 
-If the function detects that its cancel token has been cancelled (see
+If the function detects that its token has been cancelled (see
 **Cancellation** below), it returns `"cancelled"` without sending any data.
 
 ## Cancellation
 
 The socket is bidirectional.  In the **tgdb→GDB** direction, tgdb writes
-varint-encoded unsigned integers (cancel tokens) to request cancellation
-of pending or in-progress convenience function calls.
+varint-encoded unsigned integers (tokens) to request cancellation of
+pending or in-progress convenience function calls.  The cancel token is
+the same MI command token that prefixed the original request — a single
+counter serves both purposes.
 
 ### Wire format (tgdb→GDB)
 
 ```
-┌───────────────────────────┐
-│ cancel_token (varint LEB) │
-└───────────────────────────┘
+┌────────────────────────┐
+│ mi_token (varint LEB)  │
+└────────────────────────┘
 ```
 
 Tokens are written directly to the socket with no framing — the GDB-side

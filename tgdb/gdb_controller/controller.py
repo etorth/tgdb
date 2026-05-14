@@ -170,10 +170,6 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.register_names: list[str] = []
         self._register_values: dict[int, str] = {}
         self._inferior_running: bool = False
-        # Monotonically increasing counter for cancel tokens.  Each
-        # convenience function request gets a unique token; tgdb can write
-        # the token to the socket to request cancellation on the GDB side.
-        self._cancel_token_counter: int = 0
 
         # Callbacks
         self.on_console: Callable[[bytes], None] = lambda d: None
@@ -314,10 +310,17 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self._proc.write(data)
 
 
-    def _next_cancel_token(self) -> int:
-        """Return a fresh cancel token for a convenience function call."""
-        self._cancel_token_counter += 1
-        return self._cancel_token_counter
+    def _next_mi_token(self) -> int:
+        """Pre-allocate the next MI token.
+
+        The returned integer serves as both the MI command prefix and the
+        cancel token passed to GDB-side convenience functions.  The caller
+        must pass it to ``_send_mi_command(token=...)`` so the same value
+        appears on the wire.
+        """
+        token = self._token
+        self._token += 1
+        return token
 
 
     def send_cancel_token(self, token: int) -> None:
