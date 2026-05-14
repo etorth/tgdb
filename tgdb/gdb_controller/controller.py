@@ -13,10 +13,10 @@ Secondary PTY: GDB machine-interface channel opened via "new-ui mi <device>".
 """
 
 import asyncio
-import fcntl
 import logging
 import os
 import signal
+import socket
 import termios
 from collections.abc import Callable
 
@@ -34,7 +34,7 @@ from .types import (  # noqa: F401 — re-exported
 )
 from .varobj import VarobjMixin
 from .parsing import ParsingMixin
-from .pipe_data import PipeDataMixin
+from .socket_data import SocketDataMixin
 # GDB/MI output parser — uses GDBMIParser extracted from pygdbmi
 # ---------------------------------------------------------------------------
 
@@ -53,7 +53,7 @@ _MI_BUF_MAX_BYTES = 16 * 1024 * 1024
 # ---------------------------------------------------------------------------
 
 
-class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, PipeDataMixin):
+class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, SocketDataMixin):
     """Drive GDB through a console PTY plus a structured MI PTY.
 
     Public interface
@@ -115,15 +115,17 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._proc: ptyprocess.PtyProcess | None = None
         self._mi_master_fd: int = -1
         self._mi_slave_fd: int = -1  # kept open to prevent master EIO
-        # Inheritable pipe used by GDB-side Python (``tgdb_pysetup.py``)
-        # for all GDB→tgdb communication: lightweight events (before-prompt,
+        # AF_UNIX socketpair used by GDB-side Python (``tgdb_pysetup.py``)
+        # for all GDB↔tgdb communication: lightweight events (before-prompt,
         # register-changed, objfile, inferior-call, gdb-exiting) and bulk
         # data payloads (locals, stack, threads, registers).  Both share a
-        # uniform binary frame format.  The write end is inherited into GDB;
-        # the read end is watched by tgdb's asyncio loop.
-        self._pipe_r: int = -1
-        self._pipe_w: int = -1
-        self._pipe_buf: bytes = b""
+        # uniform binary frame format.  The GDB-side fd is inherited into
+        # GDB; the tgdb-side fd is watched by tgdb's asyncio loop.
+        # The socket is bidirectional: GDB writes data/events to tgdb, and
+        # tgdb can write cancel tokens back to GDB.
+        self._sock_tgdb: int = -1
+        self._sock_gdb: int = -1
+        self._sock_buf: bytes = b""
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, asyncio.Future] = {}
@@ -136,7 +138,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.current_frame: Frame | None = None
         # Guard against redundant ``request_current_location`` calls.
         # Set True when a frame-info request is in flight; cleared when the
-        # pipe frame response is processed.  ``_ui_on_cli_prompt`` checks
+        # socket frame response is processed.  ``_ui_on_cli_prompt`` checks
         # this to avoid sending another frame-info request while one is
         # already pending — each MI command GDB processes emits a prompt,
         # so without this guard a single ``up`` creates an infinite cascade.
@@ -175,7 +177,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.on_exit: Callable[[], None] = lambda: None
         self.on_error: Callable[[str], None] = lambda m: None
         # Fired (coalesced) whenever the GDB CLI is about to redisplay its
-        # prompt — wired off the inheritable notify pipe.  Used by tgdb to
+        # prompt — wired off the AF_UNIX socketpair.  Used by tgdb to
         # refresh the source pane after CLI frame navigation.
         self.on_cli_prompt: Callable[[], None] = lambda: None
         # User wrote a register from the CLI (``set $rax=...``).  GDB has
@@ -210,7 +212,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         Primary PTY  : GDB console (user sees + types here).
         Secondary PTY: GDB MI channel via 'new-ui mi <slave_device>'.
         """
-        # Refuse double-start so we don't leak the previous PTY/pipe fds.
+        # Refuse double-start so we don't leak the previous PTY/socket fds.
         # A caller that genuinely wants to restart GDB should terminate()
         # first.
         if self._proc is not None:
@@ -222,20 +224,25 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._mi_master_fd = mi_master_fd
         self._mi_slave_fd = mi_slave_fd
 
-        # Create the unified pipe for all GDB→tgdb communication.  The write
-        # end is inherited by GDB (via pass_fds); the read end is watched by
-        # asyncio.  The write end stays blocking so the GDB-side Python retry
-        # loop can complete large data frames; lightweight event frames (5
-        # bytes) complete instantly even on a blocking fd.  Enlarge the kernel
-        # buffer to 1 MB so compressed payloads don't stall the writer.
-        pipe_r, pipe_w = os.pipe()
-        self._pipe_r = pipe_r
-        self._pipe_w = pipe_w
-        os.set_inheritable(pipe_w, True)
+        # Create the AF_UNIX socketpair for all GDB↔tgdb communication.
+        # The GDB-side fd is inherited by GDB (via pass_fds); the tgdb-side
+        # fd is watched by asyncio.  The GDB side stays blocking so the
+        # GDB-side Python retry loop can complete large data frames;
+        # lightweight event frames (5 bytes) complete instantly even on a
+        # blocking fd.  Enlarge the socket buffers to 1 MB so compressed
+        # payloads don't stall the writer.
+        sock_a, sock_b = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            fcntl.fcntl(pipe_r, 1031, 1024 * 1024)  # F_SETPIPE_SZ
+            sock_a.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+            sock_b.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
         except OSError:
             pass
+        sock_tgdb = sock_a.detach()
+        sock_gdb = sock_b.detach()
+        self._sock_tgdb = sock_tgdb
+        self._sock_gdb = sock_gdb
+        os.set_inheritable(sock_gdb, True)
+        os.set_blocking(sock_tgdb, False)
 
         cmd: list[str] = []
         try:
@@ -261,7 +268,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self._proc = ptyprocess.PtyProcess.spawn(
                 cmd,
                 dimensions=(rows, cols),
-                pass_fds=[pipe_w],
+                pass_fds=[sock_gdb],
             )
         except Exception:
             _log.error(f"GDB spawn failed, cmd={cmd!r}")
@@ -327,8 +334,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 fds.append(fd)
         if self._mi_master_fd >= 0:
             fds.append(self._mi_master_fd)
-        if self._pipe_r >= 0:
-            fds.append(self._pipe_r)
+        if self._sock_tgdb >= 0:
+            fds.append(self._sock_tgdb)
         return fds
 
 
@@ -388,7 +395,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 except Exception:
                     pass
 
-        for attr in ("_mi_master_fd", "_mi_slave_fd", "_pipe_r", "_pipe_w"):
+        for attr in ("_mi_master_fd", "_mi_slave_fd", "_sock_tgdb", "_sock_gdb"):
             fd = getattr(self, attr, -1)
             if fd >= 0:
                 try:
@@ -418,10 +425,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # with zero polling delay (unlike asyncio.sleep(0.02)).
         loop.add_reader(self._proc.fd, self._on_console_readable, loop)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
-        # Watch the unified pipe written by ``register_pipe_fd`` inside GDB's
+        # Watch the AF_UNIX socket written by ``register_socket_fd`` inside GDB's
         # embedded Python.  Carries both lightweight events and bulk data.
-        if self._pipe_r >= 0:
-            loop.add_reader(self._pipe_r, self._on_pipe_readable)
+        if self._sock_tgdb >= 0:
+            loop.add_reader(self._sock_tgdb, self._on_sock_readable)
         _log.info("MI reader started")
 
         # Load tgdb's embedded GDB/Python helpers before stop handling needs
@@ -431,10 +438,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # Tell GDB which fd to ping on every event we care about. Sent after
         # pysetup so the helper is defined; MI commands are FIFO so ordering
         # holds.
-        if self._pipe_w >= 0:
+        if self._sock_gdb >= 0:
             log_enabled = _log.isEnabledFor(logging.DEBUG)
             self.mi_command(
-                f'-interpreter-exec console "python register_pipe_fd({self._pipe_w}, log_enabled={log_enabled})"',
+                f'-interpreter-exec console "python register_socket_fd({self._sock_gdb}, log_enabled={log_enabled})"',
                 report_error=False,
             )
 
@@ -451,9 +458,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 loop.remove_reader(self._mi_master_fd)
             except Exception:
                 pass
-            if self._pipe_r >= 0:
+            if self._sock_tgdb >= 0:
                 try:
-                    loop.remove_reader(self._pipe_r)
+                    loop.remove_reader(self._sock_tgdb)
                 except Exception:
                     pass
             _log.info("GDB exited")

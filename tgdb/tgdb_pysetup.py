@@ -12,10 +12,10 @@ except gdb.error:
     pass
 
 
-_pipe_fd = None
+_sock_fd = None
 _event_handlers_connected = False
 
-# Control-byte bit masks for variable-length pipe frames.
+# Control-byte bit masks for variable-length socket frames.
 _CTL_COMPRESSED = 0x01
 
 # Payloads at or above this size are zlib-compressed automatically.
@@ -28,18 +28,18 @@ _COMPRESS_THRESHOLD = 64
 # Mirrors the tgdb-side pattern in ``tgdb/log.py``:
 # - Default level is WARNING so ``_log.debug(...)`` calls are free when
 #   tgdb is run without ``--log``.
-# - When tgdb passes ``log_enabled=True`` via ``register_pipe_fd()``,
+# - When tgdb passes ``log_enabled=True`` via ``register_socket_fd()``,
 #   the level is raised to DEBUG and a custom handler sends messages
-#   through the pipe (tag ``D``) to appear in tgdb's log file.
+#   through the socket (tag ``D``) to appear in tgdb's log file.
 # ---------------------------------------------------------------------------
 
-class _PipeLogHandler(logging.Handler):
-    """Logging handler that sends records through the GDB→tgdb pipe."""
+class _SocketLogHandler(logging.Handler):
+    """Logging handler that sends records through the GDB↔tgdb socket."""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
-            _send_pipe_frame("D", msg.encode("utf-8", errors="replace"))
+            _send_sock_frame("D", msg.encode("utf-8", errors="replace"))
         except Exception:
             pass
 
@@ -50,8 +50,8 @@ _log.setLevel(logging.WARNING)
 _log.propagate = False
 
 
-def _send_pipe_frame(tag, payload):
-    """Write a variable-length frame to the pipe.
+def _send_sock_frame(tag, payload):
+    """Write a variable-length frame to the socket.
 
     Frame format: ``[tag 1B][ctl 1B][length 7B BE][payload]``.
 
@@ -60,9 +60,9 @@ def _send_pipe_frame(tag, payload):
     zlib-compressed and the ``_CTL_COMPRESSED`` bit is set in the control
     byte; otherwise the payload is sent as-is.
 
-    Returns True on success, False if the pipe is closed or the write fails.
+    Returns True on success, False if the socket is closed or the write fails.
     """
-    fd = _pipe_fd
+    fd = _sock_fd
     if fd is None:
         return False
 
@@ -88,35 +88,37 @@ def _send_pipe_frame(tag, payload):
         return False
 
 
-def register_pipe_fd(fd, log_enabled=False):
-    """Wire GDB Python events and data collection to a single pipe.
+def register_socket_fd(fd, log_enabled=False):
+    """Wire GDB Python events and data collection to an AF_UNIX socket.
 
-    tgdb opens one inheritable pipe before forking GDB and passes the write
-    end's fd number here.  All communication uses a tag-driven binary frame
-    format so lightweight events and bulk data share the same channel.
+    tgdb creates an ``AF_UNIX`` socketpair before forking GDB and passes
+    one end's fd number here.  All communication uses a tag-driven binary
+    frame format so lightweight events and bulk data share the same
+    channel.  The socket is bidirectional: GDB writes data/events to
+    tgdb, and tgdb can write cancel tokens back to GDB.
 
     When *log_enabled* is True (tgdb was started with ``--log``), the
-    GDB-side logger is raised to DEBUG and a ``_PipeLogHandler`` is
-    attached so ``_log.debug(...)`` messages flow through the pipe to
+    GDB-side logger is raised to DEBUG and a ``_SocketLogHandler`` is
+    attached so ``_log.debug(...)`` messages flow through the socket to
     tgdb's log file.  When False, the logger stays at WARNING and all
     DEBUG-level calls are effectively free (no string formatting, no
     handler walk).
 
-    See ``docs/pipe-protocol.md`` for the full protocol specification.
+    See ``docs/socket-protocol.md`` for the full protocol specification.
 
     Calling this again with a different fd retargets the existing handlers.
     Handlers are connected to GDB's event registries exactly once per
     Python process so a re-call cannot accumulate duplicates.
     """
-    global _pipe_fd, _event_handlers_connected
-    _pipe_fd = fd
+    global _sock_fd, _event_handlers_connected
+    _sock_fd = fd
 
     if log_enabled:
-        # Remove any previously attached pipe handlers (in case of re-init).
+        # Remove any previously attached socket handlers (in case of re-init).
         for handler in list(_log.handlers):
-            if isinstance(handler, _PipeLogHandler):
+            if isinstance(handler, _SocketLogHandler):
                 _log.removeHandler(handler)
-        handler = _PipeLogHandler()
+        handler = _SocketLogHandler()
         handler.setFormatter(logging.Formatter("%(message)s"))
         _log.addHandler(handler)
         _log.setLevel(logging.DEBUG)
@@ -128,7 +130,7 @@ def register_pipe_fd(fd, log_enabled=False):
     _event_handlers_connected = True
 
     def _emit(tag_byte, payload=b""):
-        active_fd = _pipe_fd
+        active_fd = _sock_fd
         if active_fd is None:
             return
         try:
@@ -187,16 +189,16 @@ def _try_connect(event_name, handler):
         pass
 
 
-def _send_pipe_payload(tag, data):
-    """Serialize *data* as JSON and write a framed payload to the pipe.
+def _send_sock_payload(tag, data):
+    """Serialize *data* as JSON and write a framed payload to the socket.
 
     Uses the unified variable-length frame format.  *tag* must be a single
     ASCII character (one of ``l``, ``s``, ``r``, ``f``, ``b``).
     Compression is applied automatically when the JSON exceeds the threshold.
-    Returns True on success, False if the pipe is closed or the write fails.
+    Returns True on success, False if the socket is closed or the write fails.
     """
     json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return _send_pipe_frame(tag, json_bytes)
+    return _send_sock_frame(tag, json_bytes)
 
 
 def _format_value(val):
@@ -231,28 +233,28 @@ def _is_builtin_local_name(name):
 
 
 # ---------------------------------------------------------------------------
-# Pipe-based collection functions
+# Socket-based collection functions
 #
 # Each function collects data using GDB's Python API, serializes it as
 # JSON, zlib-compresses the bytes, and writes a length-prefixed frame to
-# the data pipe.  The MI return value is a tiny "ok" string so the MI
+# the socket.  The MI return value is a tiny "ok" string so the MI
 # channel is never congested by the payload.
 # ---------------------------------------------------------------------------
 
 
 def _collect_locals():
-    """Collect local variables and send via data pipe (tag ``L``)."""
+    """Collect local variables and send via data socket (tag ``l``)."""
     try:
         frame = gdb.selected_frame()
     except gdb.error:
-        _send_pipe_payload("l", [])
+        _send_sock_payload("l", [])
         return "ok"
 
     try:
         block = frame.block()
     except (gdb.error, RuntimeError) as exc:
         if "Cannot locate block" in str(exc):
-            _send_pipe_payload("l", [])
+            _send_sock_payload("l", [])
             return "ok"
         raise
 
@@ -382,17 +384,17 @@ def _collect_locals():
             if deduped[prev_idx]["value"] == "<optimized out>":
                 deduped[prev_idx] = entry
 
-    _send_pipe_payload("l", deduped)
+    _send_sock_payload("l", deduped)
     return "ok"
 
 
 def _collect_stack():
-    """Collect stack frames and send via data pipe (tag ``S``)."""
+    """Collect stack frames and send via data socket (tag ``S``)."""
     frames = []
     try:
         frame = gdb.newest_frame()
     except gdb.error:
-        _send_pipe_payload("s", [])
+        _send_sock_payload("s", [])
         return "ok"
 
     level = 0
@@ -430,17 +432,17 @@ def _collect_stack():
         except gdb.error:
             break
 
-    _send_pipe_payload("s", frames)
+    _send_sock_payload("s", frames)
     return "ok"
 
 
 def _collect_registers():
-    """Collect register values and send via data pipe (tag ``R``)."""
+    """Collect register values and send via data socket (tag ``R``)."""
     try:
         frame = gdb.selected_frame()
         arch = frame.architecture()
     except gdb.error:
-        _send_pipe_payload("r", [])
+        _send_sock_payload("r", [])
         return "ok"
 
     registers = []
@@ -463,15 +465,15 @@ def _collect_registers():
                 "number": number,
             })
     except (gdb.error, AttributeError):
-        _send_pipe_payload("r", [])
+        _send_sock_payload("r", [])
         return "ok"
 
-    _send_pipe_payload("r", registers)
+    _send_sock_payload("r", registers)
     return "ok"
 
 
 def _collect_frame_info():
-    """Collect current frame info and send via data pipe (tag ``f``).
+    """Collect current frame info and send via data socket (tag ``f``).
 
     Mirrors the data that ``-stack-info-frame`` returns: level, func,
     addr, file, fullname, line, arch.
@@ -479,7 +481,7 @@ def _collect_frame_info():
     try:
         frame = gdb.selected_frame()
     except gdb.error:
-        _send_pipe_payload("f", {})
+        _send_sock_payload("f", {})
         return "ok"
 
     try:
@@ -494,7 +496,7 @@ def _collect_frame_info():
             fullname = ""
         line = sal.line
     except gdb.error:
-        _send_pipe_payload("f", {})
+        _send_sock_payload("f", {})
         return "ok"
 
     try:
@@ -502,7 +504,7 @@ def _collect_frame_info():
     except (gdb.error, AttributeError):
         arch_name = ""
 
-    _send_pipe_payload("f", {
+    _send_sock_payload("f", {
         "level": frame.level(),
         "func": func_name,
         "addr": addr,
@@ -515,7 +517,7 @@ def _collect_frame_info():
 
 
 def _collect_breakpoints():
-    """Collect breakpoint info and send via data pipe (tag ``b``).
+    """Collect breakpoint info and send via data socket (tag ``b``).
 
     Mirrors the data that ``-break-list`` returns.
     """
@@ -551,17 +553,17 @@ def _collect_breakpoints():
             "location": loc,
         })
 
-    _send_pipe_payload("b", breakpoints)
+    _send_sock_payload("b", breakpoints)
     return "ok"
 
 
 # ---------------------------------------------------------------------------
-# Convenience function registrations for pipe-based collection
+# Convenience function registrations for socket-based collection
 # ---------------------------------------------------------------------------
 
 
 class _CollectLocalsFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_locals()`` — collect locals via data pipe."""
+    """``$_tgdb_RSVD_collect_locals()`` — collect locals via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_locals")
@@ -572,7 +574,7 @@ class _CollectLocalsFunc(gdb.Function):
 
 
 class _CollectStackFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_stack()`` — collect stack frames via data pipe."""
+    """``$_tgdb_RSVD_collect_stack()`` — collect stack frames via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_stack")
@@ -583,7 +585,7 @@ class _CollectStackFunc(gdb.Function):
 
 
 class _CollectRegistersFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_registers()`` — collect register values via data pipe."""
+    """``$_tgdb_RSVD_collect_registers()`` — collect register values via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_registers")
@@ -594,7 +596,7 @@ class _CollectRegistersFunc(gdb.Function):
 
 
 class _CollectFrameInfoFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_frame_info()`` — collect current frame via data pipe."""
+    """``$_tgdb_RSVD_collect_frame_info()`` — collect current frame via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_frame_info")
@@ -605,7 +607,7 @@ class _CollectFrameInfoFunc(gdb.Function):
 
 
 class _CollectBreakpointsFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_breakpoints()`` — collect breakpoints via data pipe."""
+    """``$_tgdb_RSVD_collect_breakpoints()`` — collect breakpoints via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_breakpoints")

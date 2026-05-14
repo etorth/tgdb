@@ -41,7 +41,7 @@ class ParsingMixin:
             frame = self._parse_frame(results.get("frame", {}))
             self.current_frame = frame
             # Suppress prompt-triggered ``request_current_location`` — all
-            # data is collected directly below.  The pipe frame-info response
+            # data is collected directly below.  The socket frame-info response
             # that the prompt would trigger would match ``current_frame`` and
             # be deduplicated anyway, but setting the flag avoids the wasted
             # round trip entirely.

@@ -189,7 +189,7 @@ class GDBRequestMixin:
 
 
     async def request_current_threads(self, *, report_error: bool = False) -> None:
-        # Thread info stays on MI instead of the pipe-based collection path
+        # Thread info stays on MI instead of the socket-based collection path
         # used by locals/stack/registers/frame/breakpoints.  Reason: the GDB
         # Python API has no way to read another thread's stack frames without
         # calling thread.switch(), which mutates GDB's selected-thread and

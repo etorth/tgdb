@@ -1,19 +1,20 @@
-# tgdb Pipe Protocol
+# tgdb Socket Protocol
 
-tgdb communicates with GDB through a single unidirectional pipe (GDB → tgdb).
-The pipe carries both lightweight event notifications and bulk debugger-state
-payloads in a compact binary frame format.
+tgdb communicates with GDB through an `AF_UNIX` socketpair (bidirectional).
+The socket carries both lightweight event notifications and bulk debugger-state
+payloads in a compact binary frame format.  The socket is bidirectional: GDB
+writes data/events to tgdb, and tgdb can write cancel tokens back to GDB.
 
-## Pipe setup
+## Socket setup
 
-Before forking GDB, tgdb creates an `os.pipe()` pair and passes the write-end
-fd to the GDB process.  At GDB startup, `tgdb_pysetup.py` is sourced and
-`register_pipe_fd(fd)` wires GDB Python event handlers and collection
-functions to that fd.
+Before forking GDB, tgdb creates a `socket.socketpair(AF_UNIX, SOCK_STREAM)`
+and passes one end's fd to the GDB process.  At GDB startup, `tgdb_pysetup.py`
+is sourced and `register_socket_fd(fd)` wires GDB Python event handlers and
+collection functions to that fd.
 
-The read-end fd is set to non-blocking mode and registered with the asyncio
-event loop via `loop.add_reader()`.  The kernel pipe buffer is enlarged to
-1 MB with `fcntl(fd, F_SETPIPE_SZ, 1048576)`.
+The tgdb-side fd is set to non-blocking mode and registered with the asyncio
+event loop via `loop.add_reader()`.  The socket buffers are enlarged to
+1 MB with `setsockopt(SOL_SOCKET, SO_RCVBUF/SO_SNDBUF, 1048576)`.
 
 ## Frame format
 
@@ -78,10 +79,10 @@ decompresses if set, regardless of size.
 | `b` | 0x62  | JSON         | Breakpoint list (`$_tgdb_RSVD_collect_breakpoints()`) |
 | `D` | 0x44  | Raw UTF-8    | Diagnostic log message from GDB Python          |
 
-## Why thread info is not on the pipe
+## Why thread info is not on the socket
 
-Thread info is fetched via MI `-thread-info` instead of a pipe convenience
-function.  An earlier version used the pipe with `_collect_threads()`, but it
+Thread info is fetched via MI `-thread-info` instead of a socket convenience
+function.  An earlier version used the socket with `_collect_threads()`, but it
 was reverted for the following reasons:
 
 1. **The GDB Python API has no read-only thread iteration.**  To read another
@@ -101,7 +102,7 @@ was reverted for the following reasons:
 
 The `_collect_threads()` implementation has been removed.  If a future GDB
 version adds a read-only Python API for cross-thread frame access, thread info
-can be moved to the pipe using a new bulk data tag.
+can be moved to the socket using a new bulk data tag.
 
 ## JSON payload schemas
 
@@ -272,15 +273,15 @@ them via `-data-evaluate-expression` on the MI channel:
 ```
 
 The convenience function collects data using GDB's Python API, serializes it
-as JSON, zlib-compresses it, writes the framed payload to the pipe, and
+as JSON, zlib-compresses it, writes the framed payload to the socket, and
 returns `"ok"` as the MI result.  The actual data arrives asynchronously
-through the pipe, decoupling bulk data transfer from the MI command stream.
+through the socket, decoupling bulk data transfer from the MI command stream.
 
 ## Implementation files
 
 | File                               | Role                                           |
 |------------------------------------|-------------------------------------------------|
-| `tgdb/tgdb_pysetup.py`            | GDB-side: pipe registration, event handlers, collection functions, convenience function classes |
-| `tgdb/gdb_controller/pipe_data.py` | tgdb-side: `PipeDataMixin` — frame parser, event coalescing, data dispatch and handlers |
-| `tgdb/gdb_controller/controller.py`| Pipe creation (`os.pipe()`), fd lifecycle, asyncio reader registration |
-| `tgdb/gdb_controller/requests.py`  | MI request helpers that trigger pipe-based collection |
+| `tgdb/tgdb_pysetup.py`            | GDB-side: socket registration, event handlers, collection functions, convenience function classes |
+| `tgdb/gdb_controller/socket_data.py` | tgdb-side: `SocketDataMixin` — frame parser, event coalescing, data dispatch and handlers |
+| `tgdb/gdb_controller/controller.py`| Socket creation (`socket.socketpair()`), fd lifecycle, asyncio reader registration |
+| `tgdb/gdb_controller/requests.py`  | MI request helpers that trigger socket-based collection |

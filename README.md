@@ -283,7 +283,7 @@ tgdb/
 2. **GDB I/O**: Two asyncio readers:
    - Primary PTY: raw console bytes → GDB widget (with ANSI colours)
    - Secondary PTY: MI stream → parser for async records (`*stopped`, `=thread-selected`, etc.)
-3. **Event-driven source updates**: An inheritable pipe lets GDB's embedded Python
+3. **Event-driven source updates**: An AF_UNIX socketpair lets GDB's embedded Python
    (via `gdb.events.*` hooks in `tgdb_pysetup.py`) notify tgdb of frame changes,
    register writes, inferior calls, and library loads without relying on MI
    async records alone (GDB does not broadcast per-UI frame changes). Events
@@ -298,7 +298,7 @@ tgdb/
 
 ### Event Hooks
 
-tgdb wires several GDB Python events via an inheritable pipe (created at startup
+tgdb wires several GDB Python events via an AF_UNIX socketpair (created at startup
 and inherited into the GDB child process). Each event is encoded as a tagged line,
 coalesced on the asyncio loop, and dispatched to callbacks in `core.py` and
 `callbacks.py`. This mechanism captures frame and state changes that GDB does not
@@ -328,5 +328,5 @@ per asyncio cycle, keeping MI load low.
 - The `--tty` / `Ctrl-T` separate TTY feature is not yet implemented
 - **Event-driven frame/state updates**: Embeds Python in GDB to hook `gdb.events.*`
   (before_prompt, register_changed, inferior_call, gdb_exiting, etc.) via an
-  inherited pipe, ensuring frame changes from CLI commands (up/down/frame N)
+  inherited AF_UNIX socket, ensuring frame changes from CLI commands (up/down/frame N)
   update the source pane immediately, without relying on MI async records alone

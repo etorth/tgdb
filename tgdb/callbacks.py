@@ -442,7 +442,7 @@ class CallbacksMixin:
     def _ui_on_cli_prompt(self) -> None:
         """GDB is about to redisplay its CLI prompt — refresh selected frame.
 
-        Wired off the unified pipe written by ``register_pipe_fd`` in
+        Wired off the AF_UNIX socket written by ``register_socket_fd`` in
         follow no-op user input, but typed CLI ``up``/``down``/``frame N``
         and similar silently move the selected frame, and GDB has no MI
         async record for that.  We issue ``-stack-info-frame`` on every
@@ -594,7 +594,7 @@ class CallbacksMixin:
 
         GDB does not emit an MI async record when the user changes frames via
         the console.  Instead, tgdb wires ``gdb.events.before_prompt`` (in
-        ``tgdb_pysetup.py``) to ping a pipe; the controller fires
+        ``tgdb_pysetup.py``) to ping a socket; the controller fires
         ``on_cli_prompt`` which schedules ``-stack-info-frame``.  The reply
         lands here.  Update the source pane to show the selected frame's
         source location (loading a new file if needed), and refresh the

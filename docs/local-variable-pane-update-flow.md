@@ -5,7 +5,7 @@
 The locals pane refreshes through a **single unified path**:
 
 ```
-GDB event → prompt notify pipe → request_current_location()
+GDB event → prompt notify socket → request_current_location()
          → _handle_frame_result (kind="current-location")
          → _publish_locals_async()
          → on_locals(variables)
@@ -15,7 +15,7 @@ GDB event → prompt notify pipe → request_current_location()
 This fires in two scenarios:
 
 1. **Inferior stops** (`*stopped` record): GDB halts execution, then
-   redisplays its prompt → the notify pipe fires `P\n` → tgdb sends
+   redisplays its prompt → the notify socket fires `P\n` → tgdb sends
    `-stack-info-frame` → the response triggers `_publish_locals_async()`.
 
 2. **Frame navigation** (CLI `up`/`down`/`frame N`): The user types a
@@ -25,14 +25,14 @@ This fires in two scenarios:
 Both cases converge at `_handle_frame_result` with
 `meta["kind"] == "current-location"`.
 
-## Data Source: `_collect_locals()` via Pipe
+## Data Source: `_collect_locals()` via Socket
 
 `_publish_locals_async()` invokes the GDB Python convenience function
 registered by `tgdb_pysetup.py`.  The function `_collect_locals()` runs
 inside GDB, walks the block tree, applies a multi-stage filtering and
 deduplication pipeline, then writes the result as a JSON payload through
-the data pipe (tag `l`) using the unified frame format
-(`[tag][ctl][7B len][payload]`, see `docs/pipe-protocol.md`).
+the data socket (tag `l`) using the unified frame format
+(`[tag][ctl][7B len][payload]`, see `docs/socket-protocol.md`).
 
 ### Block Walk
 
@@ -131,7 +131,7 @@ the ones that produce duplicate keys.
 ### Output
 
 The final deduplicated list is serialized as JSON and sent through the
-data pipe as tag `l`.  tgdb receives it in `PipeDataMixin`, parses the
+data socket as tag `l`.  tgdb receives it in `SocketDataMixin`, parses the
 JSON, and calls `on_locals(variables)` to feed the reconciliation engine.
 
 ## Incremental Reconciliation (_update_variables)
@@ -226,8 +226,8 @@ saved expansions are restored automatically.
 
 - `tgdb/tgdb_pysetup.py` — `_collect_locals()`: GDB-side Python function
   that walks the block tree, applies noise filters and dedup, writes
-  JSON to the data pipe (tag `l`)
-- `tgdb/gdb_controller/pipe_data.py` — `PipeDataMixin`: receives pipe
+  JSON to the data socket (tag `l`)
+- `tgdb/gdb_controller/socket_data.py` — `SocketDataMixin`: receives socket
   frames, parses JSON, dispatches `on_locals()` callback
 - `tgdb/gdb_controller/results.py` — `_handle_frame_result()`: triggers
   `_publish_locals_async()` on `kind="current-location"`
@@ -241,4 +241,4 @@ saved expansions are restored automatically.
   `_build_removed_bindings()`, etc.
 - `docs/known_gdb_bug.md` — Bug 3 documents the GDB block iterator
   duplicate/merge bug that the noise filter works around
-- `docs/pipe-protocol.md` — Pipe frame format specification
+- `docs/socket-protocol.md` — Socket frame format specification

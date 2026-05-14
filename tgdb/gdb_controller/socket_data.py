@@ -1,10 +1,12 @@
-"""Unified pipe reader for ``GDBController``.
+"""Unified socket reader for ``GDBController``.
 
-Provides ``PipeDataMixin``, which reads binary frames from the single
-GDB→tgdb pipe.  The pipe carries both lightweight events (before-prompt,
-register-changed, objfile, inferior-call, gdb-exiting) and bulk data
-payloads (locals, stack, threads, registers, frame info, breakpoints)
-in one stream.
+Provides ``SocketDataMixin``, which reads binary frames from the
+``AF_UNIX`` socketpair shared between tgdb and GDB.  The socket
+carries both lightweight events (before-prompt, register-changed,
+objfile, inferior-call, gdb-exiting) and bulk data payloads (locals,
+stack, threads, registers, frame info, breakpoints) in one stream.
+The socket is bidirectional: GDB writes data/events to tgdb, and tgdb
+can write cancel tokens back to GDB.
 
 Frame format
 ~~~~~~~~~~~~
@@ -51,10 +53,10 @@ from .types import (
 
 _log = logging.getLogger("tgdb.gdb_controller")
 
-# Maximum buffer size for incoming pipe data.  16 MB is generous;
+# Maximum buffer size for incoming socket data.  16 MB is generous;
 # individual frames should rarely exceed a few hundred KB even for
 # programs with thousands of threads and locals.
-_PIPE_BUF_MAX_BYTES = 16 * 1024 * 1024
+_SOCK_BUF_MAX_BYTES = 16 * 1024 * 1024
 
 # Tags that carry no payload (1 byte total — tag only).
 _ZERO_PAYLOAD_TAGS = frozenset(b"POFCX")
@@ -72,11 +74,11 @@ _VAR_LEN_TAGS = frozenset(b"lsrbfD")
 _CTL_COMPRESSED = 0x01
 
 
-class PipeDataMixin:
-    """Mixin providing unified pipe frame parsing and dispatch.
+class SocketDataMixin:
+    """Mixin providing unified socket frame parsing and dispatch.
 
-    Expects the host class to set ``self._pipe_r`` (read fd) and
-    ``self._pipe_buf`` (bytes buffer) before the asyncio reader is
+    Expects the host class to set ``self._sock_tgdb`` (local fd) and
+    ``self._sock_buf`` (bytes buffer) before the asyncio reader is
     registered.  The host also provides the standard controller callbacks
     (``on_locals``, ``on_stack``, ``on_threads``, ``on_registers``,
     ``on_cli_prompt``, ``on_register_changed``, ``on_objfiles_changed``,
@@ -84,45 +86,45 @@ class PipeDataMixin:
     and state attributes (``_inferior_running``, ``current_thread_id``, etc.).
     """
 
-    def _on_pipe_readable(self) -> None:
-        """Drain the pipe and process complete frames."""
+    def _on_sock_readable(self) -> None:
+        """Drain the socket and process complete frames."""
         try:
             while True:
-                chunk = os.read(self._pipe_r, 65536)
+                chunk = os.read(self._sock_tgdb, 65536)
                 if not chunk:
-                    self._unregister_pipe()
+                    self._unregister_sock()
                     return
-                self._pipe_buf += chunk
+                self._sock_buf += chunk
                 if len(chunk) < 65536:
                     break
         except BlockingIOError:
             pass
         except OSError as exc:
-            _log.warning(f"pipe read failed: {exc!r}")
-            self._unregister_pipe()
+            _log.warning(f"socket read failed: {exc!r}")
+            self._unregister_sock()
             return
 
-        if len(self._pipe_buf) > _PIPE_BUF_MAX_BYTES:
+        if len(self._sock_buf) > _SOCK_BUF_MAX_BYTES:
             _log.warning(
-                f"pipe buffer exceeded {_PIPE_BUF_MAX_BYTES} bytes; resetting"
+                f"socket buffer exceeded {_SOCK_BUF_MAX_BYTES} bytes; resetting"
             )
-            self._pipe_buf = b""
+            self._sock_buf = b""
             return
 
-        self._process_pipe_frames()
+        self._process_sock_frames()
 
 
-    def _unregister_pipe(self) -> None:
-        """Remove the pipe asyncio reader and discard buffer."""
+    def _unregister_sock(self) -> None:
+        """Remove the socket asyncio reader and discard buffer."""
         try:
-            asyncio.get_running_loop().remove_reader(self._pipe_r)
+            asyncio.get_running_loop().remove_reader(self._sock_tgdb)
         except Exception:
             pass
-        self._pipe_buf = b""
+        self._sock_buf = b""
 
 
-    def _process_pipe_frames(self) -> None:
-        """Parse and dispatch complete frames from the unified pipe.
+    def _process_sock_frames(self) -> None:
+        """Parse and dispatch complete frames from the unified socket.
 
         The tag byte determines the frame structure:
         - No-payload tags: 1 byte total (tag only).
@@ -133,11 +135,11 @@ class PipeDataMixin:
         objfiles_pending = False
         pending_regnums: set[int] = set()
 
-        while self._pipe_buf:
-            tag_byte = self._pipe_buf[0]
+        while self._sock_buf:
+            tag_byte = self._sock_buf[0]
 
             if tag_byte in _ZERO_PAYLOAD_TAGS:
-                self._pipe_buf = self._pipe_buf[1:]
+                self._sock_buf = self._sock_buf[1:]
                 if tag_byte == ord(b"P"):
                     prompt_pending = True
                 elif tag_byte in (ord(b"O"), ord(b"F"), ord(b"C")):
@@ -151,10 +153,10 @@ class PipeDataMixin:
             elif tag_byte in _FIXED_PAYLOAD:
                 fixed_size = _FIXED_PAYLOAD[tag_byte]
                 total = 1 + fixed_size
-                if len(self._pipe_buf) < total:
+                if len(self._sock_buf) < total:
                     break
-                payload = self._pipe_buf[1:total]
-                self._pipe_buf = self._pipe_buf[total:]
+                payload = self._sock_buf[1:total]
+                self._sock_buf = self._sock_buf[total:]
 
                 if tag_byte == ord(b"R"):
                     regnum = struct.unpack(">i", payload[:4])[0]
@@ -171,25 +173,25 @@ class PipeDataMixin:
                         _log.debug("inferior_call callback raised", exc_info=True)
 
             elif tag_byte in _VAR_LEN_TAGS:
-                if len(self._pipe_buf) < 9:
+                if len(self._sock_buf) < 9:
                     break
-                ctl = self._pipe_buf[1]
-                payload_len = struct.unpack(">Q", b"\x00" + self._pipe_buf[2:9])[0]
-                if payload_len > _PIPE_BUF_MAX_BYTES:
-                    _log.warning(f"pipe: invalid payload size {payload_len}; resetting")
-                    self._pipe_buf = b""
+                ctl = self._sock_buf[1]
+                payload_len = struct.unpack(">Q", b"\x00" + self._sock_buf[2:9])[0]
+                if payload_len > _SOCK_BUF_MAX_BYTES:
+                    _log.warning(f"socket: invalid payload size {payload_len}; resetting")
+                    self._sock_buf = b""
                     return
                 total = 9 + payload_len
-                if len(self._pipe_buf) < total:
+                if len(self._sock_buf) < total:
                     break
-                payload = self._pipe_buf[9:total]
-                self._pipe_buf = self._pipe_buf[total:]
+                payload = self._sock_buf[9:total]
+                self._sock_buf = self._sock_buf[total:]
 
                 if ctl & _CTL_COMPRESSED:
                     try:
                         payload = zlib.decompress(payload)
                     except Exception as exc:
-                        _log.warning(f"pipe: decompress failed (tag={chr(tag_byte)!r}): {exc!r}")
+                        _log.warning(f"socket: decompress failed (tag={chr(tag_byte)!r}): {exc!r}")
                         continue
 
                 if tag_byte == ord(b"D"):
@@ -197,18 +199,18 @@ class PipeDataMixin:
                         msg = payload.decode("utf-8", errors="replace").rstrip("\n")
                     except Exception:
                         msg = "<decode error>"
-                    _log.debug(f"PIPE<- gdb-python: {msg}")
+                    _log.debug(f"SOCK<- gdb-python: {msg}")
                 else:
                     try:
                         data = json.loads(payload)
                     except Exception as exc:
-                        _log.warning(f"pipe: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
+                        _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
                         continue
-                    self._dispatch_pipe_data(tag_byte, data)
+                    self._dispatch_sock_data(tag_byte, data)
 
             else:
-                _log.debug(f"pipe: unknown tag 0x{tag_byte:02x}")
-                self._pipe_buf = self._pipe_buf[1:]
+                _log.debug(f"socket: unknown tag 0x{tag_byte:02x}")
+                self._sock_buf = self._sock_buf[1:]
 
         # Coalesced event dispatch — at most one callback per tag per read.
         if objfiles_pending:
@@ -233,24 +235,24 @@ class PipeDataMixin:
                 _log.debug("on_cli_prompt callback raised", exc_info=True)
 
 
-    def _dispatch_pipe_data(self, tag_byte: int, data) -> None:
-        """Route a decoded pipe data frame to the appropriate handler."""
+    def _dispatch_sock_data(self, tag_byte: int, data) -> None:
+        """Route a decoded socket data frame to the appropriate handler."""
         if tag_byte == ord(b"l"):
-            self._handle_pipe_locals(data)
+            self._handle_sock_locals(data)
         elif tag_byte == ord(b"s"):
-            self._handle_pipe_stack(data)
+            self._handle_sock_stack(data)
         elif tag_byte == ord(b"r"):
-            self._handle_pipe_registers(data)
+            self._handle_sock_registers(data)
         elif tag_byte == ord(b"f"):
-            self._handle_pipe_frame_info(data)
+            self._handle_sock_frame_info(data)
         elif tag_byte == ord(b"b"):
-            self._handle_pipe_breakpoints(data)
+            self._handle_sock_breakpoints(data)
         else:
-            _log.debug(f"pipe: unknown data tag {chr(tag_byte)!r}")
+            _log.debug(f"socket: unknown data tag {chr(tag_byte)!r}")
 
 
-    def _handle_pipe_locals(self, data: list) -> None:
-        """Build ``LocalVariable`` list from pipe JSON and fire ``on_locals``."""
+    def _handle_sock_locals(self, data: list) -> None:
+        """Build ``LocalVariable`` list from socket JSON and fire ``on_locals``."""
         if self._inferior_running:
             return
         if not isinstance(data, list):
@@ -271,13 +273,13 @@ class PipeDataMixin:
             for d in data
             if d.get("name")
         ]
-        _log.debug(f"pipe locals: {len(variables)} variables")
+        _log.debug(f"socket locals: {len(variables)} variables")
         self.locals = variables
         self.on_locals(list(variables))
 
 
-    def _handle_pipe_stack(self, data: list) -> None:
-        """Build ``Frame`` list from pipe JSON and fire ``on_stack``."""
+    def _handle_sock_stack(self, data: list) -> None:
+        """Build ``Frame`` list from socket JSON and fire ``on_stack``."""
         if self._inferior_running:
             return
         if not isinstance(data, list):
@@ -297,13 +299,13 @@ class PipeDataMixin:
                     addr=d.get("addr", ""),
                 )
             )
-        _log.debug(f"pipe stack: {len(frames)} frames")
+        _log.debug(f"socket stack: {len(frames)} frames")
         self.stack = frames
         self.on_stack(list(frames))
 
 
-    def _handle_pipe_registers(self, data: list) -> None:
-        """Build ``RegisterInfo`` list from pipe JSON and fire ``on_registers``."""
+    def _handle_sock_registers(self, data: list) -> None:
+        """Build ``RegisterInfo`` list from socket JSON and fire ``on_registers``."""
         if self._inferior_running:
             return
         if not isinstance(data, list):
@@ -326,15 +328,15 @@ class PipeDataMixin:
             names[number] = name
             values[number] = value
 
-        _log.debug(f"pipe registers: {len(registers)} registers")
+        _log.debug(f"socket registers: {len(registers)} registers")
         self.register_names = names
         self._register_values = values
         self.registers = registers
         self.on_registers(list(registers))
 
 
-    def _handle_pipe_frame_info(self, data: dict) -> None:
-        """Parse frame info from pipe JSON and drive the frame-changed chain.
+    def _handle_sock_frame_info(self, data: dict) -> None:
+        """Parse frame info from socket JSON and drive the frame-changed chain.
 
         Mirrors ``_handle_frame_result`` in ``results.py``: sets
         ``current_frame``, fires ``on_frame_changed`` / ``on_source_file``,
@@ -368,7 +370,7 @@ class PipeDataMixin:
             func=data.get("func", ""),
             addr=data.get("addr", ""),
         )
-        _log.debug(f"pipe frame: {parsed.func} {parsed.file}:{parsed.line}")
+        _log.debug(f"socket frame: {parsed.func} {parsed.file}:{parsed.line}")
 
         if self.current_frame == parsed:
             return
@@ -382,14 +384,14 @@ class PipeDataMixin:
         else:
             self.request_source_file(report_error=False)
 
-        supervise(self.request_current_frame_locals(report_error=False), name="pipe-frame-locals")
-        supervise(self.request_current_stack_frames(report_error=False), name="pipe-frame-stack")
-        supervise(self.request_current_threads(report_error=False), name="pipe-frame-threads")
-        supervise(self.request_current_registers(report_error=False), name="pipe-frame-registers")
+        supervise(self.request_current_frame_locals(report_error=False), name="sock-frame-locals")
+        supervise(self.request_current_stack_frames(report_error=False), name="sock-frame-stack")
+        supervise(self.request_current_threads(report_error=False), name="sock-frame-threads")
+        supervise(self.request_current_registers(report_error=False), name="sock-frame-registers")
 
 
-    def _handle_pipe_breakpoints(self, data: list) -> None:
-        """Parse breakpoint list from pipe JSON and fire ``on_breakpoints``."""
+    def _handle_sock_breakpoints(self, data: list) -> None:
+        """Parse breakpoint list from socket JSON and fire ``on_breakpoints``."""
         if not isinstance(data, list):
             return
 
@@ -410,6 +412,6 @@ class PipeDataMixin:
                         temporary=bool(raw.get("temporary", False)),
                     )
                 )
-        _log.info(f"pipe breaklist: {len(new_bps)} breakpoints")
+        _log.info(f"socket breaklist: {len(new_bps)} breakpoints")
         self.breakpoints = new_bps
         self.on_breakpoints(list(self.breakpoints))
