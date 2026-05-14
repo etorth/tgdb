@@ -265,17 +265,77 @@ order of arrival.
 ## Data collection flow
 
 Bulk data is collected by GDB-side Python functions registered as GDB
-convenience functions (e.g. `$_tgdb_RSVD_collect_locals()`).  tgdb invokes
-them via `-data-evaluate-expression` on the MI channel:
+convenience functions (e.g. `$_tgdb_RSVD_collect_locals(token)`).  tgdb
+invokes them via `-data-evaluate-expression` on the MI channel, passing a
+cancel token as an integer argument:
 
 ```
--data-evaluate-expression "$_tgdb_RSVD_collect_locals()"
+-data-evaluate-expression "$_tgdb_RSVD_collect_locals(42)"
 ```
 
 The convenience function collects data using GDB's Python API, serializes it
 as JSON, zlib-compresses it, writes the framed payload to the socket, and
 returns `"ok"` as the MI result.  The actual data arrives asynchronously
 through the socket, decoupling bulk data transfer from the MI command stream.
+
+If the function detects that its cancel token has been cancelled (see
+**Cancellation** below), it returns `"cancelled"` without sending any data.
+
+## Cancellation
+
+The socket is bidirectional.  In the **tgdb→GDB** direction, tgdb writes
+4-byte big-endian unsigned integers (cancel tokens) to request cancellation
+of pending or in-progress convenience function calls.
+
+### Wire format (tgdb→GDB)
+
+```
+┌──────────────────────────┐
+│ cancel_token (4B, BE U32)│
+└──────────────────────────┘
+```
+
+Tokens are written directly to the socket with no framing — the GDB-side
+reader thread reads in a loop and consumes tokens 4 bytes at a time.
+
+### GDB-side cancel reader
+
+`register_socket_fd()` starts a daemon thread (`tgdb-cancel-reader`) that
+reads cancel tokens from the socket and adds them to a thread-safe
+`set[int]` protected by a `threading.Lock`.
+
+### Convenience function integration
+
+Each convenience function receives a cancel token as its first argument
+(default `0` = no cancellation).  At key checkpoints the function calls
+`_is_cancelled(token)` to test the set.  When cancelled:
+
+1. The function calls `_finish_token(token)` to remove the token from the set.
+2. Returns `"cancelled"` — no data is sent through the socket.
+
+When completed normally, the function also calls `_finish_token(token)` to
+clean up.
+
+### Cancel checkpoints
+
+| Function            | Checkpoint locations                                      |
+|---------------------|-----------------------------------------------------------|
+| `_collect_locals`   | Before block walk, at each block depth, before dedup/send |
+| `_collect_stack`    | Before frame walk, every 50 frames                        |
+| `_collect_registers`| Before register iteration                                 |
+| `_collect_frame_info`| Not checked (always fast)                                |
+| `_collect_breakpoints`| Not checked (always fast)                               |
+
+### Cancellation semantics
+
+- **Best-effort**: a fast function may complete before the cancel token
+  arrives — that is expected and harmless.
+- **Token 0** means "no cancellation support" and is never checked.
+- Since GDB processes convenience functions serially, multiple cancel
+  tokens can accumulate in the set before any function checks them.
+- The tgdb side stores the latest cancel token per request type
+  (`_locals_cancel_token`, `_stack_cancel_token`, etc.) so it knows
+  which token to cancel when superseding an in-flight request.
 
 ## Implementation files
 

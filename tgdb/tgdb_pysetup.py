@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import struct
+import threading
 import zlib
 
 # Lift GDB's memory read limit so str(val) never fails for large variables.
@@ -14,6 +15,21 @@ except gdb.error:
 
 _sock_fd = None
 _event_handlers_connected = False
+
+# ---------------------------------------------------------------------------
+# Cancel-token infrastructure
+#
+# tgdb writes 4-byte big-endian unsigned integers (cancel tokens) to the
+# socket.  A daemon reader thread on the GDB side drains them into a set.
+# Convenience functions check the set at key points and abort early when
+# their token is present — returning ``"cancelled"`` instead of ``"ok"``.
+#
+# Token 0 means "no cancellation support" and is never checked.
+# ---------------------------------------------------------------------------
+
+_cancel_tokens: set[int] = set()
+_cancel_lock = threading.Lock()
+_cancel_reader_started = False
 
 # Control-byte bit masks for variable-length socket frames.
 _CTL_COMPRESSED = 0x01
@@ -88,6 +104,57 @@ def _send_sock_frame(tag, payload):
         return False
 
 
+def _start_cancel_reader(fd):
+    """Start a daemon thread that reads cancel tokens from the socket.
+
+    tgdb writes 4-byte big-endian unsigned integers to the socket.  This
+    thread drains them into ``_cancel_tokens`` so convenience functions can
+    check for cancellation without blocking the GDB main thread.
+
+    The thread exits silently when the socket closes (empty read or OSError).
+    """
+    global _cancel_reader_started
+    if _cancel_reader_started:
+        return
+    _cancel_reader_started = True
+
+    def _reader():
+        buf = b""
+        while True:
+            try:
+                data = os.read(fd, 4096)
+                if not data:
+                    break
+                buf += data
+                while len(buf) >= 4:
+                    token = struct.unpack(">I", buf[:4])[0]
+                    buf = buf[4:]
+                    with _cancel_lock:
+                        _cancel_tokens.add(token)
+                    _log.debug(f"cancel token received: {token}")
+            except OSError:
+                break
+
+    t = threading.Thread(target=_reader, daemon=True, name="tgdb-cancel-reader")
+    t.start()
+
+
+def _is_cancelled(token):
+    """Return True if *token* has been cancelled by tgdb."""
+    if token == 0:
+        return False
+    with _cancel_lock:
+        return token in _cancel_tokens
+
+
+def _finish_token(token):
+    """Remove *token* from the cancel set (completed or cancelled)."""
+    if token == 0:
+        return
+    with _cancel_lock:
+        _cancel_tokens.discard(token)
+
+
 def register_socket_fd(fd, log_enabled=False):
     """Wire GDB Python events and data collection to an AF_UNIX socket.
 
@@ -112,6 +179,11 @@ def register_socket_fd(fd, log_enabled=False):
     """
     global _sock_fd, _event_handlers_connected
     _sock_fd = fd
+
+    # Start the cancel-token reader thread.  It reads 4-byte BE unsigned
+    # integers from the socket (written by tgdb) and adds them to
+    # ``_cancel_tokens``.  Started once per process.
+    _start_cancel_reader(fd)
 
     if log_enabled:
         # Remove any previously attached socket handlers (in case of re-init).
@@ -242,12 +314,22 @@ def _is_builtin_local_name(name):
 # ---------------------------------------------------------------------------
 
 
-def _collect_locals():
-    """Collect local variables and send via data socket (tag ``l``)."""
+def _collect_locals(cancel_token=0):
+    """Collect local variables and send via data socket (tag ``l``).
+
+    If *cancel_token* is non-zero and has been cancelled by tgdb, the
+    function aborts early and returns ``"cancelled"`` without sending
+    any data through the socket.
+    """
+    if _is_cancelled(cancel_token):
+        _finish_token(cancel_token)
+        return "cancelled"
+
     try:
         frame = gdb.selected_frame()
     except gdb.error:
         _send_sock_payload("l", [])
+        _finish_token(cancel_token)
         return "ok"
 
     try:
@@ -255,6 +337,7 @@ def _collect_locals():
     except (gdb.error, RuntimeError) as exc:
         if "Cannot locate block" in str(exc):
             _send_sock_payload("l", [])
+            _finish_token(cancel_token)
             return "ok"
         raise
 
@@ -271,6 +354,10 @@ def _collect_locals():
     seen: dict[str, dict] = {}
 
     while block:
+        if _is_cancelled(cancel_token):
+            _finish_token(cancel_token)
+            return "cancelled"
+
         block_start = hex(block.start)
         for symbol in block:
             if not (symbol.is_variable or symbol.is_argument):
@@ -364,6 +451,10 @@ def _collect_locals():
         block = block.superblock
         depth += 1
 
+    if _is_cancelled(cancel_token):
+        _finish_token(cancel_token)
+        return "cancelled"
+
     # GDB Bug 3 workaround: deduplicate register variables with identical
     # (name, addr) keys.  GDB's block iterator merges sibling-scope symbols
     # into the parent function-body block and can yield the same variable
@@ -385,20 +476,30 @@ def _collect_locals():
                 deduped[prev_idx] = entry
 
     _send_sock_payload("l", deduped)
+    _finish_token(cancel_token)
     return "ok"
 
 
-def _collect_stack():
-    """Collect stack frames and send via data socket (tag ``S``)."""
+def _collect_stack(cancel_token=0):
+    """Collect stack frames and send via data socket (tag ``s``)."""
+    if _is_cancelled(cancel_token):
+        _finish_token(cancel_token)
+        return "cancelled"
+
     frames = []
     try:
         frame = gdb.newest_frame()
     except gdb.error:
         _send_sock_payload("s", [])
+        _finish_token(cancel_token)
         return "ok"
 
     level = 0
     while frame:
+        if level % 50 == 0 and _is_cancelled(cancel_token):
+            _finish_token(cancel_token)
+            return "cancelled"
+
         try:
             sal = frame.find_sal()
             func_name = frame.name() or ""
@@ -433,16 +534,22 @@ def _collect_stack():
             break
 
     _send_sock_payload("s", frames)
+    _finish_token(cancel_token)
     return "ok"
 
 
-def _collect_registers():
-    """Collect register values and send via data socket (tag ``R``)."""
+def _collect_registers(cancel_token=0):
+    """Collect register values and send via data socket (tag ``r``)."""
+    if _is_cancelled(cancel_token):
+        _finish_token(cancel_token)
+        return "cancelled"
+
     try:
         frame = gdb.selected_frame()
         arch = frame.architecture()
     except gdb.error:
         _send_sock_payload("r", [])
+        _finish_token(cancel_token)
         return "ok"
 
     registers = []
@@ -466,13 +573,15 @@ def _collect_registers():
             })
     except (gdb.error, AttributeError):
         _send_sock_payload("r", [])
+        _finish_token(cancel_token)
         return "ok"
 
     _send_sock_payload("r", registers)
+    _finish_token(cancel_token)
     return "ok"
 
 
-def _collect_frame_info():
+def _collect_frame_info(cancel_token=0):
     """Collect current frame info and send via data socket (tag ``f``).
 
     Mirrors the data that ``-stack-info-frame`` returns: level, func,
@@ -482,6 +591,7 @@ def _collect_frame_info():
         frame = gdb.selected_frame()
     except gdb.error:
         _send_sock_payload("f", {})
+        _finish_token(cancel_token)
         return "ok"
 
     try:
@@ -497,6 +607,7 @@ def _collect_frame_info():
         line = sal.line
     except gdb.error:
         _send_sock_payload("f", {})
+        _finish_token(cancel_token)
         return "ok"
 
     try:
@@ -513,10 +624,11 @@ def _collect_frame_info():
         "line": line,
         "arch": arch_name,
     })
+    _finish_token(cancel_token)
     return "ok"
 
 
-def _collect_breakpoints():
+def _collect_breakpoints(cancel_token=0):
     """Collect breakpoint info and send via data socket (tag ``b``).
 
     Mirrors the data that ``-break-list`` returns.
@@ -554,6 +666,7 @@ def _collect_breakpoints():
         })
 
     _send_sock_payload("b", breakpoints)
+    _finish_token(cancel_token)
     return "ok"
 
 
@@ -563,58 +676,63 @@ def _collect_breakpoints():
 
 
 class _CollectLocalsFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_locals()`` — collect locals via data socket."""
+    """``$_tgdb_RSVD_collect_locals([token])`` — collect locals via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_locals")
 
 
-    def invoke(self):
-        return _collect_locals()
+    def invoke(self, *args):
+        token = int(args[0]) if args else 0
+        return _collect_locals(token)
 
 
 class _CollectStackFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_stack()`` — collect stack frames via data socket."""
+    """``$_tgdb_RSVD_collect_stack([token])`` — collect stack frames via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_stack")
 
 
-    def invoke(self):
-        return _collect_stack()
+    def invoke(self, *args):
+        token = int(args[0]) if args else 0
+        return _collect_stack(token)
 
 
 class _CollectRegistersFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_registers()`` — collect register values via data socket."""
+    """``$_tgdb_RSVD_collect_registers([token])`` — collect register values via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_registers")
 
 
-    def invoke(self):
-        return _collect_registers()
+    def invoke(self, *args):
+        token = int(args[0]) if args else 0
+        return _collect_registers(token)
 
 
 class _CollectFrameInfoFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_frame_info()`` — collect current frame via data socket."""
+    """``$_tgdb_RSVD_collect_frame_info([token])`` — collect current frame via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_frame_info")
 
 
-    def invoke(self):
-        return _collect_frame_info()
+    def invoke(self, *args):
+        token = int(args[0]) if args else 0
+        return _collect_frame_info(token)
 
 
 class _CollectBreakpointsFunc(gdb.Function):
-    """``$_tgdb_RSVD_collect_breakpoints()`` — collect breakpoints via data socket."""
+    """``$_tgdb_RSVD_collect_breakpoints([token])`` — collect breakpoints via data socket."""
 
     def __init__(self):
         super().__init__("_tgdb_RSVD_collect_breakpoints")
 
 
-    def invoke(self):
-        return _collect_breakpoints()
+    def invoke(self, *args):
+        token = int(args[0]) if args else 0
+        return _collect_breakpoints(token)
 
 
 _CollectLocalsFunc()

@@ -162,8 +162,10 @@ class GDBRequestMixin:
 
     async def request_current_location(self, *, report_error: bool = True) -> None:
         self._frame_request_inflight = True
+        token = self._next_cancel_token()
+        self._frame_cancel_token = token
         await self.mi_command_async(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info()"',
+            f'-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info({token})"',
             timeout=30.0,
         )
 
@@ -172,9 +174,11 @@ class GDBRequestMixin:
         if self._locals_request_inflight:
             return
         self._locals_request_inflight = True
+        token = self._next_cancel_token()
+        self._locals_cancel_token = token
         try:
             await self.mi_command_async(
-                '-data-evaluate-expression "$_tgdb_RSVD_collect_locals()"',
+                f'-data-evaluate-expression "$_tgdb_RSVD_collect_locals({token})"',
                 timeout=30.0,
             )
         finally:
@@ -182,8 +186,10 @@ class GDBRequestMixin:
 
 
     async def request_current_stack_frames(self, *, report_error: bool = False) -> None:
+        token = self._next_cancel_token()
+        self._stack_cancel_token = token
         await self.mi_command_async(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_stack()"',
+            f'-data-evaluate-expression "$_tgdb_RSVD_collect_stack({token})"',
             timeout=30.0,
         )
 
@@ -205,15 +211,19 @@ class GDBRequestMixin:
 
 
     async def request_current_registers(self, *, report_error: bool = False) -> None:
+        token = self._next_cancel_token()
+        self._registers_cancel_token = token
         await self.mi_command_async(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_registers()"',
+            f'-data-evaluate-expression "$_tgdb_RSVD_collect_registers({token})"',
             timeout=30.0,
         )
 
 
     async def request_breakpoints(self, *, report_error: bool = False) -> None:
+        token = self._next_cancel_token()
+        self._breakpoints_cancel_token = token
         await self.mi_command_async(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
+            f'-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints({token})"',
             timeout=30.0,
         )
 

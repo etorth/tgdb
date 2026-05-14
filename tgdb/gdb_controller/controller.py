@@ -17,6 +17,7 @@ import logging
 import os
 import signal
 import socket
+import struct
 import termios
 from collections.abc import Callable
 
@@ -160,6 +161,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.register_names: list[str] = []
         self._register_values: dict[int, str] = {}
         self._inferior_running: bool = False
+        # Monotonically increasing counter for cancel tokens.  Each
+        # convenience function request gets a unique token; tgdb can write
+        # the token to the socket to request cancellation on the GDB side.
+        self._cancel_token_counter: int = 0
 
         # Callbacks
         self.on_console: Callable[[bytes], None] = lambda d: None
@@ -298,6 +303,27 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 data = data.encode()
             _log.debug(f"GDB input: {data!r}")
             self._proc.write(data)
+
+
+    def _next_cancel_token(self) -> int:
+        """Return a fresh cancel token for a convenience function call."""
+        self._cancel_token_counter += 1
+        return self._cancel_token_counter
+
+
+    def send_cancel_token(self, token: int) -> None:
+        """Write a 4-byte BE cancel token to the GDB-side reader thread.
+
+        Best-effort: if the socket is closed or the write fails, the token
+        is silently dropped.  The GDB-side convenience function may complete
+        before the token arrives — that is expected.
+        """
+        if self._sock_tgdb < 0 or token == 0:
+            return
+        try:
+            os.write(self._sock_tgdb, struct.pack(">I", token))
+        except OSError:
+            pass
 
 
     def _fail_pending_futures(self, reason: BaseException) -> None:
