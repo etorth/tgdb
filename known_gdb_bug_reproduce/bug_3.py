@@ -276,6 +276,42 @@ def _print_mi_variables(raw: str, mi_cmd: str) -> None:
         print(f"      {v['name']:25s} = {val_preview}{dup_marker}")
 
 
+def _extract_between(text: str, start_marker: str, end_marker: str) -> list[str]:
+    """Return lines between two marker lines (exclusive)."""
+    lines = text.splitlines()
+    collecting = False
+    result: list[str] = []
+    for line in lines:
+        if start_marker in line:
+            collecting = True
+            continue
+        if end_marker in line:
+            break
+        if collecting:
+            stripped = line.strip()
+            if stripped:
+                result.append(stripped)
+    return result
+
+
+def _parse_info_scope(lines: list[str]) -> list[str]:
+    """Extract symbol names from ``info scope`` output lines.
+
+    Each variable line looks like:
+        Symbol <name> is a variable at frame base reg ...
+        Symbol <name> is optimized out.
+        Symbol <name> is a variable in register ...
+    """
+    import re
+
+    names: list[str] = []
+    for line in lines:
+        m = re.match(r"Symbol\s+(\S+)\s+is\s+", line)
+        if m:
+            names.append(m.group(1))
+    return names
+
+
 def main() -> int:
     for tool in ("gdb", "g++"):
         if shutil.which(tool) is None:
@@ -310,6 +346,9 @@ def main() -> int:
                 "-ex", "up",
                 "-ex", f'python exec("{escaped}")',
                 *mi_exs,
+                "-ex", "echo @@INFO_SCOPE_START@@\\n",
+                "-ex", "info scope Processor::Processor",
+                "-ex", "echo @@INFO_SCOPE_END@@\\n",
                 exe_path,
             ],
             stdout=subprocess.PIPE,
@@ -403,6 +442,21 @@ def main() -> int:
                     _print_mi_variables(raw, mi_cmd)
                 else:
                     print("    (no response)")
+            print()
+
+        # Show 'info scope' output for comparison.
+        info_scope_lines = _extract_between(stdout, "@@INFO_SCOPE_START@@", "@@INFO_SCOPE_END@@")
+        if info_scope_lines:
+            print("=== info scope Processor::Processor ===")
+            scope_names = _parse_info_scope(info_scope_lines)
+            print(f"  symbols returned: {len(scope_names)}")
+            scope_dups = {n for n, c in __import__("collections").Counter(scope_names).items() if c > 1}
+            if scope_dups:
+                print(f"  DUPLICATES in info scope: {sorted(scope_dups)}")
+            else:
+                print(f"  no duplicates in info scope")
+            for line in info_scope_lines:
+                print(f"    {line}")
             print()
 
         if found_bug:
