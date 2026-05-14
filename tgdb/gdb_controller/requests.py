@@ -126,6 +126,13 @@ class GDBRequestMixin:
             if raise_on_error:
                 raise RuntimeError("MI command timed out — GDB may be busy") from exc
             return {}
+        except (RuntimeError, asyncio.CancelledError):
+            # Future rejected by _fail_pending_futures (GDB exit / PTY EOF)
+            # or task cancelled during shutdown.  Treat as silent failure
+            # unless the caller explicitly opted into exceptions.
+            if raise_on_error:
+                raise
+            return {}
         finally:
             # Drop bookkeeping in every exit path (timeout, cancel, shutdown
             # rejection, normal return).  These pops are no-ops on the normal

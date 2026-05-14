@@ -323,6 +323,11 @@ def _collect_threads():
     except gdb.error:
         original_thread = None
 
+    try:
+        original_frame = gdb.selected_frame()
+    except gdb.error:
+        original_frame = None
+
     current_thread_id = ""
     if original_thread:
         current_thread_id = str(original_thread.global_num)
@@ -370,6 +375,16 @@ def _collect_threads():
     if original_thread:
         try:
             original_thread.switch()
+        except gdb.error:
+            pass
+
+    # Restore the frame the user had selected before the thread iteration.
+    # thread.switch() resets each thread to frame #0; without this restore
+    # a subsequent collect_locals would see frame #0 instead of the frame
+    # the user navigated to with "up"/"down"/"frame N".
+    if original_frame is not None:
+        try:
+            original_frame.select()
         except gdb.error:
             pass
 
