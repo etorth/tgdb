@@ -25,24 +25,114 @@ This fires in two scenarios:
 Both cases converge at `_handle_frame_result` with
 `meta["kind"] == "current-location"`.
 
-## Data Source: get_locals_b64()
+## Data Source: `_collect_locals()` via Pipe
 
-`_publish_locals_async()` calls `get_locals_b64()` — a GDB Python
-convenience function registered by `tgdb_pysetup.py`. It walks the
-block tree from innermost to outermost, collecting:
+`_publish_locals_async()` invokes the GDB Python convenience function
+registered by `tgdb_pysetup.py`.  The function `_collect_locals()` runs
+inside GDB, walks the block tree, applies a multi-stage filtering and
+deduplication pipeline, then writes the result as a JSON payload through
+the data pipe (tag `l`) using the unified frame format
+(`[tag][ctl][7B len][payload]`, see `docs/pipe-protocol.md`).
 
-- `name`: variable name
-- `value`: string representation from `str(val)`
-- `type`: type string (e.g. `int`, `(anonymous namespace)::A`)
-- `addr`: memory address or `"register"` / `"unknown"`
-- `depth`: 0 = innermost block, increments outward
-- `line`: declaration line number
-- `is_shadowed`: True if a same-named variable at smaller depth exists
-- `is_reference`: True for lvalue/rvalue references
-- `is_arg`: True for function arguments
+### Block Walk
 
-The returned list is in **block-walk order** (innermost first). No sort
-is applied in `get_locals_b64()` — sorting happens locally where needed.
+Starting from `frame.block()` (the innermost scope containing the
+current PC), the walk iterates every symbol in the block, then moves to
+`block.superblock` (one level outward), incrementing the `depth` counter.
+The walk stops when it reaches the function-body block
+(`block.function is not None`) or there is no superblock.
+
+```
+depth 0 — innermost block (the { } the PC is inside)
+depth 1 — next enclosing block
+  ...
+depth N — function-body block (stop here)
+```
+
+### Per-Symbol Fields
+
+For each symbol the walk collects:
+
+| Field          | Source / Meaning                                         |
+|----------------|----------------------------------------------------------|
+| `name`         | `symbol.name`                                            |
+| `value`        | `_format_value(val)` — formatted with unlimited elements |
+| `type`         | `str(symbol.type)` — declared type string                |
+| `addr`         | hex address from `val.address`, or `"register@<depth>"`  |
+| `depth`        | block depth (0 = innermost)                              |
+| `line`         | `symbol.line` — declaration line number                  |
+| `is_arg`       | `symbol.is_argument`                                     |
+| `is_reference` | lvalue or rvalue reference                               |
+| `ref_kind`     | `"lvalue (&)"`, `"rvalue (&&)"`, or `None`               |
+| `is_shadowed`  | True if same name already collected at a shallower depth |
+| `scope_start`  | `hex(block.start)` — block start address                 |
+
+**Address resolution:**
+
+- For references: `str(val.referenced_value().address)`.
+- For non-references: `str(val.address)` if not None, else
+  `"register@<depth>"` (variable lives in a register, not on the stack).
+- On exception: `"unknown"`.
+
+### Pre-Collection Filters
+
+Before a symbol enters the collection list, three early filters apply:
+
+1. **Non-variable skip**: only `symbol.is_variable` or `symbol.is_argument`.
+2. **Builtin name skip**: compiler-generated names like `__for_begin`,
+   `__for_end`, `__for_range` (C++ range-for lowering) and the scratch
+   variable `_` are hidden.
+3. **Not-yet-declared skip**: if `symbol.line >= current_line` (and the
+   symbol is not an argument), skip it — the variable is declared after
+   the current execution point and is not yet in scope.
+
+### GDB Bug 3 Noise Filter (Cross-Depth Phantoms)
+
+GDB's `block.__iter__()` merges child-block symbols into the parent
+function-body block (see `docs/known_gdb_bug.md` § Bug 3).  This causes
+a variable like `dccInterleave` to appear both at depth 0 with a real
+stack address and value, and again at depth 1 with `val.address == None`
+(mapped to `register@1`) and an `<optimized out>` value.
+
+The filter detects these phantoms precisely:
+
+```
+if (name already seen at shallower depth)
+   AND (current addr starts with "register@")
+   AND (shallower copy has same declaration line)
+   AND (shallower copy has same declared type)
+   AND (shallower copy has a real stack address)
+→ skip this symbol (it is a GDB-merged phantom)
+```
+
+This avoids false positives on genuine shadowed variables which have
+different types or declaration lines (e.g. `parms` at line 390 with
+type `CheckVersionParams` vs `parms` at line 421 with type
+`OpenEngineParams` — those are real sibling-scope variables, not noise).
+
+### Post-Collection Dedup (Same-Key Register Variables)
+
+After the walk completes, a second deduplication pass handles symbols
+that GDB yields **twice within the same block** — same `(name, addr)`
+key.  This happens when the compiler splits a variable's lifetime into
+multiple DWARF location ranges.
+
+```
+Group by (name, addr).
+If a key appears more than once:
+    keep the first entry that has a real value (not "<optimized out>");
+    fall back to the first entry if all copies are optimized out.
+```
+
+Stack-allocated variables have unique hex addresses and never collide.
+Register variables share synthetic `register@<depth>` addresses and are
+the ones that produce duplicate keys.
+
+### Output
+
+The final deduplicated list is serialized as JSON and sent through the
+data pipe as tag `l`.  tgdb receives it in `PipeDataMixin`, parses the
+JSON, and calls `on_locals(variables)` to feed the reconciliation engine.
 
 ## Incremental Reconciliation (_update_variables)
 
@@ -134,15 +224,21 @@ saved expansions are restored automatically.
 
 ## Implementation Files
 
+- `tgdb/tgdb_pysetup.py` — `_collect_locals()`: GDB-side Python function
+  that walks the block tree, applies noise filters and dedup, writes
+  JSON to the data pipe (tag `l`)
+- `tgdb/gdb_controller/pipe_data.py` — `PipeDataMixin`: receives pipe
+  frames, parses JSON, dispatches `on_locals()` callback
 - `tgdb/gdb_controller/results.py` — `_handle_frame_result()`: triggers
   `_publish_locals_async()` on `kind="current-location"`
-- `tgdb/gdb_controller/varobj.py` — `_publish_locals_async()`: calls
-  `get_locals_b64()`, builds `LocalVariable` list, fires `on_locals()`
+- `tgdb/gdb_controller/varobj.py` — `_publish_locals_async()`: invokes
+  the GDB convenience function, builds `LocalVariable` list
 - `tgdb/callbacks.py` — `_ui_on_cli_prompt()`: sends
   `request_current_location()` on every GDB prompt
-- `tgdb/tgdb_pysetup.py` — `get_locals_b64()`: GDB Python function
-  collecting variables from the block tree
 - `tgdb/local_variable_pane/reconcile.py` — `_update_variables()`:
-  incremental reconciliation logic
+  incremental reconciliation logic (varobj lifecycle, tree diffing)
 - `tgdb/local_variable_pane/update.py` — `_build_reanchor_bindings()`,
   `_build_removed_bindings()`, etc.
+- `docs/known_gdb_bug.md` — Bug 3 documents the GDB block iterator
+  duplicate/merge bug that the noise filter works around
+- `docs/pipe-protocol.md` — Pipe frame format specification
