@@ -186,8 +186,17 @@ def _collect_locals():
     depth = 0
     all_vars = []
     seen_names = set()
+    # Track (name, depth, scope_start) for duplicate diagnosis.
+    _dup_diag: list[tuple[str, int, str, str, str, int]] = []
 
     while block:
+        block_start = hex(block.start)
+        block_end = hex(block.end)
+        func_tag = f" func={block.function.name}" if block.function else ""
+        gdb.write(
+            f"[tgdb] block walk: depth={depth}"
+            f" start={block_start} end={block_end}{func_tag}\n"
+        )
         for symbol in block:
             if not (symbol.is_variable or symbol.is_argument):
                 continue
@@ -226,6 +235,15 @@ def _collect_locals():
                 val_str = "<optimized out>"
                 addr_str = "unknown"
 
+            _dup_diag.append((name, depth, block_start, block_end, addr_str, decl_line))
+
+            gdb.write(
+                f"[tgdb]   sym: {name} depth={depth}"
+                f" block={block_start}..{block_end}"
+                f" addr={addr_str} line={decl_line}"
+                f" val={val_str[:60]}\n"
+            )
+
             is_shadowed = name in seen_names
 
             if is_lref:
@@ -259,6 +277,22 @@ def _collect_locals():
 
         block = block.superblock
         depth += 1
+
+    # Log duplicate (name, addr) entries for diagnosis.
+    _name_addr_count: dict[tuple[str, str], list] = {}
+    for name, d, bstart, bend, addr, line in _dup_diag:
+        key = (name, addr)
+        _name_addr_count.setdefault(key, []).append((d, bstart, bend, line))
+    for (name, addr), entries in _name_addr_count.items():
+        if len(entries) > 1:
+            detail = " ; ".join(
+                f"depth={d} block={bs}..{be} line={ln}"
+                for d, bs, be, ln in entries
+            )
+            gdb.write(
+                f"[tgdb] dup local: {name} addr={addr} "
+                f"occurrences={len(entries)}: {detail}\n"
+            )
 
     # Deduplicate register variables with identical (name, addr) keys.
     #
