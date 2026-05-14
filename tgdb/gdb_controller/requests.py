@@ -156,42 +156,42 @@ class GDBRequestMixin:
     async def request_current_location(self, *, report_error: bool = True) -> None:
         await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info()"',
-            timeout=10.0,
+            timeout=30.0,
         )
 
 
     async def request_current_frame_locals(self, *, report_error: bool = False) -> None:
         await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_locals()"',
-            timeout=10.0,
+            timeout=30.0,
         )
 
 
     async def request_current_stack_frames(self, *, report_error: bool = False) -> None:
         await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_stack()"',
-            timeout=10.0,
+            timeout=30.0,
         )
 
 
     async def request_current_threads(self, *, report_error: bool = False) -> None:
         await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_threads()"',
-            timeout=10.0,
+            timeout=30.0,
         )
 
 
     async def request_current_registers(self, *, report_error: bool = False) -> None:
         await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_registers()"',
-            timeout=10.0,
+            timeout=30.0,
         )
 
 
     async def request_breakpoints(self, *, report_error: bool = False) -> None:
         await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints()"',
-            timeout=10.0,
+            timeout=30.0,
         )
 
 
