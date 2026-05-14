@@ -473,6 +473,20 @@ class LocalVariablePaneReconcileMixin:
         to_add = self._build_added_bindings(current_keys, new_bindings)
         to_reanchor = self._build_reanchor_bindings(current_keys, new_bindings, shadowed_keys)
 
+        kept = current_keys & new_binding_keys
+        _log.info(
+            f"reconcile: vars={len(variables)} tracked={len(current_keys)} "
+            f"kept={len(kept)} add={len(to_add)} remove={len(to_remove)} "
+            f"reanchor={len(to_reanchor)} frame_key_changed={new_frame_key != self._frame_key}"
+        )
+        if _log.isEnabledFor(10):
+            for name, addr, _var in to_add:
+                _log.debug(f"  + {name} @ {addr}")
+            for name, addr in to_remove:
+                _log.debug(f"  - {name} @ {addr}")
+            for name, addr, _var in to_reanchor:
+                _log.debug(f"  ~ {name} @ {addr}")
+
         dynamic_root_overrides = self._build_dynamic_root_value_overrides(variables)
 
         no_change = not to_remove and not to_add and not to_reanchor and new_frame_key == self._frame_key
