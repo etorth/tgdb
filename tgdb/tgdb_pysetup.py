@@ -289,6 +289,20 @@ def _collect_locals():
 
             is_shadowed = name in seen_names
 
+            # A shadowed variable whose address is a synthetic "register@N"
+            # marker is a GDB-merged parent-block copy of a variable already
+            # present at a shallower depth with a real stack address.  Drop it
+            # to avoid duplicate entries in the locals pane.  Genuine shadowed
+            # variables (e.g. inner block re-declares the same name) keep
+            # distinct stack addresses and are preserved.
+            if is_shadowed and addr_str.startswith("register@"):
+                _tgdb_RSVD_log(
+                    f"[tgdb]   skip shadowed register: {name}"
+                    f" depth={depth} line={decl_line}\n"
+                )
+                seen_names.add(name)
+                continue
+
             if is_lref:
                 ref_kind = "lvalue (&)"
             elif is_rref:
