@@ -222,17 +222,8 @@ def _collect_locals():
     depth = 0
     all_vars = []
     seen_names = set()
-    # Track (name, depth, scope_start) for duplicate diagnosis.
-    _dup_diag: list[tuple[str, int, str, str, str, int]] = []
-
     while block:
         block_start = hex(block.start)
-        block_end = hex(block.end)
-        func_tag = f" func={block.function.name}" if block.function else ""
-        _tgdb_RSVD_log(
-            f"[tgdb] block walk: depth={depth}"
-            f" start={block_start} end={block_end}{func_tag}\n"
-        )
         for symbol in block:
             if not (symbol.is_variable or symbol.is_argument):
                 continue
@@ -261,10 +252,7 @@ def _collect_locals():
                         addr_str = str(val.referenced_value().address)
                     except Exception as exc:
                         addr_str = "unknown (referenced target)"
-                        _tgdb_RSVD_log(
-                            f"[tgdb] referenced_value().address failed"
-                            f" for {name}: {exc}\n"
-                        )
+                        _tgdb_RSVD_log(f"referenced_value().address failed for {name}: {exc}\n")
                 else:
                     if val.address:
                         addr_str = str(val.address)
@@ -274,32 +262,15 @@ def _collect_locals():
             except Exception as exc:
                 val_str = "<optimized out>"
                 addr_str = "unknown"
-                _tgdb_RSVD_log(
-                    f"[tgdb] value eval failed for {name}: {exc}\n"
-                )
-
-            _dup_diag.append((name, depth, block_start, block_end, addr_str, decl_line))
-
-            _tgdb_RSVD_log(
-                f"[tgdb]   sym: {name} depth={depth}"
-                f" block={block_start}..{block_end}"
-                f" addr={addr_str} line={decl_line}"
-                f" val={val_str[:60]}\n"
-            )
+                _tgdb_RSVD_log(f"value eval failed for {name}: {exc}\n")
 
             is_shadowed = name in seen_names
 
-            # A shadowed variable whose address is a synthetic "register@N"
-            # marker is a GDB-merged parent-block copy of a variable already
-            # present at a shallower depth with a real stack address.  Drop it
-            # to avoid duplicate entries in the locals pane.  Genuine shadowed
-            # variables (e.g. inner block re-declares the same name) keep
-            # distinct stack addresses and are preserved.
+            # GDB Bug 3 workaround: a shadowed variable whose address is a
+            # synthetic "register@N" marker is a GDB-merged parent-block copy
+            # already present at a shallower depth with a real stack address.
+            # See docs/known_gdb_bug.md § Bug 3.
             if is_shadowed and addr_str.startswith("register@"):
-                _tgdb_RSVD_log(
-                    f"[tgdb]   skip shadowed register: {name}"
-                    f" depth={depth} line={decl_line}\n"
-                )
                 seen_names.add(name)
                 continue
 
@@ -335,33 +306,14 @@ def _collect_locals():
         block = block.superblock
         depth += 1
 
-    # Log duplicate (name, addr) entries for diagnosis.
-    _name_addr_count: dict[tuple[str, str], list] = {}
-    for name, d, bstart, bend, addr, line in _dup_diag:
-        key = (name, addr)
-        _name_addr_count.setdefault(key, []).append((d, bstart, bend, line))
-    for (name, addr), entries in _name_addr_count.items():
-        if len(entries) > 1:
-            detail = " ; ".join(
-                f"depth={d} block={bs}..{be} line={ln}"
-                for d, bs, be, ln in entries
-            )
-            _tgdb_RSVD_log(
-                f"[tgdb] dup local: {name} addr={addr} "
-                f"occurrences={len(entries)}: {detail}\n"
-            )
-
-    # Deduplicate register variables with identical (name, addr) keys.
-    #
-    # The compiler can split a variable's lifetime into multiple DWARF
-    # location ranges.  GDB's block iterator yields one symbol per range,
-    # so a single variable may appear multiple times in the same block —
-    # typically once with a real value and once as "<optimized out>".
-    # Stack-allocated variables get unique hex addresses and never collide,
-    # but register variables all share the same synthetic addr
-    # ("register@<depth>"), producing duplicate BindingKeys on the tgdb
-    # side.  Keep only the first entry per (name, addr) that carries a
-    # real value; fall back to the first entry if all are optimized out.
+    # GDB Bug 3 workaround: deduplicate register variables with identical
+    # (name, addr) keys.  GDB's block iterator merges sibling-scope symbols
+    # into the parent function-body block and can yield the same variable
+    # twice within a single block.  Register variables all share the
+    # synthetic addr "register@<depth>", producing duplicate BindingKeys.
+    # Keep only the first entry per (name, addr) that carries a real value;
+    # fall back to the first entry if all are optimized out.
+    # See docs/known_gdb_bug.md § Bug 3.
     deduped: list[dict] = []
     seen_keys: dict[tuple[str, str], int] = {}
     for entry in all_vars:

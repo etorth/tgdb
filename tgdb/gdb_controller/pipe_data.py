@@ -197,7 +197,7 @@ class PipeDataMixin:
                         msg = payload.decode("utf-8", errors="replace").rstrip("\n")
                     except Exception:
                         msg = "<decode error>"
-                    _log.debug(f"gdb-python: {msg}")
+                    _log.debug(f"PIPE<- gdb-python: {msg}")
                 else:
                     try:
                         data = json.loads(payload)
