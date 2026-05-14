@@ -13,6 +13,16 @@ except gdb.error:
 
 _pipe_fd = None
 _event_handlers_connected = False
+_DIAG_PATH = "/tmp/tgdb_locals_diag.log"
+
+
+def _diag_write(msg):
+    """Append diagnostic text to a file (gdb.write is invisible during MI)."""
+    try:
+        with open(_DIAG_PATH, "a") as f:
+            f.write(msg)
+    except OSError:
+        pass
 
 
 def register_pipe_fd(fd):
@@ -193,7 +203,7 @@ def _collect_locals():
         block_start = hex(block.start)
         block_end = hex(block.end)
         func_tag = f" func={block.function.name}" if block.function else ""
-        gdb.write(
+        _diag_write(
             f"[tgdb] block walk: depth={depth}"
             f" start={block_start} end={block_end}{func_tag}\n"
         )
@@ -237,7 +247,7 @@ def _collect_locals():
 
             _dup_diag.append((name, depth, block_start, block_end, addr_str, decl_line))
 
-            gdb.write(
+            _diag_write(
                 f"[tgdb]   sym: {name} depth={depth}"
                 f" block={block_start}..{block_end}"
                 f" addr={addr_str} line={decl_line}"
@@ -289,7 +299,7 @@ def _collect_locals():
                 f"depth={d} block={bs}..{be} line={ln}"
                 for d, bs, be, ln in entries
             )
-            gdb.write(
+            _diag_write(
                 f"[tgdb] dup local: {name} addr={addr} "
                 f"occurrences={len(entries)}: {detail}\n"
             )

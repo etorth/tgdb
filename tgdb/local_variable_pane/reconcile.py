@@ -110,6 +110,7 @@ class LocalVariablePaneReconcileMixin:
         use_addr = (
             binding_addr
             and binding_addr not in ("register", "unknown", "")
+            and not binding_addr.startswith("register@")
             and not variable.is_reference
             and type_str
         )
@@ -648,6 +649,12 @@ class LocalVariablePaneReconcileMixin:
             label = self._build_value_label(name, fallback_value, False, marker_active=False)
             self._add_placeholder_node(tree, key, name, label, marker_active=False)
             _log.debug(f"Reanchor {name} at {addr}: type {type_str!r} unparseable, demoted to placeholder")
+            return
+
+        # Synthetic addr markers (e.g. "register@0") are not dereferenceable.
+        if addr.startswith("register@") or addr in ("register", "unknown", ""):
+            if node is not None:
+                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True, marker_active=False)
             return
 
         addr_expr = f"*({type_str}*){addr}"
