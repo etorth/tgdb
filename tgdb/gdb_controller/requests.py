@@ -161,6 +161,7 @@ class GDBRequestMixin:
 
 
     async def request_current_location(self, *, report_error: bool = True) -> None:
+        self._frame_request_inflight = True
         await self.mi_command_async(
             '-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info()"',
             timeout=30.0,

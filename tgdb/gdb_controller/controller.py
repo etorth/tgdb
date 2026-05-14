@@ -134,6 +134,13 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
         self.current_frame: Frame | None = None
+        # Guard against redundant ``request_current_location`` calls.
+        # Set True when a frame-info request is in flight; cleared when the
+        # pipe frame response is processed.  ``_ui_on_cli_prompt`` checks
+        # this to avoid sending another frame-info request while one is
+        # already pending — each MI command GDB processes emits a prompt,
+        # so without this guard a single ``up`` creates an infinite cascade.
+        self._frame_request_inflight: bool = False
         self.locals: list[LocalVariable] = []
         self.stack: list[Frame] = []
         self.threads: list[ThreadInfo] = []

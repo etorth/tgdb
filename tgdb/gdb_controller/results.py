@@ -159,6 +159,10 @@ class GDBResultMixin:
             return
 
         parsed = self._parse_frame(frame)
+
+        if self.current_frame == parsed:
+            return
+
         self.current_frame = parsed
         path = parsed.fullname or parsed.file
         self.on_frame_changed(parsed)

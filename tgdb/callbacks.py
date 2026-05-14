@@ -451,8 +451,15 @@ class CallbacksMixin:
 
         The inferior must not be running — querying frames during execution
         is invalid.
+
+        Skips when a frame-info request is already in flight.  Without this
+        guard, every MI command GDB processes emits a ``before_prompt`` event,
+        which would send another ``collect_frame_info``, whose MI response
+        emits yet another prompt — creating an infinite request cascade.
         """
         if self.gdb is None or self.gdb._inferior_running:
+            return
+        if self.gdb._frame_request_inflight:
             return
         try:
             supervise(

@@ -318,10 +318,24 @@ class PipeDataMixin:
         Mirrors ``_handle_frame_result`` in ``results.py``: sets
         ``current_frame``, fires ``on_frame_changed`` / ``on_source_file``,
         and kicks off locals/stack/threads/registers collection.
+
+        Skips data collection when the parsed frame is identical to the
+        already-active ``current_frame``.  This breaks the feedback loop
+        where each MI command's ``before_prompt`` event triggers another
+        ``request_current_location`` — the second (and all subsequent)
+        frame-info responses report the same frame and are no-ops.
+
+        When the frame is unchanged, ``_frame_request_inflight`` is left
+        True so that prompts from the in-flight MI commands spawned by
+        the *previous* (genuine) frame change cannot re-trigger this
+        cycle.  The flag is only cleared when a genuinely new frame
+        arrives, at which point a fresh round of data collection begins.
         """
         if self._inferior_running:
+            self._frame_request_inflight = False
             return
         if not isinstance(data, dict) or not data:
+            self._frame_request_inflight = False
             self.request_source_file(report_error=False)
             return
 
@@ -334,6 +348,11 @@ class PipeDataMixin:
             addr=data.get("addr", ""),
         )
         _log.debug(f"pipe frame: {parsed.func} {parsed.file}:{parsed.line}")
+
+        if self.current_frame == parsed:
+            return
+
+        self._frame_request_inflight = False
         self.current_frame = parsed
         path = parsed.fullname or parsed.file
         self.on_frame_changed(parsed)

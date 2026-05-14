@@ -40,6 +40,12 @@ class ParsingMixin:
             self._inferior_running = False
             frame = self._parse_frame(results.get("frame", {}))
             self.current_frame = frame
+            # Suppress prompt-triggered ``request_current_location`` — all
+            # data is collected directly below.  The pipe frame-info response
+            # that the prompt would trigger would match ``current_frame`` and
+            # be deduplicated anyway, but setting the flag avoids the wasted
+            # round trip entirely.
+            self._frame_request_inflight = True
             thread_id = results.get("thread-id")
             if isinstance(thread_id, str):
                 self.current_thread_id = thread_id
@@ -47,6 +53,7 @@ class ParsingMixin:
             path = frame.file or frame.fullname
             _log.info(f"stopped reason={reason} frame={path}:{frame.line}")
             self.on_stopped(frame)
+            await self.request_current_frame_locals(report_error=False)
             await self.request_current_stack_frames(report_error=False)
             await self.request_current_threads(report_error=False)
             await self.request_current_registers(report_error=False)

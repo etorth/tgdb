@@ -378,7 +378,7 @@ def _collect_frame_info():
         arch_name = ""
 
     _send_pipe_payload("f", {
-        "level": 0,
+        "level": frame.level(),
         "func": func_name,
         "addr": addr,
         "file": file_name,
