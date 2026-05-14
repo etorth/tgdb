@@ -287,21 +287,33 @@ def _format_value(val):
 
 
 def _is_builtin_local_name(name):
-    """Return True for compiler-generated locals we should hide.
+    """Return True for compiler-generated or implicit locals we should hide.
 
-    C++ range-for lowering creates reserved implementation names such as
-    ``__for_begin``, ``__for_end``, and ``__for_range``.  Those variables are
-    noise in the locals pane, so filter the whole ``__for_`` family here before
-    the payload leaves GDB.  Also hide the standalone ``_`` scratch variable,
-    which is commonly used as an intentionally-ignored binding.
+    Filtered families:
+
+    - ``__for_begin``, ``__for_end``, ``__for_range`` — C++ range-for lowering
+    - ``__func__``, ``__FUNCTION__``, ``__PRETTY_FUNCTION__`` — GCC/Clang
+      implicit string constants (``static const char[]``) injected into
+      every function body
+    - ``_`` — intentionally-ignored scratch binding
+
+    All of these are noise in the locals pane and never useful to inspect.
     """
     if not name:
         return False
 
-    if name == "_":
+    if name in _BUILTIN_LOCAL_NAMES:
         return True
 
     return name.startswith("__for_")
+
+
+_BUILTIN_LOCAL_NAMES = frozenset({
+    "_",
+    "__func__",
+    "__FUNCTION__",
+    "__PRETTY_FUNCTION__",
+})
 
 
 # ---------------------------------------------------------------------------
