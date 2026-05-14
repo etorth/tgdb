@@ -199,6 +199,59 @@ GDB_WALK_SCRIPT = textwrap.dedent("""
 """).strip()
 
 
+MI_WALK_COMMANDS = [
+    "-stack-list-variables --all-values",
+    "-stack-list-locals --all-values",
+]
+
+
+def _parse_mi_variable_list(raw: str) -> list[dict[str, str]]:
+    """Extract variable name/value pairs from an MI ``^done`` response.
+
+    The MI output format is not JSON — it uses ``key=value`` pairs with
+    quoted strings and ``[{...},{...}]`` lists.  This is a lightweight
+    regex-based parser that pulls ``name="..."`` and ``value="..."``
+    pairs from entries like ``{name="x",value="42"}``.
+    """
+    import re
+
+    results: list[dict[str, str]] = []
+    for m in re.finditer(r'\{([^}]+)\}', raw):
+        entry_str = m.group(1)
+        name_m = re.search(r'name="([^"]*)"', entry_str)
+        value_m = re.search(r'value="([^"]*)"', entry_str)
+        if name_m:
+            results.append({
+                "name": name_m.group(1),
+                "value": value_m.group(1) if value_m else "<no value>",
+            })
+    return results
+
+
+def _print_mi_variables(raw: str, mi_cmd: str) -> None:
+    """Pretty-print the MI variable list and flag duplicates."""
+    from collections import Counter
+
+    variables = _parse_mi_variable_list(raw)
+    if not variables:
+        print(f"    (could not parse: {raw[:120]}...)")
+        return
+
+    name_count = Counter(v["name"] for v in variables)
+    dups = {n for n, c in name_count.items() if c > 1}
+
+    print(f"    variables returned: {len(variables)}")
+    if dups:
+        print(f"    DUPLICATES in MI output: {sorted(dups)}")
+    else:
+        print(f"    no duplicates in MI output")
+
+    for v in variables:
+        dup_marker = " **DUP**" if v["name"] in dups else ""
+        val_preview = v["value"][:60]
+        print(f"      {v['name']:25s} = {val_preview}{dup_marker}")
+
+
 def main() -> int:
     for tool in ("gdb", "g++"):
         if shutil.which(tool) is None:
@@ -220,6 +273,10 @@ def main() -> int:
 
         escaped = GDB_WALK_SCRIPT.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
+        mi_exs: list[str] = []
+        for mi_cmd in MI_WALK_COMMANDS:
+            mi_exs.extend(["-ex", f"interpreter-exec mi \"{mi_cmd}\""])
+
         proc = subprocess.Popen(
             [
                 "gdb", "--batch", "--quiet",
@@ -229,6 +286,7 @@ def main() -> int:
                 "-ex", "run",
                 "-ex", "up",
                 "-ex", f'python exec("{escaped}")',
+                *mi_exs,
                 exe_path,
             ],
             stdout=subprocess.PIPE,
@@ -249,6 +307,13 @@ def main() -> int:
             print("--- GDB output ---", file=sys.stderr)
             print(stdout, file=sys.stderr)
             return 3
+
+        # Collect MI output lines for comparison.
+        mi_lines: list[str] = []
+        for line in stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("^done,") or stripped.startswith("^error,"):
+                mi_lines.append(stripped)
 
         # Analysis.
         from collections import Counter
@@ -304,6 +369,18 @@ def main() -> int:
                 entries = sibling_merged[(name, depth)]
                 lines = sorted(set(e["line"] for e in entries))
                 print(f"  {name:25s} depth={depth} lines={lines}")
+            print()
+
+        # Show MI output for comparison.
+        if mi_lines:
+            print("=== MI COMMAND OUTPUT ===")
+            for i, mi_cmd in enumerate(MI_WALK_COMMANDS):
+                print(f"\n  {mi_cmd}:")
+                if i < len(mi_lines):
+                    raw = mi_lines[i]
+                    _print_mi_variables(raw, mi_cmd)
+                else:
+                    print("    (no response)")
             print()
 
         if found_bug:
