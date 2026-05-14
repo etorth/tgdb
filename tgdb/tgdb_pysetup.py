@@ -59,7 +59,7 @@ def _send_pipe_frame(tag, payload):
         return False
 
 
-def _log_to_tgdb(msg):
+def _tgdb_RSVD_log(msg):
     """Send a diagnostic log line from GDB Python to tgdb via the pipe.
 
     Uses tag ``D`` with a raw UTF-8 payload.  tgdb logs the message through
@@ -229,7 +229,7 @@ def _collect_locals():
         block_start = hex(block.start)
         block_end = hex(block.end)
         func_tag = f" func={block.function.name}" if block.function else ""
-        _log_to_tgdb(
+        _tgdb_RSVD_log(
             f"[tgdb] block walk: depth={depth}"
             f" start={block_start} end={block_end}{func_tag}\n"
         )
@@ -273,7 +273,7 @@ def _collect_locals():
 
             _dup_diag.append((name, depth, block_start, block_end, addr_str, decl_line))
 
-            _log_to_tgdb(
+            _tgdb_RSVD_log(
                 f"[tgdb]   sym: {name} depth={depth}"
                 f" block={block_start}..{block_end}"
                 f" addr={addr_str} line={decl_line}"
@@ -325,7 +325,7 @@ def _collect_locals():
                 f"depth={d} block={bs}..{be} line={ln}"
                 for d, bs, be, ln in entries
             )
-            _log_to_tgdb(
+            _tgdb_RSVD_log(
                 f"[tgdb] dup local: {name} addr={addr} "
                 f"occurrences={len(entries)}: {detail}\n"
             )
