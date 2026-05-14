@@ -66,10 +66,30 @@ These tags carry variable-length payloads.  The payload is always
 | `f` | 0x66  | `$_tgdb_RSVD_collect_frame_info()`      | Current frame info       |
 | `b` | 0x62  | `$_tgdb_RSVD_collect_breakpoints()`     | Breakpoint list          |
 
-> **Note:** Thread info uses MI `-thread-info` instead of the pipe.  The GDB
-> Python API requires `thread.switch()` to read another thread's frames, which
-> mutates GDB's selected-thread/frame state.  The C-level MI command iterates
-> threads read-only.
+## Why thread info is not on the pipe
+
+Thread info is fetched via MI `-thread-info` instead of a pipe convenience
+function.  An earlier version used the pipe with `_collect_threads()`, but it
+was reverted for the following reasons:
+
+1. **The GDB Python API has no read-only thread iteration.**  To read another
+   thread's topmost frame you must call `thread.switch()`, which changes GDB's
+   selected-thread *and* selected-frame to frame #0 of that thread.
+
+2. **Save/restore is not safe under concurrent MI.**  Even if you save and
+   restore the original thread and frame, other MI commands queued on the same
+   channel (e.g. `collect_locals`) can execute between the switch and the
+   restore, observing the wrong frame.  This manifested as the locals pane
+   showing frame #0 variables after `up`/`down` navigation.
+
+3. **MI `-thread-info` is read-only at the C level.**  It iterates threads and
+   returns per-thread frame info without touching the selected context.  The
+   response size is modest (tens to hundreds of threads), so MI overhead is
+   acceptable — unlike locals or registers where payloads can be megabytes.
+
+The `_collect_threads()` implementation has been removed.  If a future GDB
+version adds a read-only Python API for cross-thread frame access, thread info
+can be moved to the pipe using a new bulk data tag.
 
 ## JSON payload schemas
 
@@ -224,7 +244,7 @@ repeated events before dispatching callbacks:
 
 `I` (inferior_call) and `X` (gdb_exiting) fire immediately without coalescing.
 
-Bulk data tags (`l`, `s`, `t`, `r`, `f`, `b`) are dispatched immediately in
+Bulk data tags (`l`, `s`, `r`, `f`, `b`) are dispatched immediately in
 order of arrival.
 
 ## Data collection flow
