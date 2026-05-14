@@ -13,14 +13,28 @@ except gdb.error:
 
 _pipe_fd = None
 _event_handlers_connected = False
-_DIAG_PATH = "/tmp/tgdb_locals_diag.log"
 
 
-def _diag_write(msg):
-    """Append diagnostic text to a file (gdb.write is invisible during MI)."""
+def _log_to_tgdb(msg):
+    """Send a diagnostic log line from GDB Python to tgdb via the pipe.
+
+    Uses tag ``D`` with a raw UTF-8 payload (no zlib/JSON).  Frame format:
+    ``[D][8-byte BE length][UTF-8 bytes]``.  tgdb logs the message through
+    its standard Python logging system at DEBUG level.
+    """
+    fd = _pipe_fd
+    if fd is None:
+        return
+    payload = msg.encode("utf-8", errors="replace")
+    header = b"D" + struct.pack(">Q", len(payload))
+    buf = header + payload
     try:
-        with open(_DIAG_PATH, "a") as f:
-            f.write(msg)
+        written = 0
+        while written < len(buf):
+            n = os.write(fd, buf[written:])
+            if n <= 0:
+                return
+            written += n
     except OSError:
         pass
 
@@ -203,7 +217,7 @@ def _collect_locals():
         block_start = hex(block.start)
         block_end = hex(block.end)
         func_tag = f" func={block.function.name}" if block.function else ""
-        _diag_write(
+        _log_to_tgdb(
             f"[tgdb] block walk: depth={depth}"
             f" start={block_start} end={block_end}{func_tag}\n"
         )
@@ -247,7 +261,7 @@ def _collect_locals():
 
             _dup_diag.append((name, depth, block_start, block_end, addr_str, decl_line))
 
-            _diag_write(
+            _log_to_tgdb(
                 f"[tgdb]   sym: {name} depth={depth}"
                 f" block={block_start}..{block_end}"
                 f" addr={addr_str} line={decl_line}"
@@ -299,7 +313,7 @@ def _collect_locals():
                 f"depth={d} block={bs}..{be} line={ln}"
                 for d, bs, be, ln in entries
             )
-            _diag_write(
+            _log_to_tgdb(
                 f"[tgdb] dup local: {name} addr={addr} "
                 f"occurrences={len(entries)}: {detail}\n"
             )

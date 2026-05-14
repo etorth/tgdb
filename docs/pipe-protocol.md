@@ -47,6 +47,21 @@ The payload size is implied by the tag — no length field is needed.
 | `R` | 0x52  | 4    | `register_changed` | 4-byte signed big-endian register number (-1 = all) |
 | `I` | 0x49  | 1    | `inferior_call`    | `0x00` = pre-call, `0x01` = post-call            |
 
+### Raw variable-length tags (tag + 8-byte length + raw UTF-8 payload)
+
+These tags carry variable-length payloads that are **not** compressed or
+JSON-encoded — the payload is raw UTF-8 text.
+
+```
+┌──────────┬──────────────────────────┬───────────────────────┐
+│ tag (1B) │ payload_length (8B, BE)  │ payload (raw UTF-8)   │
+└──────────┴──────────────────────────┴───────────────────────┘
+```
+
+| Tag | ASCII | Description                                                    |
+|-----|-------|----------------------------------------------------------------|
+| `D` | 0x44  | Diagnostic log message from GDB Python; logged at DEBUG level  |
+
 ### Bulk data tags (tag + 8-byte length + payload)
 
 These tags carry variable-length payloads.  The payload is always
@@ -243,6 +258,8 @@ repeated events before dispatching callbacks:
   is present, only `-1` is dispatched.
 
 `I` (inferior_call) and `X` (gdb_exiting) fire immediately without coalescing.
+
+`D` (diagnostic log) fires immediately, writing to the tgdb log at DEBUG level.
 
 Bulk data tags (`l`, `s`, `r`, `f`, `b`) are dispatched immediately in
 order of arrival.

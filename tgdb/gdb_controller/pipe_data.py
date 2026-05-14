@@ -21,6 +21,9 @@ Fixed-payload tags (tag + fixed-size payload, no length field):
   ``R`` — register_changed (4-byte signed BE regnum, -1 = all)
   ``I`` — inferior_call (1 byte: 0x00 = pre, 0x01 = post)
 
+Raw variable-length tag (tag + 8-byte BE length + raw UTF-8 payload):
+  ``D`` — diagnostic log message from GDB Python
+
 Bulk data tags (``[1-byte tag][8-byte BE payload_length][payload]``):
   ``l`` — local variables (zlib-compressed JSON)
   ``s`` — stack frames
@@ -64,6 +67,10 @@ _FIXED_PAYLOAD = {
 # Tags that carry variable-length zlib-compressed JSON payloads.
 # Frame: [1-byte tag][8-byte BE payload_length][payload]
 _DATA_TAGS = frozenset(b"lsrbf")
+
+# Tag for raw UTF-8 diagnostic log messages from GDB Python.
+# Same frame layout as _DATA_TAGS but payload is plain UTF-8, not zlib/JSON.
+_LOG_TAG = ord(b"D")
 
 
 class PipeDataMixin:
@@ -184,6 +191,25 @@ class PipeDataMixin:
                     _log.warning(f"pipe: frame decode failed (tag={chr(tag_byte)!r}): {exc!r}")
                     continue
                 self._dispatch_pipe_data(tag_byte, data)
+
+            elif tag_byte == _LOG_TAG:
+                if len(self._pipe_buf) < 9:
+                    break
+                payload_len = struct.unpack_from(">Q", self._pipe_buf, 1)[0]
+                if payload_len > _PIPE_BUF_MAX_BYTES:
+                    _log.warning(f"pipe: invalid log payload size {payload_len}; resetting")
+                    self._pipe_buf = b""
+                    return
+                total = 9 + payload_len
+                if len(self._pipe_buf) < total:
+                    break
+                payload = self._pipe_buf[9:total]
+                self._pipe_buf = self._pipe_buf[total:]
+                try:
+                    msg = payload.decode("utf-8", errors="replace").rstrip("\n")
+                except Exception:
+                    msg = "<decode error>"
+                _log.debug(f"gdb-python: {msg}")
 
             else:
                 _log.debug(f"pipe: unknown tag 0x{tag_byte:02x}")
