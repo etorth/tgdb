@@ -315,7 +315,7 @@ prefixes the MI command on the wire:
 
 The convenience function collects data using GDB's Python API, serializes it
 as JSON, zlib-compresses it, writes the framed payload to the socket, and
-returns `"ok"` as the MI result.  The actual data arrives asynchronously
+returns `"done"` as the MI result.  The actual data arrives asynchronously
 through the socket, decoupling bulk data transfer from the MI command stream.
 
 If the function detects that its token has been cancelled (see

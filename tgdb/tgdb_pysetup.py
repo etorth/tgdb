@@ -406,7 +406,7 @@ def _collect_locals(cancel_token=0):
     except gdb.error:
         _send_sock_payload("l", [], cancel_token)
         _finish_token(cancel_token)
-        return "ok"
+        return "done"
 
     try:
         block = frame.block()
@@ -414,7 +414,7 @@ def _collect_locals(cancel_token=0):
         if "Cannot locate block" in str(exc):
             _send_sock_payload("l", [], cancel_token)
             _finish_token(cancel_token)
-            return "ok"
+            return "done"
         raise
 
     sal = frame.find_sal()
@@ -553,7 +553,7 @@ def _collect_locals(cancel_token=0):
 
     _send_sock_payload("l", deduped, cancel_token)
     _finish_token(cancel_token)
-    return "ok"
+    return "done"
 
 
 def _collect_stack(cancel_token=0):
@@ -568,7 +568,7 @@ def _collect_stack(cancel_token=0):
     except gdb.error:
         _send_sock_payload("s", [], cancel_token)
         _finish_token(cancel_token)
-        return "ok"
+        return "done"
 
     level = 0
     while frame:
@@ -611,7 +611,7 @@ def _collect_stack(cancel_token=0):
 
     _send_sock_payload("s", frames, cancel_token)
     _finish_token(cancel_token)
-    return "ok"
+    return "done"
 
 
 def _collect_registers(cancel_token=0):
@@ -626,7 +626,7 @@ def _collect_registers(cancel_token=0):
     except gdb.error:
         _send_sock_payload("r", [], cancel_token)
         _finish_token(cancel_token)
-        return "ok"
+        return "done"
 
     registers = []
     try:
@@ -650,11 +650,11 @@ def _collect_registers(cancel_token=0):
     except (gdb.error, AttributeError):
         _send_sock_payload("r", [], cancel_token)
         _finish_token(cancel_token)
-        return "ok"
+        return "done"
 
     _send_sock_payload("r", registers, cancel_token)
     _finish_token(cancel_token)
-    return "ok"
+    return "done"
 
 
 def _collect_frame_info(cancel_token=0):
@@ -668,7 +668,7 @@ def _collect_frame_info(cancel_token=0):
     except gdb.error:
         _send_sock_payload("f", {}, cancel_token)
         _finish_token(cancel_token)
-        return "ok"
+        return "done"
 
     try:
         sal = frame.find_sal()
@@ -684,7 +684,7 @@ def _collect_frame_info(cancel_token=0):
     except gdb.error:
         _send_sock_payload("f", {}, cancel_token)
         _finish_token(cancel_token)
-        return "ok"
+        return "done"
 
     try:
         arch_name = frame.architecture().name()
@@ -701,7 +701,7 @@ def _collect_frame_info(cancel_token=0):
         "arch": arch_name,
     }, cancel_token)
     _finish_token(cancel_token)
-    return "ok"
+    return "done"
 
 
 def _collect_breakpoints(cancel_token=0):
@@ -743,7 +743,7 @@ def _collect_breakpoints(cancel_token=0):
 
     _send_sock_payload("b", breakpoints, cancel_token)
     _finish_token(cancel_token)
-    return "ok"
+    return "done"
 
 
 # ---------------------------------------------------------------------------
