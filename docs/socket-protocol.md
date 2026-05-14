@@ -19,13 +19,29 @@ event loop via `loop.add_reader()`.  The socket buffers are enlarged to
 ## Frame format
 
 The **tag byte** alone determines how each frame is parsed.  There are
-three frame categories:
+four frame categories:
 
 ```
 No-payload tags        [tag]                                        (1 byte)
 Fixed-payload tags     [tag][payload]                               (1 + N bytes)
-Variable-length tags   [tag][ctl][7-byte BE payload_length][payload] (9 + payload_length bytes)
+Varint-payload tags    [tag][zigzag varint]                         (1 + 1–N bytes)
+Variable-length tags   [tag][ctl][payload_length varint][payload]   (2 + varint + payload bytes)
 ```
+
+### Varint encoding (unsigned LEB128)
+
+Integers are encoded using unsigned LEB128 (Little Endian Base 128).
+Each byte carries 7 data bits; the MSB is a continuation flag:
+
+- **MSB = 0**: this is the last byte — take the lower 7 bits.
+- **MSB = 1**: take the lower 7 bits, shift, and read the next byte.
+
+Examples: `0` → `0x00` (1 byte), `127` → `0x7F` (1 byte),
+`128` → `0x80 0x01` (2 bytes), `300` → `0xAC 0x02` (2 bytes).
+
+Signed integers (e.g. register numbers) use **zigzag encoding** first:
+`zigzag(n) = (n << 1) ^ (n >> 63)`, mapping `0 → 0, -1 → 1, 1 → 2, -2 → 3, ...`
+The result is then encoded as an unsigned varint.
 
 ### No-payload tags (1 byte total)
 
@@ -45,18 +61,26 @@ The payload size is implied by the tag — no length field is needed.
 
 | Tag | ASCII | Size | Event              | Payload format                                   |
 |-----|-------|------|--------------------|--------------------------------------------------|
-| `R` | 0x52  | 4    | `register_changed` | 4-byte signed big-endian register number (-1 = all) |
 | `I` | 0x49  | 1    | `inferior_call`    | `0x00` = pre-call, `0x01` = post-call            |
 
-### Variable-length tags (tag + ctl + 7-byte length + payload)
+### Varint-payload tags (tag + zigzag varint)
+
+The payload is a single zigzag-encoded signed integer in LEB128 varint form.
+Each byte carries 7 data bits; MSB=1 means "more bytes follow".
+
+| Tag | ASCII | Event              | Payload format                                          |
+|-----|-------|--------------------|---------------------------------------------------------|
+| `R` | 0x52  | `register_changed` | Zigzag-encoded signed register number (-1 = all)        |
+
+### Variable-length tags (tag + ctl + varint length + payload)
 
 These tags carry variable-length payloads with a **control byte** for
-encoding flags and a **7-byte big-endian** payload length (max ~128 PB).
+encoding flags and a **varint** payload length (unsigned LEB128).
 
 ```
-┌──────────┬─────────┬──────────────────────────┬───────────────────────┐
-│ tag (1B) │ ctl(1B) │ payload_length (7B, BE)  │ payload               │
-└──────────┴─────────┴──────────────────────────┴───────────────────────┘
+┌──────────┬─────────┬────────────────────────┬───────────────────────┐
+│ tag (1B) │ ctl(1B) │ payload_length (varint) │ payload               │
+└──────────┴─────────┴────────────────────────┴───────────────────────┘
 ```
 
 **Control byte bit flags:**
@@ -284,19 +308,19 @@ If the function detects that its cancel token has been cancelled (see
 ## Cancellation
 
 The socket is bidirectional.  In the **tgdb→GDB** direction, tgdb writes
-4-byte big-endian unsigned integers (cancel tokens) to request cancellation
+varint-encoded unsigned integers (cancel tokens) to request cancellation
 of pending or in-progress convenience function calls.
 
 ### Wire format (tgdb→GDB)
 
 ```
-┌──────────────────────────┐
-│ cancel_token (4B, BE U32)│
-└──────────────────────────┘
+┌───────────────────────────┐
+│ cancel_token (varint LEB) │
+└───────────────────────────┘
 ```
 
 Tokens are written directly to the socket with no framing — the GDB-side
-reader thread reads in a loop and consumes tokens 4 bytes at a time.
+reader thread reads in a loop and decodes varints from the byte stream.
 
 ### GDB-side cancel reader
 

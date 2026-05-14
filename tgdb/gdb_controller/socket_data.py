@@ -20,10 +20,12 @@ No-payload tags (1 byte total):
   ``X`` — gdb_exiting
 
 Fixed-payload tags (tag + fixed-size payload, no length field):
-  ``R`` — register_changed (4-byte signed BE regnum, -1 = all)
   ``I`` — inferior_call (1 byte: 0x00 = pre, 0x01 = post)
 
-Variable-length tags (``[tag 1B][ctl 1B][length 7B BE][payload]``):
+Varint-payload tags (tag + zigzag varint):
+  ``R`` — register_changed (zigzag-encoded signed register number, -1 = all)
+
+Variable-length tags (``[tag 1B][ctl 1B][length varint][payload]``):
   ``l`` — local variables (JSON, auto-compressed)
   ``s`` — stack frames (JSON, auto-compressed)
   ``r`` — register values (JSON, auto-compressed)
@@ -39,7 +41,6 @@ import asyncio
 import json
 import logging
 import os
-import struct
 import zlib
 
 from ..async_util import supervise
@@ -63,15 +64,45 @@ _ZERO_PAYLOAD_TAGS = frozenset(b"POFCX")
 
 # Tags with fixed-size payloads (tag + payload, no length field).
 _FIXED_PAYLOAD = {
-    ord(b"R"): 4,   # 4-byte signed BE regnum
     ord(b"I"): 1,   # 1-byte pre/post flag
 }
 
+# Tags whose payload is a single zigzag-encoded varint.
+_VARINT_TAGS = frozenset({ord(b"R")})
+
 # Tags that carry variable-length payloads.
-# Frame: [1-byte tag][1-byte control][7-byte BE payload_length][payload]
+# Frame: [1-byte tag][1-byte control][length varint][payload]
 # Control byte bit 0 (_CTL_COMPRESSED): payload is zlib-compressed.
 _VAR_LEN_TAGS = frozenset(b"lsrbfD")
 _CTL_COMPRESSED = 0x01
+
+
+# ---------------------------------------------------------------------------
+# Varint helpers — unsigned LEB128 and zigzag signed decoding
+# ---------------------------------------------------------------------------
+
+def _decode_varint(buf, offset=0):
+    """Decode one unsigned LEB128 varint from *buf* starting at *offset*.
+
+    Returns ``(value, new_offset)`` on success, or ``(None, offset)``
+    if the buffer is incomplete (not enough bytes yet).
+    """
+    result = 0
+    shift = 0
+    start = offset
+    while offset < len(buf):
+        byte = buf[offset]
+        result |= (byte & 0x7F) << shift
+        offset += 1
+        if not (byte & 0x80):
+            return result, offset
+        shift += 7
+    return None, start
+
+
+def _zigzag_decode(n):
+    """Zigzag-decode unsigned integer *n* back to signed."""
+    return (n >> 1) ^ -(n & 1)
 
 
 class SocketDataMixin:
@@ -129,7 +160,8 @@ class SocketDataMixin:
         The tag byte determines the frame structure:
         - No-payload tags: 1 byte total (tag only).
         - Fixed-payload tags: 1 + N bytes (tag + known payload size).
-        - Data tags: 1 + 8 + payload_length bytes (tag + 8-byte BE length + payload).
+        - Varint-payload tags: 1 + zigzag varint (tag + varint).
+        - Variable-length tags: 1 + 1 + varint + payload (tag + ctl + len + data).
         """
         prompt_pending = False
         objfiles_pending = False
@@ -158,12 +190,7 @@ class SocketDataMixin:
                 payload = self._sock_buf[1:total]
                 self._sock_buf = self._sock_buf[total:]
 
-                if tag_byte == ord(b"R"):
-                    regnum = struct.unpack(">i", payload[:4])[0]
-                    if regnum < 0:
-                        regnum = -1
-                    pending_regnums.add(regnum)
-                elif tag_byte == ord(b"I"):
+                if tag_byte == ord(b"I"):
                     try:
                         if payload[0] == 0:
                             self.on_inferior_call_pre()
@@ -172,19 +199,33 @@ class SocketDataMixin:
                     except Exception:
                         _log.debug("inferior_call callback raised", exc_info=True)
 
+            elif tag_byte in _VARINT_TAGS:
+                raw, after = _decode_varint(self._sock_buf, 1)
+                if raw is None:
+                    break
+                self._sock_buf = self._sock_buf[after:]
+
+                if tag_byte == ord(b"R"):
+                    regnum = _zigzag_decode(raw)
+                    if regnum < 0:
+                        regnum = -1
+                    pending_regnums.add(regnum)
+
             elif tag_byte in _VAR_LEN_TAGS:
-                if len(self._sock_buf) < 9:
+                if len(self._sock_buf) < 3:
                     break
                 ctl = self._sock_buf[1]
-                payload_len = struct.unpack(">Q", b"\x00" + self._sock_buf[2:9])[0]
+                payload_len, after = _decode_varint(self._sock_buf, 2)
+                if payload_len is None:
+                    break
                 if payload_len > _SOCK_BUF_MAX_BYTES:
                     _log.warning(f"socket: invalid payload size {payload_len}; resetting")
                     self._sock_buf = b""
                     return
-                total = 9 + payload_len
+                total = after + payload_len
                 if len(self._sock_buf) < total:
                     break
-                payload = self._sock_buf[9:total]
+                payload = self._sock_buf[after:total]
                 self._sock_buf = self._sock_buf[total:]
 
                 if ctl & _CTL_COMPRESSED:

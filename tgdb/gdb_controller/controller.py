@@ -17,7 +17,6 @@ import logging
 import os
 import signal
 import socket
-import struct
 import termios
 from collections.abc import Callable
 
@@ -47,6 +46,16 @@ _log = logging.getLogger("tgdb.gdb_controller")
 # than this without a trailing newline (e.g. a runaway pretty-printer), we
 # truncate it instead of letting memory grow without bound.
 _MI_BUF_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _encode_varint(n: int) -> bytes:
+    """Encode unsigned integer *n* as LEB128 varint bytes."""
+    buf = bytearray()
+    while n >= 0x80:
+        buf.append((n & 0x7F) | 0x80)
+        n >>= 7
+    buf.append(n & 0x7F)
+    return bytes(buf)
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +321,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
 
 
     def send_cancel_token(self, token: int) -> None:
-        """Write a 4-byte BE cancel token to the GDB-side reader thread.
+        """Write a varint-encoded cancel token to the GDB-side reader thread.
 
         Best-effort: if the socket is closed or the write fails, the token
         is silently dropped.  The GDB-side convenience function may complete
@@ -321,7 +330,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         if self._sock_tgdb < 0 or token == 0:
             return
         try:
-            os.write(self._sock_tgdb, struct.pack(">I", token))
+            os.write(self._sock_tgdb, _encode_varint(token))
         except OSError:
             pass
 

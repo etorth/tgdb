@@ -2,7 +2,6 @@ import gdb
 import json
 import logging
 import os
-import struct
 import threading
 import zlib
 
@@ -19,7 +18,7 @@ _event_handlers_connected = False
 # ---------------------------------------------------------------------------
 # Cancel-token infrastructure
 #
-# tgdb writes 4-byte big-endian unsigned integers (cancel tokens) to the
+# tgdb writes varint-encoded unsigned integers (cancel tokens) to the
 # socket.  A daemon reader thread on the GDB side drains them into a set.
 # Convenience functions check the set at key points and abort early when
 # their token is present — returning ``"cancelled"`` instead of ``"ok"``.
@@ -36,6 +35,53 @@ _CTL_COMPRESSED = 0x01
 
 # Payloads at or above this size are zlib-compressed automatically.
 _COMPRESS_THRESHOLD = 64
+
+
+# ---------------------------------------------------------------------------
+# Varint helpers — unsigned LEB128 and zigzag signed encoding
+#
+# Each byte carries 7 data bits; MSB=1 means "more bytes follow".
+# Zigzag maps signed integers to unsigned so small negatives stay small:
+#   0 → 0, -1 → 1, 1 → 2, -2 → 3, 2 → 4, ...
+# ---------------------------------------------------------------------------
+
+def _encode_varint(n):
+    """Encode unsigned integer *n* as LEB128 varint bytes."""
+    buf = bytearray()
+    while n >= 0x80:
+        buf.append((n & 0x7F) | 0x80)
+        n >>= 7
+    buf.append(n & 0x7F)
+    return bytes(buf)
+
+
+def _decode_varint(buf, offset=0):
+    """Decode one unsigned LEB128 varint from *buf* starting at *offset*.
+
+    Returns ``(value, new_offset)`` on success, or ``(None, offset)``
+    if the buffer is incomplete (not enough bytes yet).
+    """
+    result = 0
+    shift = 0
+    start = offset
+    while offset < len(buf):
+        byte = buf[offset]
+        result |= (byte & 0x7F) << shift
+        offset += 1
+        if not (byte & 0x80):
+            return result, offset
+        shift += 7
+    return None, start
+
+
+def _zigzag_encode(n):
+    """Zigzag-encode signed integer *n* to unsigned."""
+    return (n << 1) ^ (n >> 63)
+
+
+def _zigzag_decode(n):
+    """Zigzag-decode unsigned integer *n* back to signed."""
+    return (n >> 1) ^ -(n & 1)
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +115,7 @@ _log.propagate = False
 def _send_sock_frame(tag, payload):
     """Write a variable-length frame to the socket.
 
-    Frame format: ``[tag 1B][ctl 1B][length 7B BE][payload]``.
+    Frame format: ``[tag 1B][ctl 1B][length varint][payload]``.
 
     *tag* is a single ASCII byte (string or bytes).  *payload* is raw
     bytes.  If the payload length meets ``_COMPRESS_THRESHOLD``, it is
@@ -90,7 +136,7 @@ def _send_sock_frame(tag, payload):
     else:
         ctl = 0x00
 
-    length_bytes = struct.pack(">Q", len(payload))[1:]
+    length_bytes = _encode_varint(len(payload))
     buf = tag_byte + bytes([ctl]) + length_bytes + payload
     try:
         written = 0
@@ -107,7 +153,7 @@ def _send_sock_frame(tag, payload):
 def _start_cancel_reader(fd):
     """Start a daemon thread that reads cancel tokens from the socket.
 
-    tgdb writes 4-byte big-endian unsigned integers to the socket.  This
+    tgdb writes varint-encoded unsigned integers to the socket.  This
     thread drains them into ``_cancel_tokens`` so convenience functions can
     check for cancellation without blocking the GDB main thread.
 
@@ -126,9 +172,11 @@ def _start_cancel_reader(fd):
                 if not data:
                     break
                 buf += data
-                while len(buf) >= 4:
-                    token = struct.unpack(">I", buf[:4])[0]
-                    buf = buf[4:]
+                while buf:
+                    token, after = _decode_varint(buf)
+                    if token is None:
+                        break
+                    buf = buf[after:]
                     with _cancel_lock:
                         _cancel_tokens.add(token)
                     _log.debug(f"cancel token received: {token}")
@@ -180,9 +228,9 @@ def register_socket_fd(fd, log_enabled=False):
     global _sock_fd, _event_handlers_connected
     _sock_fd = fd
 
-    # Start the cancel-token reader thread.  It reads 4-byte BE unsigned
-    # integers from the socket (written by tgdb) and adds them to
-    # ``_cancel_tokens``.  Started once per process.
+    # Start the cancel-token reader thread.  It reads varint-encoded
+    # unsigned integers from the socket (written by tgdb) and adds them
+    # to ``_cancel_tokens``.  Started once per process.
     _start_cancel_reader(fd)
 
     if log_enabled:
@@ -221,7 +269,7 @@ def register_socket_fd(fd, log_enabled=False):
             regnum = int(event.regnum)
         except (AttributeError, ValueError, TypeError):
             regnum = -1
-        _emit(b"R", struct.pack(">i", regnum))
+        _emit(b"R", _encode_varint(_zigzag_encode(regnum)))
 
     def _on_new_objfile(_event):
         _emit(b"O")
