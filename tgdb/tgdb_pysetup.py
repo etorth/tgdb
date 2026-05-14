@@ -259,17 +259,24 @@ def _collect_locals():
                 if is_reference:
                     try:
                         addr_str = str(val.referenced_value().address)
-                    except Exception:
+                    except Exception as exc:
                         addr_str = "unknown (referenced target)"
+                        _tgdb_RSVD_log(
+                            f"[tgdb] referenced_value().address failed"
+                            f" for {name}: {exc}\n"
+                        )
                 else:
                     if val.address:
                         addr_str = str(val.address)
                     else:
                         addr_str = f"register@{depth}"
 
-            except Exception:
+            except Exception as exc:
                 val_str = "<optimized out>"
                 addr_str = "unknown"
+                _tgdb_RSVD_log(
+                    f"[tgdb] value eval failed for {name}: {exc}\n"
+                )
 
             _dup_diag.append((name, depth, block_start, block_end, addr_str, decl_line))
 
