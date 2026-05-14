@@ -1,5 +1,6 @@
 import gdb
 import json
+import logging
 import os
 import struct
 import zlib
@@ -19,6 +20,34 @@ _CTL_COMPRESSED = 0x01
 
 # Payloads at or above this size are zlib-compressed automatically.
 _COMPRESS_THRESHOLD = 64
+
+
+# ---------------------------------------------------------------------------
+# GDB-side logger
+#
+# Mirrors the tgdb-side pattern in ``tgdb/log.py``:
+# - Default level is WARNING so ``_log.debug(...)`` calls are free when
+#   tgdb is run without ``--log``.
+# - When tgdb passes ``log_enabled=True`` via ``register_pipe_fd()``,
+#   the level is raised to DEBUG and a custom handler sends messages
+#   through the pipe (tag ``D``) to appear in tgdb's log file.
+# ---------------------------------------------------------------------------
+
+class _PipeLogHandler(logging.Handler):
+    """Logging handler that sends records through the GDB→tgdb pipe."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            _send_pipe_frame("D", msg.encode("utf-8", errors="replace"))
+        except Exception:
+            pass
+
+
+_log = logging.getLogger("tgdb.gdb_python")
+_log.addHandler(logging.NullHandler())
+_log.setLevel(logging.WARNING)
+_log.propagate = False
 
 
 def _send_pipe_frame(tag, payload):
@@ -59,21 +88,19 @@ def _send_pipe_frame(tag, payload):
         return False
 
 
-def _tgdb_RSVD_log(msg):
-    """Send a diagnostic log line from GDB Python to tgdb via the pipe.
-
-    Uses tag ``D`` with a raw UTF-8 payload.  tgdb logs the message through
-    its standard Python logging system at DEBUG level.
-    """
-    _send_pipe_frame("D", msg.encode("utf-8", errors="replace"))
-
-
-def register_pipe_fd(fd):
+def register_pipe_fd(fd, log_enabled=False):
     """Wire GDB Python events and data collection to a single pipe.
 
     tgdb opens one inheritable pipe before forking GDB and passes the write
     end's fd number here.  All communication uses a tag-driven binary frame
     format so lightweight events and bulk data share the same channel.
+
+    When *log_enabled* is True (tgdb was started with ``--log``), the
+    GDB-side logger is raised to DEBUG and a ``_PipeLogHandler`` is
+    attached so ``_log.debug(...)`` messages flow through the pipe to
+    tgdb's log file.  When False, the logger stays at WARNING and all
+    DEBUG-level calls are effectively free (no string formatting, no
+    handler walk).
 
     See ``docs/pipe-protocol.md`` for the full protocol specification.
 
@@ -83,6 +110,19 @@ def register_pipe_fd(fd):
     """
     global _pipe_fd, _event_handlers_connected
     _pipe_fd = fd
+
+    if log_enabled:
+        # Remove any previously attached pipe handlers (in case of re-init).
+        for handler in list(_log.handlers):
+            if isinstance(handler, _PipeLogHandler):
+                _log.removeHandler(handler)
+        handler = _PipeLogHandler()
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        _log.addHandler(handler)
+        _log.setLevel(logging.DEBUG)
+    else:
+        _log.setLevel(logging.WARNING)
+
     if _event_handlers_connected:
         return
     _event_handlers_connected = True
@@ -258,7 +298,7 @@ def _collect_locals():
                         addr_str = str(val.referenced_value().address)
                     except Exception as exc:
                         addr_str = "unknown (referenced target)"
-                        _tgdb_RSVD_log(f"referenced_value().address failed for {name}: {exc}\n")
+                        _log.debug("referenced_value().address failed for %s: %s", name, exc)
                 else:
                     if val.address:
                         addr_str = str(val.address)
@@ -268,7 +308,7 @@ def _collect_locals():
             except Exception as exc:
                 val_str = "<optimized out>"
                 addr_str = "unknown"
-                _tgdb_RSVD_log(f"value eval failed for {name}: {exc}\n")
+                _log.debug("value eval failed for %s: %s", name, exc)
 
             is_shadowed = name in seen
             type_str = str(symbol.type)

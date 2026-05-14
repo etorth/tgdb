@@ -432,8 +432,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # pysetup so the helper is defined; MI commands are FIFO so ordering
         # holds.
         if self._pipe_w >= 0:
+            log_enabled = _log.isEnabledFor(logging.DEBUG)
             self.mi_command(
-                f'-interpreter-exec console "python register_pipe_fd({self._pipe_w})"',
+                f'-interpreter-exec console "python register_pipe_fd({self._pipe_w}, log_enabled={log_enabled})"',
                 report_error=False,
             )
 
