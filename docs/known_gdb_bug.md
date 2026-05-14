@@ -285,3 +285,123 @@ GDB build the third such update lands the assertion
 deterministically (`[0]` and `[1]` succeed, `[2]` crashes).
 
 
+---
+
+## Bug 3: `block.__iter__()` yields duplicate symbols from parent-block merging of sibling scopes
+
+### Symptom
+
+The locals pane shows every variable twice.  When navigating frames with
+`up`/`down` to a large constructor or function that contains multiple
+sibling `{ }` blocks (each declaring identically-named variables like
+`parms` and `result` for successive RPC calls), GDB's Python
+`block.__iter__()` yields the same variable names multiple times from
+the function-body block.  Debugger front-ends that build a locals pane
+from this iterator see phantom duplicates.
+
+Two distinct sub-issues are observed within a single block walk:
+
+1. **Cross-depth duplication** — a variable such as `numConnIds` appears
+   at depth 0 (the innermost scope block where the PC sits) with a real
+   stack address, AND again at depth 1 (the function-body block) with
+   `val.address == None`.  The depth-1 copy is a phantom: the same
+   declaration line, same block start/end, but no dereferenceable address.
+
+2. **Sibling-scope merging** — variables `parms` and `result`, each
+   declared inside distinct `{ }` blocks (sibling scopes at the same
+   nesting level), ALL appear in the function-body block at depth 1 with
+   their original declaration lines — even though only the currently
+   executing block's variables should be visible.  The block walk follows
+   the `superblock` chain (inner → outer) and never visits sibling blocks,
+   so these symbols can only come from GDB merging child-block symbols
+   into the parent.
+
+### Trigger
+
+The trigger requires a constructor (or large function) with:
+
+- Lambda-initialised variables (`const auto x = [...]() { ... }();`)
+- Multiple `{ }` blocks that each declare identically-named local variables
+  (e.g. `parms`, `result` for different RPC-like calls)
+- The debugger stops inside a callee called from near the end of the
+  constructor, and the user uses `up` to navigate to the constructor frame
+
+Reproduced at **all optimization levels** (`-O0`, `-O1`, `-O2`, `-O3`)
+with `-g3` debug info.
+
+### Affected versions
+
+Confirmed on:
+- GDB 15.0.50.20240403-git (Ubuntu 24.04 LTS)
+- g++ 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04)
+
+The bug is likely present in all GDB versions that implement the Python
+`gdb.Block.__iter__()` API, since the root cause is in how GDB
+populates the function-body block's symbol table from DWARF child-scope
+entries.
+
+### tgdb workaround
+
+Three layers of defence in `tgdb/tgdb_pysetup.py::_collect_locals()`:
+
+1. **Skip shadowed register copies** (commit `1e0fc63`): when a variable
+   is both shadowed (same name already seen at a shallower depth) AND has
+   a synthetic `register@N` address (no real stack address), skip it.
+   This handles the cross-depth duplication — the depth-0 copy with a
+   real address is kept, the depth-1 phantom is dropped.
+
+2. **Deduplicate same-key entries** (commit `ad333d3`): after collecting
+   all variables, group by `(name, addr)`.  When multiple entries share
+   the same key, keep the first one with a real value; fall back to the
+   first entry if all are `<optimized out>`.  This handles the
+   sibling-scope merging and the within-block DWARF duplicate entries.
+
+3. **varobj guard** (commit `da3a23c`): the `use_addr` check in
+   `tgdb/local_variable_pane/reconcile.py` rejects any address starting
+   with `register@` so the reconciliation engine does not attempt to
+   create MI varobjs with invalid expressions like
+   `*(type*)register@depth1`.
+
+Limit of the workaround: genuine shadowed variables from nested scopes
+(e.g. an inner block intentionally re-declaring the same name) that
+happen to be register-allocated will be hidden.  This is acceptable
+because GDB's merged parent-block copies are the common case; true
+C++ variable shadowing with register allocation is rare.
+
+### Reproducer
+
+Run [`../known_gdb_bug_reproduce/bug_3.py`](../known_gdb_bug_reproduce/bug_3.py).
+Exit code 0 = bug reproduced, 1 = not reproduced,
+2 = `gdb`/`g++` not in PATH, 3 = setup diverged.
+
+### Sample successful reproduction
+
+```
+Total symbols: 36
+Names appearing more than once: 15
+
+=== CROSS-DEPTH DUPLICATION ===
+Variables present in both inner block (real addr) and
+function-body block (addr=None):
+
+  currRunDir                depth=0 line= 46 has_addr=True
+  currRunDir                depth=1 line= 46 has_addr=False
+  numConnIds                depth=0 line= 62 has_addr=True
+  numConnIds                depth=1 line= 62 has_addr=False
+  ...13 more variables...
+
+=== SIBLING-SCOPE MERGING ===
+Same name at same depth but different declaration lines
+(from sibling { } blocks merged into function body):
+
+  parms                     depth=1 lines=[72, 79]
+  result                    depth=1 lines=[73, 80]
+
+CONFIRMED: GDB block iterator produces duplicate/merged symbols.
+```
+
+Note: the depth-0 entries have `has_addr=True` (real stack addresses)
+while the depth-1 copies of the same variables have `has_addr=False`
+(register-allocated phantoms).  The `parms` and `result` entries at
+depth 1 show different declaration lines — these come from two separate
+`{ }` blocks in the source, merged by GDB into the function-body block.
