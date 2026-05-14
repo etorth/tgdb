@@ -135,24 +135,16 @@ class GDBRequestMixin:
         entry = PendingEntry(future=future, expect_socket=expect_socket)
         self._pending[token] = entry
 
-        timeout_handle: asyncio.TimerHandle | None = None
-        if timeout is not None:
-            def _on_timeout() -> None:
-                e = self._pending.pop(token, None)
-                self._request_meta.pop(token, None)
-                if e is not None and not e.future.done():
-                    e.future.set_exception(
-                        TimeoutError("MI command timed out — GDB may be busy")
-                    )
-                    if e.expect_socket:
-                        self.send_cancel_token(token)
-            timeout_handle = loop.call_later(timeout, _on_timeout)
-
         try:
-            result = await future
-        except TimeoutError:
+            if timeout is None:
+                result = await future
+            else:
+                result = await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            if expect_socket:
+                self.send_cancel_token(token)
             if raise_on_error:
-                raise RuntimeError("MI command timed out — GDB may be busy")
+                raise RuntimeError("MI command timed out — GDB may be busy") from exc
             return {}
         except (RuntimeError, asyncio.CancelledError):
             # Future rejected by _fail_pending_futures (GDB exit / PTY EOF),
@@ -162,12 +154,9 @@ class GDBRequestMixin:
                 raise
             return {}
         finally:
-            if timeout_handle is not None:
-                timeout_handle.cancel()
             # Drop bookkeeping in every exit path.  These pops are no-ops
             # when the entry was already consumed by _handle_result /
-            # _try_resolve_sock_pending, or removed by _on_timeout /
-            # _fail_pending_futures.
+            # _try_resolve_sock_pending, or cleared by _fail_pending_futures.
             self._pending.pop(token, None)
             self._request_meta.pop(token, None)
 
