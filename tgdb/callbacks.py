@@ -533,8 +533,16 @@ class CallbacksMixin:
         for memory writes inside the call, so memory panes are already
         covered by ``on_memory_changed``; we still touch them defensively
         in case the call changed only its own locals.
+
+        Skips when a locals request is already in flight.  The GDB-side
+        ``_collect_locals()`` evaluates every variable's value, which can
+        itself trigger ``InferiorCallPostEvent`` (e.g. pretty-printers)
+        — requesting another collect while one is running creates a
+        feedback loop.
         """
         if self.gdb is None or self.gdb._inferior_running:
+            return
+        if self.gdb._locals_request_inflight:
             return
         try:
             supervise(

@@ -141,6 +141,15 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # already pending — each MI command GDB processes emits a prompt,
         # so without this guard a single ``up`` creates an infinite cascade.
         self._frame_request_inflight: bool = False
+        # Guard against redundant ``request_current_frame_locals`` calls.
+        # ``_collect_locals()`` evaluates every variable's value inside GDB,
+        # which can fire ``InferiorCallPostEvent`` and ``=memory-changed``
+        # events as side effects of pretty-printers and memory reads.  Those
+        # events normally request another locals refresh — creating a
+        # feedback loop.  This flag lets ``_ui_on_inferior_call_post`` and
+        # ``_flush_memory_changed`` skip the re-request while collection is
+        # already running.
+        self._locals_request_inflight: bool = False
         self.locals: list[LocalVariable] = []
         self.stack: list[Frame] = []
         self.threads: list[ThreadInfo] = []

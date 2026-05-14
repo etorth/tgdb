@@ -169,10 +169,16 @@ class GDBRequestMixin:
 
 
     async def request_current_frame_locals(self, *, report_error: bool = False) -> None:
-        await self.mi_command_async(
-            '-data-evaluate-expression "$_tgdb_RSVD_collect_locals()"',
-            timeout=30.0,
-        )
+        if self._locals_request_inflight:
+            return
+        self._locals_request_inflight = True
+        try:
+            await self.mi_command_async(
+                '-data-evaluate-expression "$_tgdb_RSVD_collect_locals()"',
+                timeout=30.0,
+            )
+        finally:
+            self._locals_request_inflight = False
 
 
     async def request_current_stack_frames(self, *, report_error: bool = False) -> None:
