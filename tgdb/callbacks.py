@@ -542,7 +542,7 @@ class CallbacksMixin:
         """
         if self.gdb is None or self.gdb._inferior_running:
             return
-        if self.gdb._locals_request_inflight:
+        if self.gdb._locals_cancel_token in self.gdb._pending:
             return
         try:
             supervise(

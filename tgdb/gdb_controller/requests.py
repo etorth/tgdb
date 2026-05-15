@@ -172,6 +172,29 @@ class GDBRequestMixin:
         return result
 
 
+    def _cancel_data_requests(self) -> None:
+        """Cancel all in-flight convenience function requests.
+
+        Sends cancel tokens for frame, locals, stack, registers, and
+        breakpoints, then resets the stored tokens to 0 and clears the
+        frame-inflight guard so new requests are not blocked.
+
+        Called when the inferior starts running — any in-flight data
+        collection is stale.
+        """
+        for attr in (
+            "_frame_cancel_token",
+            "_locals_cancel_token",
+            "_stack_cancel_token",
+            "_registers_cancel_token",
+            "_breakpoints_cancel_token",
+        ):
+            token = getattr(self, attr, 0)
+            self.send_cancel_token(token)
+            setattr(self, attr, 0)
+        self._frame_request_inflight = False
+
+
     def request_source_files(self) -> None:
         self.mi_command("-file-list-exec-source-files")
 
@@ -183,6 +206,7 @@ class GDBRequestMixin:
     async def request_current_location(self, *, report_error: bool = True) -> None:
         self._frame_request_inflight = True
         token = self._next_mi_token()
+        self.send_cancel_token(self._frame_cancel_token)
         self._frame_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_frame_info({token})"',
@@ -193,24 +217,22 @@ class GDBRequestMixin:
 
 
     async def request_current_frame_locals(self, *, report_error: bool = False) -> None:
-        if self._locals_request_inflight:
+        if self._locals_cancel_token in self._pending:
             return
-        self._locals_request_inflight = True
         token = self._next_mi_token()
+        self.send_cancel_token(self._locals_cancel_token)
         self._locals_cancel_token = token
-        try:
-            await self.mi_command_async(
-                f'-data-evaluate-expression "$_tgdb_RSVD_collect_locals({token})"',
-                timeout=30.0,
-                token=token,
-                expect_socket=True,
-            )
-        finally:
-            self._locals_request_inflight = False
+        await self.mi_command_async(
+            f'-data-evaluate-expression "$_tgdb_RSVD_collect_locals({token})"',
+            timeout=30.0,
+            token=token,
+            expect_socket=True,
+        )
 
 
     async def request_current_stack_frames(self, *, report_error: bool = False) -> None:
         token = self._next_mi_token()
+        self.send_cancel_token(self._stack_cancel_token)
         self._stack_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_stack({token})"',
@@ -238,6 +260,7 @@ class GDBRequestMixin:
 
     async def request_current_registers(self, *, report_error: bool = False) -> None:
         token = self._next_mi_token()
+        self.send_cancel_token(self._registers_cancel_token)
         self._registers_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_registers({token})"',
@@ -249,6 +272,7 @@ class GDBRequestMixin:
 
     async def request_breakpoints(self, *, report_error: bool = False) -> None:
         token = self._next_mi_token()
+        self.send_cancel_token(self._breakpoints_cancel_token)
         self._breakpoints_cancel_token = token
         await self.mi_command_async(
             f'-data-evaluate-expression "$_tgdb_RSVD_collect_breakpoints({token})"',

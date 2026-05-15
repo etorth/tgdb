@@ -60,6 +60,7 @@ class ParsingMixin:
             await self.request_breakpoints(report_error=False)
         elif cls == "running":
             self._inferior_running = True
+            self._cancel_data_requests()
             self.current_frame = None
             self.locals = []
             self.stack = []
