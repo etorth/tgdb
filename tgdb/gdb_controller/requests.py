@@ -176,8 +176,7 @@ class GDBRequestMixin:
         """Cancel all in-flight convenience function requests.
 
         Sends cancel tokens for frame, locals, stack, registers, and
-        breakpoints, then resets the stored tokens to 0 and clears the
-        frame-inflight guard so new requests are not blocked.
+        breakpoints, then resets the stored tokens to 0.
 
         Called when the inferior starts running — any in-flight data
         collection is stale.
@@ -192,7 +191,6 @@ class GDBRequestMixin:
             token = getattr(self, attr, 0)
             self.send_cancel_token(token)
             setattr(self, attr, 0)
-        self._frame_request_inflight = False
 
 
     def request_source_files(self) -> None:
@@ -204,7 +202,6 @@ class GDBRequestMixin:
 
 
     async def request_current_location(self, *, report_error: bool = True) -> None:
-        self._frame_request_inflight = True
         token = self._next_mi_token()
         self.send_cancel_token(self._frame_cancel_token)
         self._frame_cancel_token = token

@@ -128,7 +128,6 @@ class AppCoreMixin:
         self.gdb.on_stack = lambda frames: _safe_later(self._ui_set_stack, frames)
         self.gdb.on_threads = lambda threads: _safe_later(self._ui_set_threads, threads)
         self.gdb.on_memory_changed = lambda: _safe_later(self._ui_on_memory_changed)
-        self.gdb.on_cli_prompt = lambda: _safe_later(self._ui_on_cli_prompt)
         self.gdb.on_register_changed = lambda regnum: _safe_later(
             self._ui_on_register_changed,
             regnum,

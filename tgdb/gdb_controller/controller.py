@@ -99,7 +99,6 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
     - ``on_stack(frames: list[Frame])``
     - ``on_threads(threads: list[ThreadInfo])``
     - ``on_registers(registers: list[RegisterInfo])``
-    - ``on_cli_prompt()``
     - ``on_register_changed(regnum: int)``
     - ``on_objfiles_changed()``
     - ``on_inferior_call_pre()``
@@ -147,13 +146,6 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
         self.current_frame: Frame | None = None
-        # Guard against redundant ``request_current_location`` calls.
-        # Set True when a frame-info request is in flight; cleared when the
-        # socket frame response is processed.  ``_ui_on_cli_prompt`` checks
-        # this to avoid sending another frame-info request while one is
-        # already pending — each MI command GDB processes emits a prompt,
-        # so without this guard a single ``up`` creates an infinite cascade.
-        self._frame_request_inflight: bool = False
         # Last cancel token per convenience function type.  Initialized to 0
         # (the "no cancel" sentinel — send_cancel_token(0) is a no-op).
         self._frame_cancel_token: int = 0
@@ -185,10 +177,6 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.on_memory_changed: Callable[[], None] = lambda: None
         self.on_exit: Callable[[], None] = lambda: None
         self.on_error: Callable[[str], None] = lambda m: None
-        # Fired (coalesced) whenever the GDB CLI is about to redisplay its
-        # prompt — wired off the AF_UNIX socketpair.  Used by tgdb to
-        # refresh the source pane after CLI frame navigation.
-        self.on_cli_prompt: Callable[[], None] = lambda: None
         # User wrote a register from the CLI (``set $rax=...``).  GDB has
         # no MI async record for this; the hook lets tgdb refresh the
         # register pane immediately instead of waiting for ``*stopped``.

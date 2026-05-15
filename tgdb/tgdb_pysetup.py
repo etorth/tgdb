@@ -250,7 +250,12 @@ def register_socket_fd(fd, log_enabled=False):
             pass
 
     def _on_before_prompt():
-        _emit(b"P")
+        frame_data = _snapshot_frame()
+        if frame_data:
+            payload = json.dumps(frame_data, separators=(",", ":")).encode("utf-8")
+            _send_sock_frame("P", payload)
+        else:
+            _send_sock_frame("P", b"{}")
 
     def _on_register_changed(event):
         try:
@@ -655,6 +660,42 @@ def _collect_registers(cancel_token=0):
     _send_sock_payload("r", registers, cancel_token)
     _finish_token(cancel_token)
     return "done"
+
+
+def _snapshot_frame():
+    """Return a lightweight frame-info dict, or ``None`` on failure.
+
+    Called from ``_on_before_prompt`` to piggyback frame data onto the
+    ``P`` socket event.  No MI token, no cancel support — just a quick
+    snapshot of the selected frame.
+    """
+    try:
+        frame = gdb.selected_frame()
+    except gdb.error:
+        return None
+
+    try:
+        sal = frame.find_sal()
+        func_name = frame.name() or ""
+        addr = hex(frame.pc())
+        if sal.symtab:
+            file_name = sal.symtab.filename or ""
+            fullname = sal.symtab.fullname() or ""
+        else:
+            file_name = ""
+            fullname = ""
+        line = sal.line
+    except gdb.error:
+        return None
+
+    return {
+        "level": frame.level(),
+        "func": func_name,
+        "addr": addr,
+        "file": file_name,
+        "fullname": fullname,
+        "line": line,
+    }
 
 
 def _collect_frame_info(cancel_token=0):

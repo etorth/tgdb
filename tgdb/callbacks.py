@@ -439,36 +439,6 @@ class CallbacksMixin:
                     pane.refresh_memory()
 
 
-    def _ui_on_cli_prompt(self) -> None:
-        """GDB is about to redisplay its CLI prompt — refresh selected frame.
-
-        Wired off the AF_UNIX socket written by ``register_socket_fd`` in
-        follow no-op user input, but typed CLI ``up``/``down``/``frame N``
-        and similar silently move the selected frame, and GDB has no MI
-        async record for that.  We issue ``-stack-info-frame`` on every
-        prompt; if the selected frame actually moved, ``_ui_on_frame_changed``
-        below will reload the source pane.  The MI request is cheap.
-
-        The inferior must not be running — querying frames during execution
-        is invalid.
-
-        Skips when a frame-info request is already in flight.  Without this
-        guard, every MI command GDB processes emits a ``before_prompt`` event,
-        which would send another ``collect_frame_info``, whose MI response
-        emits yet another prompt — creating an infinite request cascade.
-        """
-        if self.gdb is None or self.gdb._inferior_running:
-            return
-        if self.gdb._frame_request_inflight:
-            return
-        try:
-            supervise(
-                self.gdb.request_current_location(report_error=False),
-                name="cli-prompt-location",
-            )
-        except Exception:
-            pass
-
 
     def _ui_on_register_changed(self, regnum: int) -> None:
         """User wrote a register from the CLI (e.g. ``set $rax=0x1234``).
@@ -590,16 +560,14 @@ class CallbacksMixin:
 
 
     def _ui_on_frame_changed(self, frame: Frame) -> None:
-        """User selected a different frame (CLI ``up``/``down``/``frame N``).
+        """The selected frame changed — update source and dependent panes.
 
-        GDB does not emit an MI async record when the user changes frames via
-        the console.  Instead, tgdb wires ``gdb.events.before_prompt`` (in
-        ``tgdb_pysetup.py``) to ping a socket; the controller fires
-        ``on_cli_prompt`` which schedules ``-stack-info-frame``.  The reply
-        lands here.  Update the source pane to show the selected frame's
+        Fired when a ``before_prompt`` socket event carries a frame that
+        differs from ``current_frame``, or when a ``*stopped`` async
+        record / ``request_current_location`` response reports a new
+        frame.  Update the source pane to show the selected frame's
         source location (loading a new file if needed), and refresh the
-        dependent panes (disasm, memory, evaluate).  The stack and locals
-        panes are refreshed by the controller's follow-up MI queries.
+        dependent panes (disasm, memory, evaluate).
         """
         path = frame.fullname or frame.file
         if path and os.path.isfile(path):
