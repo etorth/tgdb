@@ -41,9 +41,7 @@ import json
 import logging
 import os
 import zlib
-from collections.abc import Coroutine
 
-from ..async_util import supervise
 from .errors import GDBRequestCancelled, GDBRequestTimeout
 from .types import (
     Breakpoint,
@@ -54,19 +52,6 @@ from .types import (
 )
 
 _log = logging.getLogger("tgdb.gdb_controller")
-
-
-async def _guarded(coro: Coroutine) -> None:
-    """Await *coro*, silently absorbing ``GDBRequestCancelled`` and ``GDBRequestTimeout``.
-
-    Used around fire-and-forget ``supervise`` calls where cancellation
-    and timeout are expected (e.g. inferior resumed while startup data
-    collection was still in progress) and should not be logged as errors.
-    """
-    try:
-        await coro
-    except (GDBRequestCancelled, GDBRequestTimeout):
-        pass
 
 
 # Maximum buffer size for incoming socket data.  16 MB is generous;
@@ -132,7 +117,7 @@ class SocketDataMixin:
     """
 
     def _on_sock_readable(self) -> None:
-        """Drain the socket and process complete frames."""
+        """Drain the socket and signal the dispatch loop."""
         try:
             while True:
                 chunk = os.read(self._sock_tgdb, 65536)
@@ -156,19 +141,43 @@ class SocketDataMixin:
             self._sock_buf = b""
             return
 
-        self._process_sock_frames()
+        self._sock_event.set()
 
 
     def _unregister_sock(self) -> None:
-        """Remove the socket asyncio reader and discard buffer."""
+        """Remove the socket asyncio reader, discard buffer, wake dispatch loop."""
         try:
             asyncio.get_running_loop().remove_reader(self._sock_tgdb)
         except Exception:
             pass
         self._sock_buf = b""
+        # Wake the dispatch loop so it can observe the cancellation.
+        self._sock_event.set()
 
 
-    def _process_sock_frames(self) -> None:
+    async def _sock_dispatch_long_run_loop(self) -> None:
+        """Async dispatch loop for socket frames.
+
+        Waits for ``_sock_event`` (set by the sync fd callback
+        ``_on_sock_readable``), then processes all complete frames in
+        ``_sock_buf``.  Because this is an async coroutine, data
+        handlers like ``_handle_sock_frame_info`` can ``await``
+        convenience function requests instead of using fire-and-forget
+        ``supervise`` calls.
+
+        The loop exits cleanly when its hosting ``asyncio.Task`` is
+        cancelled (during ``terminate()`` or ``run_async`` cleanup).
+        """
+        try:
+            while True:
+                await self._sock_event.wait()
+                self._sock_event.clear()
+                await self._process_sock_frames()
+        except asyncio.CancelledError:
+            return
+
+
+    async def _process_sock_frames(self) -> None:
         """Parse and dispatch complete frames from the unified socket.
 
         The tag byte determines the frame structure:
@@ -264,14 +273,14 @@ class SocketDataMixin:
                         _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
                         continue
                     self._try_resolve_sock_pending(mi_token, tag_byte, data)
-                    self._dispatch_sock_data(tag_byte, data)
+                    await self._dispatch_sock_data(tag_byte, data)
                 else:
                     try:
                         data = json.loads(payload)
                     except Exception as exc:
                         _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
                         continue
-                    self._dispatch_sock_data(tag_byte, data)
+                    await self._dispatch_sock_data(tag_byte, data)
 
             else:
                 _log.debug(f"socket: unknown tag 0x{tag_byte:02x}")
@@ -293,7 +302,7 @@ class SocketDataMixin:
                 except Exception:
                     _log.debug("on_register_changed callback raised", exc_info=True)
 
-    def _dispatch_sock_data(self, tag_byte: int, data) -> None:
+    async def _dispatch_sock_data(self, tag_byte: int, data) -> None:
         """Route a decoded socket data frame to the appropriate handler."""
         if tag_byte == ord(b"l"):
             self._handle_sock_locals(data)
@@ -302,7 +311,7 @@ class SocketDataMixin:
         elif tag_byte == ord(b"r"):
             self._handle_sock_registers(data)
         elif tag_byte == ord(b"f"):
-            self._handle_sock_frame_info(data)
+            await self._handle_sock_frame_info(data)
         elif tag_byte == ord(b"b"):
             self._handle_sock_breakpoints(data)
         else:
@@ -426,14 +435,14 @@ class SocketDataMixin:
         self.on_registers(list(registers))
 
 
-    def _handle_sock_frame_info(self, data: dict) -> None:
+    async def _handle_sock_frame_info(self, data: dict) -> None:
         """Parse frame info from socket JSON and drive the frame-changed chain.
 
         Called when the ``f`` data tag arrives in response to an
         ``request_current_location`` MI command (used only during
         startup).  Sets ``current_frame``, fires ``on_frame_changed``
-        / ``on_source_file``, and kicks off locals/stack/threads/
-        registers collection.  Skips data collection when the parsed
+        / ``on_source_file``, and awaits locals/stack/threads/registers
+        collection sequentially.  Skips data collection when the parsed
         frame is identical to the already-active ``current_frame``.
         """
         if self._inferior_running:
@@ -463,10 +472,13 @@ class SocketDataMixin:
         else:
             self.request_source_file(report_error=False)
 
-        supervise(_guarded(self.request_current_frame_locals(report_error=False)), name="sock-frame-locals")
-        supervise(_guarded(self.request_current_stack_frames(report_error=False)), name="sock-frame-stack")
-        supervise(_guarded(self.request_current_threads(report_error=False)), name="sock-frame-threads")
-        supervise(_guarded(self.request_current_registers(report_error=False)), name="sock-frame-registers")
+        try:
+            await self.request_current_frame_locals(report_error=False)
+            await self.request_current_stack_frames(report_error=False)
+            await self.request_current_threads(report_error=False)
+            await self.request_current_registers(report_error=False)
+        except (GDBRequestCancelled, GDBRequestTimeout):
+            _log.debug("startup data collection cancelled")
 
 
     def _handle_sock_breakpoints(self, data: list) -> None:
