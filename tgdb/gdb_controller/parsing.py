@@ -78,7 +78,22 @@ class ParsingMixin:
             thread_id = results.get("id") or results.get("thread-id")
             if isinstance(thread_id, str):
                 self.current_thread_id = thread_id
-            await self.request_current_location(report_error=False)
+            frame_data = results.get("frame")
+            if isinstance(frame_data, dict) and frame_data:
+                parsed = self._parse_frame(frame_data)
+                if self.current_frame != parsed:
+                    _log.info(f"thread-selected frame={parsed.file}:{parsed.line} func={parsed.func}")
+                    self.current_frame = parsed
+                    path = parsed.fullname or parsed.file
+                    self.on_frame_changed(parsed)
+                    if path:
+                        self.on_source_file(path, parsed.line)
+                    else:
+                        self.request_source_file(report_error=False)
+                    await self.request_current_frame_locals(report_error=False)
+                    await self.request_current_stack_frames(report_error=False)
+                    await self.request_current_threads(report_error=False)
+                    await self.request_current_registers(report_error=False)
         elif cls == "memory-changed":
             _log.info(
                 f"memory-changed addr={results.get('addr', '?')} "

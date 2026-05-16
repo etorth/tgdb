@@ -562,12 +562,11 @@ class CallbacksMixin:
     def _ui_on_frame_changed(self, frame: Frame) -> None:
         """The selected frame changed — update source and dependent panes.
 
-        Fired when a ``before_prompt`` socket event carries a frame that
-        differs from ``current_frame``, or when a ``*stopped`` async
-        record / ``request_current_location`` response reports a new
-        frame.  Update the source pane to show the selected frame's
-        source location (loading a new file if needed), and refresh the
-        dependent panes (disasm, memory, evaluate).
+        Fired when a ``*stopped`` async record, ``=thread-selected``
+        notification, or ``request_current_location`` response reports
+        a new frame.  Update the source pane to show the selected
+        frame's source location (loading a new file if needed), and
+        refresh the dependent panes (disasm, memory, evaluate).
         """
         path = frame.fullname or frame.file
         if path and os.path.isfile(path):

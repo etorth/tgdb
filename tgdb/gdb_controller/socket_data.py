@@ -16,6 +16,7 @@ No-payload tags (1 byte total):
   ``O`` — new_objfile
   ``F`` — free_objfile
   ``C`` — clear_objfiles
+  ``P`` — before_prompt
   ``X`` — gdb_exiting
 
 Fixed-payload tags (tag + fixed-size payload, no length field):
@@ -30,7 +31,6 @@ Variable-length tags (``[tag 1B][ctl 1B][length varint][payload]``):
   ``r`` — register values (JSON, auto-compressed)
   ``f`` — current frame info (JSON, auto-compressed)
   ``b`` — breakpoint list (JSON, auto-compressed)
-  ``P`` — before_prompt with inline frame snapshot (JSON)
   ``D`` — diagnostic log message (raw UTF-8)
 
 The control byte carries bit flags:
@@ -60,7 +60,7 @@ _log = logging.getLogger("tgdb.gdb_controller")
 _SOCK_BUF_MAX_BYTES = 16 * 1024 * 1024
 
 # Tags that carry no payload (1 byte total — tag only).
-_ZERO_PAYLOAD_TAGS = frozenset(b"OFCX")
+_ZERO_PAYLOAD_TAGS = frozenset(b"OFCXP")
 
 # Tags with fixed-size payloads (tag + payload, no length field).
 _FIXED_PAYLOAD = {
@@ -73,7 +73,7 @@ _VARINT_TAGS = frozenset({ord(b"R")})
 # Tags that carry variable-length payloads.
 # Frame: [1-byte tag][1-byte control][length varint][payload]
 # Control byte bit 0 (_CTL_COMPRESSED): payload is zlib-compressed.
-_VAR_LEN_TAGS = frozenset(b"lsrbfDP")
+_VAR_LEN_TAGS = frozenset(b"lsrbfD")
 _CTL_COMPRESSED = 0x01
 
 # Data tags that embed a varint MI token at the start of their payload.
@@ -162,8 +162,6 @@ class SocketDataMixin:
         - Varint-payload tags: 1 + zigzag varint (tag + varint).
         - Variable-length tags: 1 + 1 + varint + payload (tag + ctl + len + data).
         """
-        prompt_pending = False
-        prompt_frame_data: dict | None = None
         objfiles_pending = False
         pending_regnums: set[int] = set()
 
@@ -239,13 +237,6 @@ class SocketDataMixin:
                     except Exception:
                         msg = "<decode error>"
                     _log.debug(f"SOCK<- gdb-python: {msg}")
-                elif tag_byte == ord(b"P"):
-                    prompt_pending = True
-                    try:
-                        prompt_frame_data = json.loads(payload)
-                    except Exception as exc:
-                        _log.warning(f"socket: JSON decode failed (tag='P'): {exc!r}")
-                        prompt_frame_data = None
                 elif tag_byte in _DATA_TAGS:
                     # Data tags embed [varint MI token][JSON payload].
                     mi_token, json_start = _decode_varint(payload, 0)
@@ -286,13 +277,6 @@ class SocketDataMixin:
                     self.on_register_changed(regnum)
                 except Exception:
                     _log.debug("on_register_changed callback raised", exc_info=True)
-
-        if prompt_pending:
-            try:
-                self._handle_prompt_frame(prompt_frame_data)
-            except Exception:
-                _log.debug("_handle_prompt_frame raised", exc_info=True)
-
 
     def _dispatch_sock_data(self, tag_byte: int, data) -> None:
         """Route a decoded socket data frame to the appropriate handler."""
@@ -430,12 +414,12 @@ class SocketDataMixin:
     def _handle_sock_frame_info(self, data: dict) -> None:
         """Parse frame info from socket JSON and drive the frame-changed chain.
 
-        Called when the ``f`` data tag arrives in response to an explicit
-        ``request_current_location`` MI command.  Sets ``current_frame``,
-        fires ``on_frame_changed`` / ``on_source_file``, and kicks off
-        locals/stack/threads/registers collection.  Skips data collection
-        when the parsed frame is identical to the already-active
-        ``current_frame``.
+        Called when the ``f`` data tag arrives in response to an
+        ``request_current_location`` MI command (used only during
+        startup).  Sets ``current_frame``, fires ``on_frame_changed``
+        / ``on_source_file``, and kicks off locals/stack/threads/
+        registers collection.  Skips data collection when the parsed
+        frame is identical to the already-active ``current_frame``.
         """
         if self._inferior_running:
             return
@@ -495,58 +479,3 @@ class SocketDataMixin:
         _log.info(f"socket breaklist: {len(new_bps)} breakpoints")
         self.breakpoints = new_bps
         self.on_breakpoints(list(self.breakpoints))
-
-
-    def _handle_prompt_frame(self, data: dict | None) -> None:
-        """Handle a before-prompt event carrying an inline frame snapshot.
-
-        The ``P`` socket tag now carries a JSON frame dict collected by
-        ``_snapshot_frame`` in GDB's ``before_prompt`` handler.  This
-        eliminates the MI round trip that the old ``on_cli_prompt`` →
-        ``request_current_location`` path required.
-
-        If the frame is unchanged, this is a no-op.  If the frame
-        changed (``up``/``down``/``frame N`` typed at the GDB console),
-        update ``current_frame`` and fire source-pane / dependent-pane
-        callbacks.  Data collection (locals, stack, threads, registers)
-        is only requested when the function or call depth changed — a
-        same-function same-level line change (e.g. from ``list``) does
-        not need a full refresh.
-        """
-        if self._inferior_running:
-            return
-        if not isinstance(data, dict) or not data:
-            return
-
-        parsed = Frame(
-            level=self._safe_int(data.get("level", 0)),
-            file=data.get("file", ""),
-            fullname=data.get("fullname", ""),
-            line=self._safe_int(data.get("line", 0)),
-            func=data.get("func", ""),
-            addr=data.get("addr", ""),
-        )
-
-        prev = self.current_frame
-        if prev == parsed:
-            return
-
-        _log.debug(f"prompt frame: {parsed.func} {parsed.file}:{parsed.line}")
-        self.current_frame = parsed
-        path = parsed.fullname or parsed.file
-        self.on_frame_changed(parsed)
-        if path:
-            self.on_source_file(path, parsed.line)
-        else:
-            self.request_source_file(report_error=False)
-
-        func_or_depth_changed = (
-            prev is None
-            or prev.func != parsed.func
-            or prev.level != parsed.level
-        )
-        if func_or_depth_changed:
-            supervise(self.request_current_frame_locals(report_error=False), name="prompt-frame-locals")
-            supervise(self.request_current_stack_frames(report_error=False), name="prompt-frame-stack")
-            supervise(self.request_current_threads(report_error=False), name="prompt-frame-threads")
-            supervise(self.request_current_registers(report_error=False), name="prompt-frame-registers")
