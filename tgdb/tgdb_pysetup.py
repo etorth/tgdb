@@ -249,9 +249,6 @@ def register_socket_fd(fd, log_enabled=False):
         except (BlockingIOError, OSError):
             pass
 
-    def _on_before_prompt():
-        _send_sock_tag(b"P")
-
     def _on_register_changed(event):
         try:
             regnum = int(event.regnum)
@@ -277,7 +274,6 @@ def register_socket_fd(fd, log_enabled=False):
     def _on_gdb_exiting(_event):
         _emit(b"X")
 
-    gdb.events.before_prompt.connect(_on_before_prompt)
     _try_connect("register_changed", _on_register_changed)
     _try_connect("new_objfile", _on_new_objfile)
     _try_connect("free_objfile", _on_free_objfile)

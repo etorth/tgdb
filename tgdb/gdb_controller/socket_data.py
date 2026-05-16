@@ -2,8 +2,8 @@
 
 Provides ``SocketDataMixin``, which reads binary frames from the
 ``AF_UNIX`` socketpair shared between tgdb and GDB.  The socket
-carries both lightweight events (before-prompt, register-changed,
-objfile, inferior-call, gdb-exiting) and bulk data payloads (locals,
+carries both lightweight events (register-changed, objfile,
+inferior-call, gdb-exiting) and bulk data payloads (locals,
 stack, threads, registers, frame info, breakpoints) in one stream.
 The socket is bidirectional: GDB writes data/events to tgdb, and tgdb
 can write cancel tokens back to GDB.
@@ -16,7 +16,6 @@ No-payload tags (1 byte total):
   ``O`` — new_objfile
   ``F`` — free_objfile
   ``C`` — clear_objfiles
-  ``P`` — before_prompt
   ``X`` — gdb_exiting
 
 Fixed-payload tags (tag + fixed-size payload, no length field):
@@ -60,7 +59,7 @@ _log = logging.getLogger("tgdb.gdb_controller")
 _SOCK_BUF_MAX_BYTES = 16 * 1024 * 1024
 
 # Tags that carry no payload (1 byte total — tag only).
-_ZERO_PAYLOAD_TAGS = frozenset(b"OFCXP")
+_ZERO_PAYLOAD_TAGS = frozenset(b"OFCX")
 
 # Tags with fixed-size payloads (tag + payload, no length field).
 _FIXED_PAYLOAD = {
