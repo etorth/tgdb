@@ -41,8 +41,10 @@ import json
 import logging
 import os
 import zlib
+from collections.abc import Coroutine
 
 from ..async_util import supervise
+from .errors import GDBRequestCancelled, GDBRequestTimeout
 from .types import (
     Breakpoint,
     Frame,
@@ -52,6 +54,20 @@ from .types import (
 )
 
 _log = logging.getLogger("tgdb.gdb_controller")
+
+
+async def _guarded(coro: Coroutine) -> None:
+    """Await *coro*, silently absorbing ``GDBRequestCancelled`` and ``GDBRequestTimeout``.
+
+    Used around fire-and-forget ``supervise`` calls where cancellation
+    and timeout are expected (e.g. inferior resumed while startup data
+    collection was still in progress) and should not be logged as errors.
+    """
+    try:
+        await coro
+    except (GDBRequestCancelled, GDBRequestTimeout):
+        pass
+
 
 # Maximum buffer size for incoming socket data.  16 MB is generous;
 # individual frames should rarely exceed a few hundred KB even for
@@ -447,10 +463,10 @@ class SocketDataMixin:
         else:
             self.request_source_file(report_error=False)
 
-        supervise(self.request_current_frame_locals(report_error=False), name="sock-frame-locals")
-        supervise(self.request_current_stack_frames(report_error=False), name="sock-frame-stack")
-        supervise(self.request_current_threads(report_error=False), name="sock-frame-threads")
-        supervise(self.request_current_registers(report_error=False), name="sock-frame-registers")
+        supervise(_guarded(self.request_current_frame_locals(report_error=False)), name="sock-frame-locals")
+        supervise(_guarded(self.request_current_stack_frames(report_error=False)), name="sock-frame-stack")
+        supervise(_guarded(self.request_current_threads(report_error=False)), name="sock-frame-threads")
+        supervise(_guarded(self.request_current_registers(report_error=False)), name="sock-frame-registers")
 
 
     def _handle_sock_breakpoints(self, data: list) -> None:

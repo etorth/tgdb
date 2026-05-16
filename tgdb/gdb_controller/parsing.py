@@ -6,9 +6,9 @@ MI result parsing (frames, locals, threads, registers, breakpoints,
 source files), and the ``_safe_int`` utility. Mixed into ``GDBController``.
 """
 
-import asyncio
 import logging
 
+from .errors import GDBRequestCancelled, GDBRequestTimeout
 from .types import (
     Breakpoint,
     Frame,
@@ -47,11 +47,14 @@ class ParsingMixin:
             path = frame.file or frame.fullname
             _log.info(f"stopped reason={reason} frame={path}:{frame.line}")
             self.on_stopped(frame)
-            await self.request_current_frame_locals(report_error=False)
-            await self.request_current_stack_frames(report_error=False)
-            await self.request_current_threads(report_error=False)
-            await self.request_current_registers(report_error=False)
-            await self.request_breakpoints(report_error=False)
+            try:
+                await self.request_current_frame_locals(report_error=False)
+                await self.request_current_stack_frames(report_error=False)
+                await self.request_current_threads(report_error=False)
+                await self.request_current_registers(report_error=False)
+                await self.request_breakpoints(report_error=False)
+            except (GDBRequestCancelled, GDBRequestTimeout):
+                _log.debug("stopped data collection cancelled (inferior resumed)")
         elif cls == "running":
             self._inferior_running = True
             self._cancel_data_requests()
@@ -90,10 +93,13 @@ class ParsingMixin:
                         self.on_source_file(path, parsed.line)
                     else:
                         self.request_source_file(report_error=False)
-                    await self.request_current_frame_locals(report_error=False)
-                    await self.request_current_stack_frames(report_error=False)
-                    await self.request_current_threads(report_error=False)
-                    await self.request_current_registers(report_error=False)
+                    try:
+                        await self.request_current_frame_locals(report_error=False)
+                        await self.request_current_stack_frames(report_error=False)
+                        await self.request_current_threads(report_error=False)
+                        await self.request_current_registers(report_error=False)
+                    except (GDBRequestCancelled, GDBRequestTimeout):
+                        _log.debug("thread-selected data collection cancelled (inferior resumed)")
         elif cls == "memory-changed":
             _log.info(
                 f"memory-changed addr={results.get('addr', '?')} "

@@ -1,9 +1,9 @@
 """Result-handling helpers for ``GDBController``."""
 
-import asyncio
 import logging
 
 from ..async_util import supervise
+from .errors import GDBRequestCancelled, GDBRequestFailed
 
 _log = logging.getLogger("tgdb.gdb_controller")
 
@@ -34,13 +34,13 @@ class GDBResultMixin:
                         msg = "gdb failed"
                         if isinstance(results, dict) and results.get("msg"):
                             msg = str(results["msg"])
-                        entry.future.set_exception(RuntimeError(msg))
+                        entry.future.set_exception(GDBRequestFailed(msg))
                 elif status == "cancelled":
                     meta = self._request_meta.pop(token, {})
                     self._pending.pop(token, None)
                     if not entry.future.done():
                         entry.future.set_exception(
-                            asyncio.CancelledError("cancelled")
+                            GDBRequestCancelled("cancelled")
                         )
                 elif status == "done":
                     entry.mi_response = rec

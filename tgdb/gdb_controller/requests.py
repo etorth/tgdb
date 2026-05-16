@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from ..async_util import supervise
+from .errors import GDBRequestCancelled, GDBRequestFailed, GDBRequestTimeout
 from .types import PendingEntry, quote_mi_string
 
 _log = logging.getLogger("tgdb.gdb_controller")
@@ -114,13 +115,18 @@ class GDBRequestMixin:
         result and the socket data payload tagged with this token before
         resolving.  The MI value determines the outcome:
 
-        - ``"done"``   — wait for socket data, resolve with socket payload
-        - ``"failed"`` — ``RuntimeError("gdb failed")``
-        - ``"cancelled"`` — ``asyncio.CancelledError("cancelled")``
+        - ``"done"``      — wait for socket data, resolve with socket payload
+        - ``"failed"``    — ``GDBRequestFailed``
+        - ``"cancelled"`` — ``GDBRequestCancelled``
 
         On timeout, a cancel token is sent to GDB (for ``expect_socket``
-        commands) and the entry is removed from ``_pending`` so any
-        late-arriving MI/socket response is silently dropped.
+        commands) and ``GDBRequestTimeout`` is raised.
+
+        ``GDBRequestCancelled`` and ``GDBRequestTimeout`` always propagate
+        to the caller regardless of *raise_on_error*.  They are plain
+        ``Exception`` subclasses that do not interfere with asyncio's
+        ``CancelledError`` machinery, so ``task.cancel()`` during shutdown
+        still propagates normally.
         """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
@@ -140,16 +146,18 @@ class GDBRequestMixin:
                 result = await future
             else:
                 result = await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except asyncio.TimeoutError:
             if expect_socket:
                 self.send_cancel_token(token)
+            raise GDBRequestTimeout("MI command timed out — GDB may be busy")
+        except GDBRequestCancelled:
+            raise
+        except GDBRequestFailed:
             if raise_on_error:
-                raise RuntimeError("MI command timed out — GDB may be busy") from exc
+                raise
             return {}
-        except (RuntimeError, asyncio.CancelledError):
-            # Future rejected by _fail_pending_futures (GDB exit / PTY EOF),
-            # task cancelled during shutdown, or convenience function
-            # returned "failed" / "cancelled".
+        except RuntimeError:
+            # Future rejected by _fail_pending_futures (GDB exit / PTY EOF).
             if raise_on_error:
                 raise
             return {}
@@ -300,7 +308,10 @@ class GDBRequestMixin:
             await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             return
-        await self.request_breakpoints()
+        try:
+            await self.request_breakpoints()
+        except (GDBRequestCancelled, GDBRequestTimeout):
+            pass
 
 
     def delete_breakpoint(self, number: int) -> None:
