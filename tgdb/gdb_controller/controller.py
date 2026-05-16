@@ -126,8 +126,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._mi_master_fd: int = -1
         self._mi_slave_fd: int = -1  # kept open to prevent master EIO
         # AF_UNIX socketpair used by GDB-side Python (``tgdb_pysetup.py``)
-        # for all GDB↔tgdb communication: lightweight events (before-prompt,
-        # register-changed, objfile, inferior-call, gdb-exiting) and bulk
+        # for all GDB↔tgdb communication: lightweight events
+        # (register-changed, objfile, inferior-call, gdb-exiting) and bulk
         # data payloads (locals, stack, threads, registers).  Both share a
         # uniform binary frame format.  The GDB-side fd is inherited into
         # GDB; the tgdb-side fd is watched by tgdb's asyncio loop.
@@ -136,6 +136,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._sock_tgdb: int = -1
         self._sock_gdb: int = -1
         self._sock_buf: bytes = b""
+        self._sock_event = asyncio.Event()
+        self._sock_dispatch_task: asyncio.Task | None = None
         self._mi_buf: str = ""
         self._token: int = 1
         self._pending: dict[int, PendingEntry] = {}
@@ -387,6 +389,12 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self._break_list_task.cancel()
         self._break_list_task = None
 
+        # Cancel the socket dispatch loop so it does not try to process
+        # frames after the controller is torn down.
+        if self._sock_dispatch_task is not None and not self._sock_dispatch_task.done():
+            self._sock_dispatch_task.cancel()
+        self._sock_dispatch_task = None
+
         # Wake any caller blocked in ``mi_command_async`` so they don't hang
         # on futures that will never resolve.
         self._fail_pending_futures(RuntimeError("GDB controller terminated"))
@@ -454,6 +462,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # embedded Python.  Carries both lightweight events and bulk data.
         if self._sock_tgdb >= 0:
             loop.add_reader(self._sock_tgdb, self._on_sock_readable)
+            self._sock_dispatch_task = asyncio.create_task(
+                self._sock_dispatch_long_run_loop(),
+                name="sock-dispatch",
+            )
         _log.info("MI reader started")
 
         # Load tgdb's embedded GDB/Python helpers before stop handling needs
@@ -488,6 +500,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                     loop.remove_reader(self._sock_tgdb)
                 except Exception:
                     pass
+            if self._sock_dispatch_task is not None and not self._sock_dispatch_task.done():
+                self._sock_dispatch_task.cancel()
+                self._sock_dispatch_task = None
             _log.info("GDB exited")
             self.on_exit()
 
