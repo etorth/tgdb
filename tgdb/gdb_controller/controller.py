@@ -24,7 +24,6 @@ import ptyprocess
 
 from .requests import GDBRequestMixin
 from .results import GDBResultMixin
-from ..async_util import supervise
 from .types import (  # noqa: F401 — re-exported
     Breakpoint,
     Frame,
@@ -138,7 +137,12 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._sock_buf: bytes = b""
         self._sock_event = asyncio.Event()
         self._sock_dispatch_task: asyncio.Task | None = None
+        self._console_buf: bytes = b""
+        self._console_event = asyncio.Event()
+        self._console_dispatch_task: asyncio.Task | None = None
         self._mi_buf: str = ""
+        self._mi_event = asyncio.Event()
+        self._mi_dispatch_task: asyncio.Task | None = None
         self._token: int = 1
         self._pending: dict[int, PendingEntry] = {}
         self._request_meta: dict[int, dict[str, object]] = {}
@@ -391,9 +395,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
 
         # Cancel the socket dispatch loop so it does not try to process
         # frames after the controller is torn down.
-        if self._sock_dispatch_task is not None and not self._sock_dispatch_task.done():
-            self._sock_dispatch_task.cancel()
-        self._sock_dispatch_task = None
+        for task_attr in ("_sock_dispatch_task", "_console_dispatch_task", "_mi_dispatch_task"):
+            task = getattr(self, task_attr, None)
+            if task is not None and not task.done():
+                task.cancel()
+            setattr(self, task_attr, None)
 
         # Wake any caller blocked in ``mi_command_async`` so they don't hang
         # on futures that will never resolve.
@@ -451,13 +457,21 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # add_reader on the console fd wakes instantly when data is available,
         # matching cgdb's select()-based approach with no timeout.
         self._console_done: asyncio.Future = loop.create_future()
-        # _mi_done intentionally omitted — MI fd close is not monitored separately;
-        # the MI reader is removed in the finally block when console closes.
 
         # Register readable callbacks — fires as soon as the fd has data,
         # with zero polling delay (unlike asyncio.sleep(0.02)).
-        loop.add_reader(self._proc.fd, self._on_console_readable, loop)
+        # Each callback reads raw bytes into a buffer and sets an Event;
+        # the corresponding async dispatch task processes complete frames.
+        loop.add_reader(self._proc.fd, self._on_console_readable)
+        self._console_dispatch_task = asyncio.create_task(
+            self._console_dispatch_long_run_loop(),
+            name="console-dispatch",
+        )
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
+        self._mi_dispatch_task = asyncio.create_task(
+            self._mi_dispatch_long_run_loop(),
+            name="mi-dispatch",
+        )
         # Watch the AF_UNIX socket written by ``register_socket_fd`` inside GDB's
         # embedded Python.  Carries both lightweight events and bulk data.
         if self._sock_tgdb >= 0:
@@ -486,7 +500,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         try:
             await self._console_done
         finally:
-            # Clean up readers
+            # Clean up fd readers.
             try:
                 loop.remove_reader(self._proc.fd)
             except Exception:
@@ -500,33 +514,65 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                     loop.remove_reader(self._sock_tgdb)
                 except Exception:
                     pass
-            if self._sock_dispatch_task is not None and not self._sock_dispatch_task.done():
-                self._sock_dispatch_task.cancel()
-                self._sock_dispatch_task = None
+            # Cancel all dispatch loops.
+            for task_attr in ("_console_dispatch_task", "_mi_dispatch_task", "_sock_dispatch_task"):
+                task = getattr(self, task_attr, None)
+                if task is not None and not task.done():
+                    task.cancel()
+                setattr(self, task_attr, None)
             _log.info("GDB exited")
             self.on_exit()
 
 
 
 
-    def _on_console_readable(self, loop: asyncio.AbstractEventLoop) -> None:
+    def _on_console_readable(self) -> None:
         """Called by event loop the instant the primary PTY fd is readable."""
         try:
             data = self._proc.read(4096)
             if data:
-                self.on_console(data)
+                self._console_buf += data
+                self._console_event.set()
         except EOFError:
-            # GDB process closed — signal run_async to finish and reject
-            # any in-flight MI requests so awaiters do not hang.
-            loop.remove_reader(self._proc.fd)
+            # GDB process closed — unregister, reject pending futures,
+            # wake dispatch loop, and signal run_async to finish.
+            try:
+                asyncio.get_running_loop().remove_reader(self._proc.fd)
+            except Exception:
+                pass
             self._fail_pending_futures(RuntimeError("GDB process exited"))
+            self._console_event.set()
             if not self._console_done.done():
                 self._console_done.set_result(None)
         except Exception:
-            loop.remove_reader(self._proc.fd)
+            try:
+                asyncio.get_running_loop().remove_reader(self._proc.fd)
+            except Exception:
+                pass
             self._fail_pending_futures(RuntimeError("console read failed"))
+            self._console_event.set()
             if not self._console_done.done():
                 self._console_done.set_result(None)
+
+
+    async def _console_dispatch_long_run_loop(self) -> None:
+        """Async dispatch loop for console PTY data.
+
+        Waits for ``_console_event`` (set by ``_on_console_readable``),
+        then forwards buffered bytes via ``on_console``.  Currently all
+        sync, but structured as an async loop so future console
+        processing can ``await`` if needed.
+        """
+        try:
+            while True:
+                await self._console_event.wait()
+                self._console_event.clear()
+                if self._console_buf:
+                    data = self._console_buf
+                    self._console_buf = b""
+                    self.on_console(data)
+        except asyncio.CancelledError:
+            return
 
 
     def _on_mi_readable(self) -> None:
@@ -534,22 +580,16 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         try:
             data = os.read(self._mi_master_fd, 4096)
             if not data:
-                # MI side closed (GDB tore down the new-ui channel).  Without
-                # unregistering, asyncio's level-triggered reader keeps firing
-                # zero-byte callbacks on the dead fd and pins a CPU.  Reject
-                # any in-flight MI futures while we're at it — no responses
-                # will ever come back through this fd.
+                # MI side closed (GDB tore down the new-ui channel).
                 try:
                     asyncio.get_running_loop().remove_reader(self._mi_master_fd)
                 except Exception:
                     pass
                 self._fail_pending_futures(RuntimeError("MI channel closed"))
+                self._mi_event.set()
                 return
             self._mi_buf += data.decode("utf-8", errors="replace")
             if len(self._mi_buf) > _MI_BUF_MAX_BYTES:
-                # Drop everything before the last newline so we resync on the
-                # next complete record.  If there's no newline at all, drop
-                # the whole buffer — the offending record cannot be parsed.
                 last_nl = self._mi_buf.rfind("\n")
                 dropped = (
                     len(self._mi_buf) if last_nl < 0 else last_nl
@@ -559,21 +599,39 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                     f"MI buffer exceeded {_MI_BUF_MAX_BYTES} bytes; "
                     f"discarded {dropped} bytes to resync"
                 )
-            self._process_mi_buffer()
+            self._mi_event.set()
         except (BlockingIOError, OSError):
             pass
 
 
-    def _process_mi_buffer(self) -> None:
+    async def _mi_dispatch_long_run_loop(self) -> None:
+        """Async dispatch loop for MI channel data.
+
+        Waits for ``_mi_event`` (set by ``_on_mi_readable``), then
+        processes complete newline-delimited MI records from
+        ``_mi_buf``.  Because this is async, ``_handle_async`` (for
+        ``*stopped``, ``=thread-selected``, etc.) can be awaited
+        directly instead of being launched via ``supervise``.
+        """
+        try:
+            while True:
+                await self._mi_event.wait()
+                self._mi_event.clear()
+                await self._process_mi_buffer()
+        except asyncio.CancelledError:
+            return
+
+
+    async def _process_mi_buffer(self) -> None:
         while "\n" in self._mi_buf:
             line, self._mi_buf = self._mi_buf.split("\n", 1)
             line = line.rstrip("\r")
             if line:
                 _log.debug(f"MI<-: {line}")
-            self._dispatch(line)
+            await self._dispatch(line)
 
 
-    def _dispatch(self, line: str) -> None:
+    async def _dispatch(self, line: str) -> None:
         if not line:
             return
         # ``parse_response`` is a direct copy of pygdbmi and has a few
@@ -595,5 +653,5 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         if t == "result":
             self._handle_result(rec)
         elif t == "notify":
-            supervise(self._handle_async(rec), name="mi-handle-async")
+            await self._handle_async(rec)
         # console/target/log/done/output on MI channel are noise — ignore
