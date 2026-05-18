@@ -236,16 +236,30 @@ class KeyRoutingMixin:
                     char = "\x08"
                 elif token == "escape":
                     char = "\x1b"
+                elif token == "ctrl+space":
+                    char = "\x00"
+                elif token == "ctrl+enter":
+                    # Most terminals send LF for Ctrl-Enter; matches the
+                    # GDB-side handling of a bare ``enter`` token too.
+                    char = "\n"
+                elif token == "shift+tab":
+                    # CSI Z — the standard "back-tab" sequence.
+                    char = "\x1b[Z"
                 elif token.startswith("ctrl+") and len(token) == 6:
-                    # Clamp to the C0 range — ``ctrl+5`` etc. would otherwise
-                    # compute ``chr(-11)`` and ValueError out of the replay
-                    # loop, leaking a partial map expansion to the GDB PTY.
+                    # Single-char ctrl chord (``ctrl+a`` etc.).  Clamp to
+                    # the C0 range — ``ctrl+5`` etc. would otherwise
+                    # compute ``chr(-11)`` and ValueError out of the
+                    # replay loop, leaking a partial map expansion to
+                    # the GDB PTY.
                     code = ord(token[5].upper()) - 64
                     if 0 <= code <= 31:
                         char = chr(code)
                     else:
                         char = ""
                 else:
+                    # Named-key chords without a portable PTY byte
+                    # (``ctrl+tab``, ``ctrl+f1``, ...) drop silently;
+                    # terminal handling is too inconsistent to forward.
                     char = ""
                 if char:
                     self.gdb.send_input(char.encode())

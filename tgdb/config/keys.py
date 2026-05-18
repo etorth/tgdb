@@ -82,13 +82,31 @@ class ConfigKeyMixin:
     def _key_token(self, name: str) -> str:
         if name in self._KEY_TOKENS:
             return self._KEY_TOKENS[name]
-        if name.startswith("c-") and len(name) == 3:
-            return f"ctrl+{name[2].lower()}"
-        if name.startswith("s-") and len(name) == 3:
-            base = name[2]
-            if base in self._SHIFTED_CHARS:
-                return self._SHIFTED_CHARS[base]
-            return base.upper()
-        if (name.startswith("m-") or name.startswith("a-")) and len(name) == 3:
-            return f"escape+{name[2]}"
+        # Modifier chord: <C-x>, <C-Tab>, <C-Enter>, <S-Tab>, <M-Tab>, ...
+        # The tail may be a single character (chord with a literal key)
+        # or a named token like ``tab``/``enter``/``space``/``f1``.
+        if len(name) >= 3 and name[1] == "-":
+            prefix = name[0]
+            tail = name[2:]
+            if len(tail) > 1:
+                # Named-key tail — resolve through _KEY_TOKENS so we emit
+                # Textual's form (e.g. ``ctrl+tab``, ``shift+tab``)
+                # instead of the literal ``<c-tab>`` string.
+                base = self._KEY_TOKENS.get(tail, tail)
+                if prefix == "c":
+                    return f"ctrl+{base}"
+                if prefix == "s":
+                    return f"shift+{base}"
+                if prefix in ("m", "a"):
+                    return f"escape+{base}"
+            else:
+                # Single-character tail — preserve the existing behaviour.
+                if prefix == "c":
+                    return f"ctrl+{tail.lower()}"
+                if prefix == "s":
+                    if tail in self._SHIFTED_CHARS:
+                        return self._SHIFTED_CHARS[tail]
+                    return tail.upper()
+                if prefix in ("m", "a"):
+                    return f"escape+{tail}"
         return f"<{name}>"
