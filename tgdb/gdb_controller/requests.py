@@ -304,7 +304,13 @@ class GDBRequestMixin:
         self.mi_command(f"-break-insert {flag}{location}")
 
 
-    def delete_breakpoint(self, number: int) -> None:
+    def delete_breakpoint(self, number: str | int) -> None:
+        # GDB does not support deleting an individual child location of
+        # a multi-location breakpoint (``-break-delete 3.1`` errors), so
+        # always pass the parent id.  Callers holding a flattened
+        # child entry like ``"3.1"`` must extract the parent themselves
+        # (e.g. ``existing.number.partition('.')[0]``); accepting either
+        # str or int here is just to keep callers ergonomic.
         self.mi_command(f"-break-delete {number}")
 
 

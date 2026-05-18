@@ -121,18 +121,17 @@ class ParsingMixin:
             if bkpt:
                 self._update_breakpoint_from_mi(bkpt)
         elif cls == "breakpoint-deleted":
-            # Narrow the except scope to the int() conversion only — the
-            # original ``try`` block wrapped the entire branch including
-            # ``on_breakpoints``, so a bug in the callback (which can
-            # surface ``ValueError`` / ``TypeError`` for many unrelated
-            # reasons) would be silently swallowed instead of propagating
-            # to the supervisor's done-callback for visible logging.
-            try:
-                num = int(results.get("id", ""))
-            except (ValueError, TypeError):
+            parent = str(results.get("id", ""))
+            if not parent:
                 return
-            _log.info(f"breakpoint-deleted id={results.get('id', '')}")
-            self.breakpoints = [b for b in self.breakpoints if b.number != num]
+            _log.info(f"breakpoint-deleted id={parent}")
+            # Remove the parent itself plus every flattened child
+            # location ("N.M") that belongs to it.
+            prefix = f"{parent}."
+            self.breakpoints = [
+                b for b in self.breakpoints
+                if b.number != parent and not b.number.startswith(prefix)
+            ]
             self.on_breakpoints(list(self.breakpoints))
 
 
@@ -296,29 +295,83 @@ class ParsingMixin:
         self.on_registers(list(self.registers))
 
 
-    def _update_breakpoint_from_mi(self, data: dict) -> None:
+    def _bkpt_to_entries(self, data: dict) -> list[Breakpoint]:
+        """Flatten a GDB ``bkpt`` tuple into one entry per location.
+
+        For a single-location breakpoint, returns a one-element list
+        with the parent's own ``(file, line)``.  For a multi-location
+        breakpoint (``addr="<MULTIPLE>"`` + ``locations=[...]``),
+        returns one entry per child, each carrying the child's id
+        (``"3.1"``), address, file, line, and enabled state.  The
+        parent itself is omitted in the multi-loc case — it has no
+        addressable ``(file, line)`` of its own, so it would produce
+        a phantom marker.
+        """
         if not isinstance(data, dict):
+            return []
+        parent_number = str(data.get("number", "")).strip()
+        if not parent_number:
+            return []
+        temporary = data.get("disp", "") == "del"
+
+        locations = data.get("locations")
+        if isinstance(locations, list) and locations:
+            entries: list[Breakpoint] = []
+            for loc in locations:
+                if not isinstance(loc, dict):
+                    continue
+                child_number = str(loc.get("number", "")).strip()
+                if not child_number:
+                    continue
+                entries.append(
+                    Breakpoint(
+                        number=child_number,
+                        file=loc.get("file", ""),
+                        fullname=loc.get("fullname", ""),
+                        line=self._safe_int(loc.get("line", 0)),
+                        addr=loc.get("addr", ""),
+                        # GDB distinguishes "n" (user-disabled) from
+                        # "N" (auto-disabled because condition is
+                        # invalid at this location).  Only "y" counts
+                        # as live.
+                        enabled=loc.get("enabled", "y") == "y",
+                        temporary=temporary,
+                    )
+                )
+            return entries
+
+        # No multi-location wrapper — record the parent as the sole entry.
+        return [
+            Breakpoint(
+                number=parent_number,
+                file=data.get("file", ""),
+                fullname=data.get("fullname", ""),
+                line=self._safe_int(data.get("line", 0)),
+                addr=data.get("addr", ""),
+                enabled=data.get("enabled", "y") == "y",
+                temporary=temporary,
+            )
+        ]
+
+
+    def _update_breakpoint_from_mi(self, data: dict) -> None:
+        entries = self._bkpt_to_entries(data)
+        if not entries:
             return
-        num = self._safe_int(data.get("number", 0))
-        if num == 0:
-            return
-        existing = None
-        for b in self.breakpoints:
-            if b.number == num:
-                existing = b
-                break
-        if existing is None:
-            existing = Breakpoint(number=num)
-            self.breakpoints.append(existing)
-        existing.file = data.get("file", existing.file)
-        existing.fullname = data.get("fullname", existing.fullname)
-        existing.line = self._safe_int(data.get("line", existing.line))
-        existing.addr = data.get("addr", existing.addr)
-        if "enabled" in data:
-            existing.enabled = data["enabled"] == "y"
-        existing.temporary = data.get("disp", "") == "del"
-        path = existing.file or existing.fullname
-        _log.info(f"breakpoint updated: #{existing.number} {path}:{existing.line}")
+        parent = str(data.get("number", "")).strip()
+        # Drop any prior entries that belong to this parent, then
+        # reinsert the freshly-flattened set.  Re-flattening on every
+        # event keeps the model coherent through location adds/removes
+        # caused by shared-library loads, condition rebinds, etc.
+        prefix = f"{parent}."
+        self.breakpoints = [
+            b for b in self.breakpoints
+            if b.number != parent and not b.number.startswith(prefix)
+        ]
+        self.breakpoints.extend(entries)
+        for e in entries:
+            path = e.file or e.fullname
+            _log.info(f"breakpoint updated: #{e.number} {path}:{e.line}")
         self.on_breakpoints(list(self.breakpoints))
 
 
@@ -334,21 +387,9 @@ class ParsingMixin:
             if not isinstance(raw, dict):
                 continue
             bkpt_data = raw.get("bkpt", raw)
-            num = self._safe_int(bkpt_data.get("number", 0))
-            if num:
-                new_bps.append(
-                    Breakpoint(
-                        number=num,
-                        file=bkpt_data.get("file", ""),
-                        fullname=bkpt_data.get("fullname", ""),
-                        line=self._safe_int(bkpt_data.get("line", 0)),
-                        addr=bkpt_data.get("addr", ""),
-                        enabled=bkpt_data.get("enabled", "y") == "y",
-                        temporary=bkpt_data.get("disp", "") == "del",
-                    )
-                )
+            new_bps.extend(self._bkpt_to_entries(bkpt_data))
         self.breakpoints = new_bps
-        _log.info(f"breaklist: {len(new_bps)} breakpoints")
+        _log.info(f"breaklist: {len(new_bps)} breakpoint locations")
         self.on_breakpoints(list(self.breakpoints))
 
 

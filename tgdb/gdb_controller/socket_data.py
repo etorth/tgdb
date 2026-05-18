@@ -489,7 +489,14 @@ class SocketDataMixin:
 
 
     def _handle_sock_breakpoints(self, data: list) -> None:
-        """Parse breakpoint list from socket JSON and fire ``on_breakpoints``."""
+        """Parse breakpoint list from socket JSON and fire ``on_breakpoints``.
+
+        Numbers come in as ints from tgdb_pysetup's ``_collect_breakpoints``
+        for now (parent-only enumeration); ``str(num)`` normalises them
+        into the dotted-string form used by the flatten model.  When the
+        GDB-side helper is later extended to emit ``bp.locations``,
+        dotted ids like ``"3.1"`` will flow through unchanged.
+        """
         if not isinstance(data, list):
             return
 
@@ -497,19 +504,20 @@ class SocketDataMixin:
         for raw in data:
             if not isinstance(raw, dict):
                 continue
-            num = int(raw.get("number", 0))
-            if num:
-                new_bps.append(
-                    Breakpoint(
-                        number=num,
-                        file=raw.get("file", ""),
-                        fullname=raw.get("fullname", ""),
-                        line=int(raw.get("line", 0)),
-                        addr=raw.get("addr", ""),
-                        enabled=bool(raw.get("enabled", True)),
-                        temporary=bool(raw.get("temporary", False)),
-                    )
+            num = str(raw.get("number", "")).strip()
+            if not num or num == "0":
+                continue
+            new_bps.append(
+                Breakpoint(
+                    number=num,
+                    file=raw.get("file", ""),
+                    fullname=raw.get("fullname", ""),
+                    line=int(raw.get("line", 0) or 0),
+                    addr=raw.get("addr", ""),
+                    enabled=bool(raw.get("enabled", True)),
+                    temporary=bool(raw.get("temporary", False)),
                 )
-        _log.info(f"socket breaklist: {len(new_bps)} breakpoints")
+            )
+        _log.info(f"socket breaklist: {len(new_bps)} breakpoint locations")
         self.breakpoints = new_bps
         self.on_breakpoints(list(self.breakpoints))

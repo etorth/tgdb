@@ -66,7 +66,12 @@ class CallbacksMixin:
                 break
         _log.info(f"toggle breakpoint line={msg.line} file={sf.path}")
         if existing:
-            self.gdb.delete_breakpoint(existing.number)
+            # ``existing.number`` may be a child id like ``"3.1"`` (one
+            # location of a multi-location breakpoint).  GDB only deletes
+            # by parent number, and deleting the parent removes every
+            # location, which is the user-visible expectation here.
+            parent_number = existing.number.partition(".")[0]
+            self.gdb.delete_breakpoint(parent_number)
         else:
             self.gdb.set_breakpoint(f"{sf.path}:{msg.line}", temporary=msg.temporary)
 
@@ -413,7 +418,7 @@ class CallbacksMixin:
         if self._file_dialog_pending:
             self.gdb.request_source_files()
 
-        coros: list = [self._refresh_breakpoints_async()]
+        coros: list = []
         if self._evaluate_pane is not None:
             coros.append(self._evaluate_pane.refresh_all())
         if self._disasm_pane is not None:
@@ -634,11 +639,6 @@ class CallbacksMixin:
         for r in results:
             if isinstance(r, Exception):
                 _log.error(f"pane refresh error: {r!r}", exc_info=r)
-
-
-    async def _refresh_breakpoints_async(self) -> None:
-        await asyncio.sleep(0.15)
-        await self.gdb.request_breakpoints()
 
 
     def _ui_on_running(self) -> None:

@@ -59,7 +59,16 @@ def normalize_addr(addr: str) -> str:
 
 @dataclass
 class Breakpoint:
-    number: int
+    # ``number`` is the GDB breakpoint id as a string so it can hold
+    # both parent ids ("3") and child-location ids ("3.1", "3.2") for
+    # multi-location breakpoints (e.g. ``b template_fn`` matching N
+    # instantiations).  The flatten model keeps one Breakpoint entry
+    # per addressable location so the source pane can mark every
+    # location's ``(file, line)`` without a separate parent/child
+    # tree.  Operations like delete must use the parent id —
+    # ``number.partition('.')[0]`` — since GDB cannot delete a single
+    # child location.
+    number: str
     file: str = ""
     fullname: str = ""
     line: int = 0
