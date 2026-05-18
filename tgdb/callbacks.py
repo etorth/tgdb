@@ -499,7 +499,7 @@ class CallbacksMixin:
         """Inferior call finished — its side effects are now visible.
 
         ``print foo()`` can change locals, registers, and arbitrary memory.
-        Tge inferior actually executed code, so refresh the same set of
+        The inferior actually executed code, so refresh the same set of
         panes we'd refresh on ``*stopped``.  ``=memory-changed`` does fire
         for memory writes inside the call, so memory panes are already
         covered by ``on_memory_changed``; we still touch them defensively
