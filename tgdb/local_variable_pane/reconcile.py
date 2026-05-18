@@ -95,8 +95,8 @@ class LocalVariablePaneReconcileMixin:
         stack_value = variable.value or ""
 
         if "<error reading variable:" in stack_value:
-            label = self._build_value_label(variable.name, "<initializing>", False, marker_active=marker_active)
-            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+            label = self._build_value_label(variable.name, "<initializing>", False)
+            self._add_placeholder_node(tree, key, variable.name, label)
             _log.debug(f"Skipping var_create for {variable.name}: uninitialized memory in bvar.value ({stack_value[:80]!r})")
             return True
 
@@ -137,8 +137,8 @@ class LocalVariablePaneReconcileMixin:
             if not value:
                 value = "<complex>"
 
-            label = self._build_value_label(variable.name, value, False, marker_active=marker_active)
-            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+            label = self._build_value_label(variable.name, value, False)
+            self._add_placeholder_node(tree, key, variable.name, label)
             return True
 
         if self._rebuild_gen != gen:
@@ -156,8 +156,8 @@ class LocalVariablePaneReconcileMixin:
                         f"-var-delete {varobj_name} failed", exc_info=True,
                     )
 
-            label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
-            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+            label = self._build_value_label(variable.name, "<not yet initialized>", False)
+            self._add_placeholder_node(tree, key, variable.name, label)
             _log.debug(f"var_create {variable.name}: uninitialized memory in response ({value[:80]!r}), placeholder added")
             return True
 
@@ -173,7 +173,6 @@ class LocalVariablePaneReconcileMixin:
             has_children,
             varobj_name=varobj_name,
             displayhint=displayhint,
-            marker_active=marker_active,
         )
         if varobj_name:
             self._varobj_to_node[varobj_name] = node
@@ -215,8 +214,8 @@ class LocalVariablePaneReconcileMixin:
         if not is_smallest_depth:
             # Not the innermost — must be a placeholder.
             value_display = variable.value or variable.addr or "?"
-            label = self._build_value_label(variable.name, value_display, False, marker_active=marker_active)
-            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+            label = self._build_value_label(variable.name, value_display, False)
+            self._add_placeholder_node(tree, key, variable.name, label)
             _log.debug(
                 f"Placeholder for shadowed {variable.name} at {binding_addr}: "
                 f"depth {variable.depth} > min {min_depth_by_name.get(binding_name)}"
@@ -233,8 +232,8 @@ class LocalVariablePaneReconcileMixin:
             value = variable.value.replace("\n", " ")
             if not value:
                 value = "<complex>"
-            label = self._build_value_label(variable.name, value, False, marker_active=marker_active)
-            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+            label = self._build_value_label(variable.name, value, False)
+            self._add_placeholder_node(tree, key, variable.name, label)
             _log.debug(f"var_create by name failed for {variable.name}: fallback to placeholder")
             return True
 
@@ -251,8 +250,8 @@ class LocalVariablePaneReconcileMixin:
                 except Exception:
                     _log.debug(f"-var-delete {varobj_name} failed", exc_info=True)
 
-            label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
-            self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+            label = self._build_value_label(variable.name, "<not yet initialized>", False)
+            self._add_placeholder_node(tree, key, variable.name, label)
             return True
 
         # Name-based varobjs are NOT pinned (is_pinned=False) — they were
@@ -270,7 +269,6 @@ class LocalVariablePaneReconcileMixin:
             has_children,
             varobj_name=varobj_name,
             displayhint=displayhint,
-            marker_active=marker_active,
         )
         if varobj_name:
             self._varobj_to_node[varobj_name] = node
@@ -376,8 +374,8 @@ class LocalVariablePaneReconcileMixin:
                 info = await self._var_create(variable.name)
             except Exception:
                 value = variable.value.replace("\n", " ") or "<complex>"
-                label = self._build_value_label(variable.name, value, False, marker_active=marker_active)
-                self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+                label = self._build_value_label(variable.name, value, False)
+                self._add_placeholder_node(tree, key, variable.name, label)
                 _log.debug(f"Placeholder promotion failed for {variable.name}: var_create by name failed")
                 continue
 
@@ -400,8 +398,8 @@ class LocalVariablePaneReconcileMixin:
                         await self._var_delete(new_varobj_name)
                     except Exception:
                         _log.debug(f"-var-delete {new_varobj_name} failed", exc_info=True)
-                label = self._build_value_label(variable.name, "<not yet initialized>", False, marker_active=marker_active)
-                self._add_placeholder_node(tree, key, variable.name, label, marker_active=marker_active)
+                label = self._build_value_label(variable.name, "<not yet initialized>", False)
+                self._add_placeholder_node(tree, key, variable.name, label)
                 _log.debug(
                     f"Promotion of {variable.name} hit uninitialized memory "
                     f"({value[:80]!r}); kept as placeholder"
@@ -420,7 +418,6 @@ class LocalVariablePaneReconcileMixin:
                 has_children,
                 varobj_name=varobj_name,
                 displayhint=displayhint,
-                marker_active=marker_active,
             )
             if varobj_name:
                 self._varobj_to_node[varobj_name] = node
@@ -651,7 +648,7 @@ class LocalVariablePaneReconcileMixin:
         fallback_value = outer_var.value or "?"
         if not type_str:
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True, marker_active=False)
+                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
             return
 
         # Unparseable types (e.g. anonymous namespace) cannot be reanchored
@@ -659,15 +656,15 @@ class LocalVariablePaneReconcileMixin:
         if _type_needs_name_fallback(type_str):
             if node is not None:
                 node.remove()
-            label = self._build_value_label(name, fallback_value, False, marker_active=False)
-            self._add_placeholder_node(tree, key, name, label, marker_active=False)
+            label = self._build_value_label(name, fallback_value, False)
+            self._add_placeholder_node(tree, key, name, label)
             _log.debug(f"Reanchor {name} at {addr}: type {type_str!r} unparseable, demoted to placeholder")
             return
 
         # Synthetic addr markers (e.g. "register@0") are not dereferenceable.
         if addr.startswith("register@") or addr in ("register", "unknown", ""):
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True, marker_active=False)
+                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
             return
 
         addr_expr = f"*({type_str}*){addr}"
@@ -675,7 +672,7 @@ class LocalVariablePaneReconcileMixin:
             info = await self._var_create(addr_expr)
         except Exception:
             if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True, marker_active=False)
+                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
             return
 
         if self._rebuild_gen != gen:
@@ -708,7 +705,7 @@ class LocalVariablePaneReconcileMixin:
             if isinstance(node_data, dict):
                 exp = node_data.get("exp", name)
 
-            label = self._build_value_label(exp, value, has_children, collapse_compound=True, marker_active=False)
+            label = self._build_value_label(exp, value, has_children, collapse_compound=True)
             node.set_label(label)
 
             if (
@@ -722,7 +719,7 @@ class LocalVariablePaneReconcileMixin:
                 node.add_leaf("⏳ loading...")
                 await self._load_children(node, new_varobj)
             elif not has_children:
-                self._collapse_to_leaf_node(node, exp, value, marker_active=False)
+                self._collapse_to_leaf_node(node, exp, value)
 
             return
 
@@ -734,7 +731,6 @@ class LocalVariablePaneReconcileMixin:
             varobj_name=new_varobj,
             displayhint=displayhint,
             collapse_compound=True,
-            marker_active=False,
         )
         if new_varobj:
             self._varobj_to_node[new_varobj] = node
@@ -958,14 +954,12 @@ class LocalVariablePaneReconcileMixin:
             has_children = data.get("has_children", False)
             new_value = change.get("value", "")
             is_pinned = varobj_name in self._pinned_varobjs
-            marker_active = data.get("marker_active", True)
 
             label = self._build_value_label(
                 exp,
                 new_value,
                 has_children,
                 collapse_compound=is_pinned,
-                marker_active=marker_active,
             )
 
             node.set_label(label)

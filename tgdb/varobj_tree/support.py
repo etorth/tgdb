@@ -40,11 +40,7 @@ class VarobjTreeSupportMixin:
         value: str,
         has_children: bool,
         collapse_compound: bool = False,
-        *,
-        marker_active: bool = True,
     ) -> Text:
-        del marker_active
-
         if not value:
             body = exp
         else:
@@ -80,7 +76,6 @@ class VarobjTreeSupportMixin:
             value,
             has_children,
             collapse_compound,
-            marker_active=marker_active,
         )
 
         data = {
@@ -112,7 +107,7 @@ class VarobjTreeSupportMixin:
         if compact_value:
             value = self._compact_value(value)
 
-        label = self._build_value_label(exp, value, False, marker_active=marker_active)
+        label = self._build_value_label(exp, value, False)
 
         node.collapse()
         node.remove_children()
