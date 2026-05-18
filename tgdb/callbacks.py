@@ -138,35 +138,40 @@ class CallbacksMixin:
             pass
 
 
-    def on_search_commit(self, msg: SearchCommit) -> None:
+    def _close_shared_search(self, *, set_mode: str, clear_other: str) -> None:
+        """Finalise the shared cmdline-bar search and switch mode.
+
+        The cmdline bar is shared between source-pane search (``/``)
+        and gdb-scroll search; both widgets track their own
+        ``_search_active`` flag.  A sequence like "press ``/`` in
+        source, focus jumps to GDB, press ``/`` in GDB" leaves both
+        widgets thinking they own the bar.  When one finishes, the
+        other's flag must be cleared too — otherwise keys keep
+        routing to its dead search-input handler.
+
+        *clear_other* is ``"gdb"`` to clear the gdb-scroll widget's
+        flag (source-side commit/cancel) or ``"src"`` to clear the
+        source widget's flag (gdb-side commit/cancel).
+        """
         try:
             self.query_one("#cmdline", CommandLineBar).cancel_input()
         except NoMatches:
             pass
-        # Defensively clear the GDB-scroll widget's ``_search_active``
-        # flag too: the cmdline bar is shared between source and
-        # gdb-scroll search, so a sequence like "press / in source,
-        # focus jumps to GDB, press / in GDB" leaves both widgets
-        # thinking they own the bar.  When one search commits/cancels
-        # the bar's input is cleared but the OTHER widget's
-        # ``_search_active`` stays True, routing subsequent keystrokes
-        # to its ``_handle_search_input`` until something else clears
-        # it.  Symmetrical reset in ``on_scroll_search_*`` below.
-        gdb_w = self._get_gdb_widget(mounted_only=True)
-        if gdb_w is not None and getattr(gdb_w, "_search_active", False):
-            gdb_w._search_active = False
-        self._set_mode("TGDB")
+        if clear_other == "gdb":
+            other = self._get_gdb_widget(mounted_only=True)
+        else:
+            other = self._get_source_view(mounted_only=True)
+        if other is not None and getattr(other, "_search_active", False):
+            other._search_active = False
+        self._set_mode(set_mode)
+
+
+    def on_search_commit(self, msg: SearchCommit) -> None:
+        self._close_shared_search(set_mode="TGDB", clear_other="gdb")
 
 
     def on_search_cancel(self, msg: SearchCancel) -> None:
-        try:
-            self.query_one("#cmdline", CommandLineBar).cancel_input()
-        except NoMatches:
-            pass
-        gdb_w = self._get_gdb_widget(mounted_only=True)
-        if gdb_w is not None and getattr(gdb_w, "_search_active", False):
-            gdb_w._search_active = False
-        self._set_mode("TGDB")
+        self._close_shared_search(set_mode="TGDB", clear_other="gdb")
 
 
     def on_status_message(self, msg: StatusMessage) -> None:
@@ -204,30 +209,11 @@ class CallbacksMixin:
 
 
     def on_scroll_search_commit(self, msg: ScrollSearchCommit) -> None:
-        try:
-            self.query_one("#cmdline", CommandLineBar).cancel_input()
-        except NoMatches:
-            pass
-        # Symmetrical to ``on_search_commit`` — clear the source
-        # widget's ``_search_active`` so a focus-switch race doesn't
-        # leave it routing keys to its own search-input handler after
-        # the gdb-scroll search has already committed/cancelled the
-        # shared cmdline bar.
-        src = self._get_source_view(mounted_only=True)
-        if src is not None and getattr(src, "_search_active", False):
-            src._search_active = False
-        self._set_mode("GDB_SCROLL")
+        self._close_shared_search(set_mode="GDB_SCROLL", clear_other="src")
 
 
     def on_scroll_search_cancel(self, msg: ScrollSearchCancel) -> None:
-        try:
-            self.query_one("#cmdline", CommandLineBar).cancel_input()
-        except NoMatches:
-            pass
-        src = self._get_source_view(mounted_only=True)
-        if src is not None and getattr(src, "_search_active", False):
-            src._search_active = False
-        self._set_mode("GDB_SCROLL")
+        self._close_shared_search(set_mode="GDB_SCROLL", clear_other="src")
 
 
     async def on_command_submit(self, msg: CommandSubmit) -> None:
