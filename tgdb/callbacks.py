@@ -225,7 +225,7 @@ class CallbacksMixin:
         self._set_mode("GDB_SCROLL")
 
 
-    def on_command_submit(self, msg: CommandSubmit) -> None:
+    async def on_command_submit(self, msg: CommandSubmit) -> None:
         _log.info(f"command: {msg.command!r}")
         # Close any lingering completion popup.
         self._close_completion_popup()
@@ -233,11 +233,13 @@ class CallbacksMixin:
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
             return
-        self._cmd_task = asyncio.create_task(
-            self._run_cmd_task(msg.command, history_text=msg.history_text),
-            name="cmd-task",
-        )
-        self._cmd_task.add_done_callback(_on_task_done)
+        # Textual creates a task per async message handler; store its
+        # handle so Ctrl+C (keys.py) can cancel it.  This replaces the
+        # previous fire-and-forget create_task: the work runs in the
+        # message-handler's own task, the handle is captured for
+        # cancellation, and _run_cmd_task is awaited inline.
+        self._cmd_task = asyncio.current_task()
+        await self._run_cmd_task(msg.command, history_text=msg.history_text)
 
 
     async def _run_cmd_task(self, cmd: str, *, history_text: str = "") -> None:
@@ -654,11 +656,11 @@ class CallbacksMixin:
             src.set_breakpoints(bps)
 
 
-    def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
+    async def _ui_set_locals(self, variables: list[LocalVariable]) -> None:
         _log.debug(f"locals: {len(variables)} vars")
         self._current_locals = list(variables)
         if self._locals_pane is not None:
-            self._locals_pane.set_variables(
+            await self._locals_pane.set_variables(
                 self._current_locals, self.gdb.current_frame
             )
 

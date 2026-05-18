@@ -6,7 +6,6 @@ import logging
 import os
 from pathlib import Path
 
-from ..async_util import _on_task_done
 from .errors import GDBRequestCancelled, GDBRequestFailed, GDBRequestTimeout
 from .types import PendingEntry, quote_mi_string
 
@@ -300,27 +299,45 @@ class GDBRequestMixin:
         if temporary:
             flag = "-t "
         self.mi_command(f"-break-insert {flag}{location}")
-        # Coalesce rapid set_breakpoint() calls into a single -break-list
-        # refresh.  Cancel any pending refresh so only the latest debounce
-        # window survives; the new task starts a fresh sleep+refresh.
-        if self._break_list_task is not None and not self._break_list_task.done():
-            self._break_list_task.cancel()
-        self._break_list_task = asyncio.create_task(
-            self._delayed_break_list(),
-            name="refresh-breakpoints-debounced",
-        )
-        self._break_list_task.add_done_callback(_on_task_done)
+        # Signal the long-lived debouncer worker (started in ``run_async``).
+        # Worker coalesces rapid set_breakpoint() calls into a single
+        # ``-break-list`` after a 100 ms quiet window.  Setting an
+        # ``asyncio.Event`` is non-blocking and does not create a task.
+        if self._break_list_dirty is not None:
+            self._break_list_dirty.set()
 
 
-    async def _delayed_break_list(self) -> None:
-        try:
-            await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
+    async def _break_list_worker(self) -> None:
+        """Coalesce ``set_breakpoint`` notifications into one refresh.
+
+        Waits for ``_break_list_dirty`` then watches for a 100 ms quiet
+        window before issuing ``request_breakpoints``.  Any additional
+        ``set_breakpoint`` during the window restarts the timer.
+        """
+        dirty = self._break_list_dirty
+        if dirty is None:
             return
-        try:
-            await self.request_breakpoints()
-        except (GDBRequestCancelled, GDBRequestTimeout):
-            pass
+        while True:
+            try:
+                await dirty.wait()
+            except asyncio.CancelledError:
+                return
+            dirty.clear()
+            # Debounce: drain further notifications inside a 100 ms window.
+            while True:
+                try:
+                    await asyncio.wait_for(dirty.wait(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    break
+                except asyncio.CancelledError:
+                    return
+                dirty.clear()
+            try:
+                await self.request_breakpoints()
+            except asyncio.CancelledError:
+                return
+            except (GDBRequestCancelled, GDBRequestTimeout):
+                pass
 
 
     def delete_breakpoint(self, number: int) -> None:

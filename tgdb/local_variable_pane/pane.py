@@ -15,12 +15,10 @@ stops.
 """
 
 
-import asyncio
 import logging
 
 from textual.widgets.tree import TreeNode
 
-from ..async_util import _on_task_done
 from ..config import Config
 from ..gdb_controller import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
@@ -155,13 +153,39 @@ class LocalVariablePane(
         # assertion (infcall.c:1594).  A counter (not a bool) is used
         # so overlapping reconciliations stay tracked correctly.
         self._reconcile_active: int = 0
+        # Initial (variables, frame) snapshot stashed by the pane
+        # factory (sync) for the pane's async on_mount to consume.
+        # Keeps the factory free of fire-and-forget task creation.
+        self._pending_initial: tuple[list[LocalVariable], Frame | None] | None = None
 
 
     def title(self) -> str:
         return "LOCALS"
 
 
-    def set_variables(self, variables: list[LocalVariable], frame: Frame | None = None) -> None:
+    def prime_initial(self, variables: list[LocalVariable], frame: Frame | None) -> None:
+        """Sync setter for the pane factory.
+
+        The pane factory (``PaneDescriptor.create``) is required by
+        Textual to be synchronous, so it cannot ``await set_variables``.
+        Instead it calls this method to stash the latest snapshot;
+        ``on_mount`` (async) consumes it once Textual mounts the pane.
+        """
+        self._pending_initial = (list(variables), frame)
+
+
+    async def on_mount(self) -> None:
+        # Run the base sync on_mount (tree visibility + root expansion).
+        super().on_mount()
+        # Consume the snapshot stashed by ``prime_initial`` (if any).
+        # Reconciliation is awaited inline — no fire-and-forget task.
+        pending = self._pending_initial
+        self._pending_initial = None
+        if pending is not None:
+            await self.set_variables(*pending)
+
+
+    async def set_variables(self, variables: list[LocalVariable], frame: Frame | None = None) -> None:
         """Publish the latest locals snapshot for the active debugger frame.
 
         This is the main caller-facing mutation API.
@@ -201,8 +225,4 @@ class LocalVariablePane(
         self._rebuild_gen += 1
         _log.debug(f"set_variables gen={self._rebuild_gen} count={len(variables)} frame={frame}")
         self._reconcile_active += 1
-        task = asyncio.create_task(
-            self._update_variables(self._rebuild_gen, frame, self._variables),
-            name="locals-update",
-        )
-        task.add_done_callback(_on_task_done)
+        await self._update_variables(self._rebuild_gen, frame, self._variables)

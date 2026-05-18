@@ -17,7 +17,7 @@ Typical usage::
         var_eval=...,
         var_eval_expr=...,
     )
-    pane.set_variables(locals_snapshot, current_frame)
+    await pane.set_variables(locals_snapshot, current_frame)
 
 After those dependencies are provided, the pane behaves like a black-box:
 callers push debugger state in, while the widget owns lazy loading, expansion

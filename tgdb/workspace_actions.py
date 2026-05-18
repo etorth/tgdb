@@ -1,6 +1,5 @@
 """Workspace and pane-management helpers for the application package."""
 
-import asyncio
 import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -26,7 +25,6 @@ from .evaluate_pane import EvaluatePane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
 from .workspace import EmptyPane, PaneContainer, Splitter
-from .async_util import _on_task_done
 
 if TYPE_CHECKING:
     from .main import TGDBApp
@@ -68,7 +66,8 @@ class WorkspaceMixin:
                 var_eval=self.gdb.eval_expr,
                 var_eval_expr=self.gdb.var_evaluate_expression,
             )
-        self._locals_pane.set_variables(self._current_locals, self.gdb.current_frame)
+        # Sync stash; the pane's async on_mount awaits set_variables.
+        self._locals_pane.prime_initial(self._current_locals, self.gdb.current_frame)
         return self._locals_pane
 
 
@@ -145,30 +144,9 @@ class WorkspaceMixin:
             self._disasm_pane.set_disasm_function_fn(
                 self.gdb.request_disassembly_function_async
             )
-            self._prime_disasm_pane()
+        # Sync stash; the pane's async on_mount awaits the initial fetch.
+        self._disasm_pane.prime_initial(self.gdb.current_frame, self.gdb.current_thread_id)
         return self._disasm_pane
-
-
-    def _prime_disasm_pane(self: "TGDBApp") -> None:
-        """Fill a freshly-created disasm pane with the current PC or main."""
-        pane = self._disasm_pane
-        if pane is None:
-            return
-        frame = self.gdb.current_frame
-        if frame is not None and frame.addr:
-            _log.debug(f"priming disasm pane at {frame.addr} ({frame.func})")
-            coro = pane.refresh_disasm(
-                frame.fullname or frame.file or "",
-                frame.line,
-                current_addr=frame.addr,
-                thread_id=self.gdb.current_thread_id,
-                func=frame.func,
-            )
-        else:
-            _log.debug("priming disasm pane with main()")
-            coro = pane.prime_function("main")
-        task = asyncio.create_task(coro, name="disasm-pane-prime")
-        task.add_done_callback(_on_task_done)
 
 
 

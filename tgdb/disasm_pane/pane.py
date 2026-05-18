@@ -350,6 +350,46 @@ class DisasmPane(PaneBase):
         self._disasm_function_fn: Callable | None = None
         self._thread_id: str = ""
         self._func: str = ""
+        # Initial prime args stashed by the pane factory (sync) for the
+        # async ``on_mount`` to consume.  Either a ``("frame", frame,
+        # thread_id)`` tuple to render the current PC, or
+        # ``("function", spec)`` to seed from a function name (e.g.
+        # ``main``).  ``None`` means nothing to prime.
+        self._pending_prime: tuple | None = None
+
+
+    def prime_initial(self, frame, thread_id: str) -> None:
+        """Sync setter for the pane factory.
+
+        Stashes the seed (current frame or ``main``) so the pane's async
+        ``on_mount`` can render it without the factory needing to spawn
+        a fire-and-forget task.
+        """
+        if frame is not None and frame.addr:
+            self._pending_prime = ("frame", frame, thread_id)
+        else:
+            self._pending_prime = ("function", "main")
+
+
+    async def on_mount(self) -> None:
+        pending = self._pending_prime
+        self._pending_prime = None
+        if pending is None:
+            return
+        if pending[0] == "frame":
+            _, frame, thread_id = pending
+            _log.debug(f"priming disasm pane at {frame.addr} ({frame.func})")
+            await self.refresh_disasm(
+                frame.fullname or frame.file or "",
+                frame.line,
+                current_addr=frame.addr,
+                thread_id=thread_id,
+                func=frame.func,
+            )
+        else:
+            _, spec = pending
+            _log.debug(f"priming disasm pane with {spec}()")
+            await self.prime_function(spec)
 
 
     def title(self) -> str:

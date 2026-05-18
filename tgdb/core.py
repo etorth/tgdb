@@ -149,19 +149,24 @@ class AppCoreMixin:
             return
 
         _log.info("GDB controller started, launching run_async")
+        # run_async() is a long-lived driver that blocks on _console_done
+        # until GDB exits; it cannot be awaited inline (on_mount must
+        # return for Textual to start its event loop).
         self._gdb_task = asyncio.create_task(
             self.gdb.run_async(), name="gdb-run",
         )
         self._gdb_task.add_done_callback(_on_task_done)
-        _init_loc_task = asyncio.create_task(
-            self._request_initial_location(), name="request-initial-location",
-        )
-        _init_loc_task.add_done_callback(_on_task_done)
 
         self._set_mode("GDB_PROMPT")
         gdb_widget.focus()
 
-        await self._load_rc_async()
+        # _request_initial_location and _load_rc_async are independent
+        # one-shots — run them in parallel and await both before on_mount
+        # finishes, instead of leaking a fire-and-forget task.
+        await asyncio.gather(
+            self._request_initial_location(),
+            self._load_rc_async(),
+        )
 
 
     def _save_history_to_disk(self) -> None:

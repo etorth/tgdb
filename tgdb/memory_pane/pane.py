@@ -9,14 +9,12 @@ mirrors GDB-style hex+ASCII dumps; users can swap in their own through
 ``:set memoryformatter='MyFormatter(...)'``.
 """
 
-import asyncio
 import logging
 from collections.abc import Callable
 
 from rich.text import Text
 from textual.widget import Widget
 
-from ..async_util import _on_task_done
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
 from .formatter import MemoryFormatter, is_valid_formatter
@@ -179,17 +177,19 @@ class MemoryPane(PaneBase):
 
 
     def set_formatter(self, formatter) -> None:
-        """Swap the formatter; invalid objects fall back to the default."""
+        """Swap the formatter; invalid objects fall back to the default.
+
+        Formatter changes only affect how existing bytes are rendered;
+        the next natural refresh (``=memory-changed``, ``*stopped``,
+        explicit reload) will pick up the new ``bytes_per_row`` and
+        refetch.  We deliberately do not spawn a refetch task here —
+        a sync config-listener firing a fire-and-forget async fetch
+        was the only reason a task was needed.
+        """
         if not is_valid_formatter(formatter):
             formatter = MemoryFormatter()
         self._formatter = formatter
         self._content.set_formatter(formatter)
-        if self._current_address and self._explicit_size is None:
-            task = asyncio.create_task(
-                self._fetch(self._current_address, self._request_size()),
-                name="memory-formatter-resize",
-            )
-            task.add_done_callback(_on_task_done)
 
 
     def _bytes_per_row(self) -> int:
