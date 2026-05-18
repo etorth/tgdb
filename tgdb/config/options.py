@@ -183,6 +183,10 @@ class ConfigOptionMixin:
             obj, err = build_formatter(value, self._py_namespace)
         if err is not None or obj is None:
             _log.warning(f"set memoryformatter: {err}")
+            # Reset BOTH the live object and the stored string so a
+            # subsequent ``:save`` doesn't persist the broken value into
+            # the rc file.
+            self.config.memoryformatter = ""
             self.config._memoryformatter_obj = MemoryFormatter()
             self.config.notify_memoryformatter_changed()
             return f"set memoryformatter: {err} (falling back to default)"
