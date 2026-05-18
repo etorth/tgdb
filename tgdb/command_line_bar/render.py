@@ -49,7 +49,10 @@ class RenderMixin:
             t.stylize(style)
             return t
 
-        # Fire-and-forget async-print-op (task finished but background coroutine printed)
+        # Streaming output from an async print_fn call (the awaited
+        # command's print() / print_fn calls keep arriving even after
+        # finish_task has cleared task_running, until the bar redraws
+        # idle).  Render the buffered chunk as a live overlay.
         if self._streaming_buf:
             return self._render_streaming(w, style)
 
