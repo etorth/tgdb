@@ -104,16 +104,24 @@ class SourceFileMixin:
         if not source_file:
             return
         source_file.bp_flags = [BP_NONE] * len(source_file.lines)
+        loaded_abs = os.path.abspath(source_file.path)
+        loaded_basename = os.path.basename(source_file.path)
         for breakpoint_info in bps:
-            fullname = breakpoint_info.fullname or breakpoint_info.file
-            if not fullname:
-                continue
-            try:
-                same_file = (
-                    os.path.abspath(fullname) == os.path.abspath(source_file.path)
-                    or os.path.basename(fullname) == os.path.basename(source_file.path)
-                )
-            except Exception:
+            # GDB MI typically supplies both ``fullname`` (absolute,
+            # symtab-resolved) and ``file`` (relative as the user saw
+            # it).  Prefer the absolute form for an exact match — that's
+            # what cgdb does in source_get_node().  Fall back to a
+            # basename comparison ONLY when GDB gave us no absolute
+            # path; this is the rare case where the breakpoint is
+            # pending/unresolved and ``fullname`` is empty.  A pure
+            # basename match across the whole project would mis-mark
+            # any same-named file (e.g. multiple ``util.c`` in different
+            # subdirs).
+            if breakpoint_info.fullname:
+                same_file = os.path.abspath(breakpoint_info.fullname) == loaded_abs
+            elif breakpoint_info.file:
+                same_file = os.path.basename(breakpoint_info.file) == loaded_basename
+            else:
                 same_file = False
             if same_file and 1 <= breakpoint_info.line <= len(source_file.lines):
                 if breakpoint_info.enabled:
