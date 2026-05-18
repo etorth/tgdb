@@ -95,7 +95,10 @@ def resolve_color(name: str) -> str:
     if name in ("-1", "none", ""):
         return ""
     lower = name.lower()
-    if lower.lstrip("-").isdigit():
+    # Accept exactly one optional leading ``-`` followed by digits.
+    # ``lstrip("-").isdigit()`` previously accepted ``"--5"`` and then
+    # ``int(lower)`` would raise.
+    if lower.lstrip("-").isdigit() and lower.count("-") <= 1:
         number = int(lower)
         if number < 0:
             return ""
