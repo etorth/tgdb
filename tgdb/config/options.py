@@ -36,20 +36,6 @@ _ALIASES: dict[str, str] = {
 }
 
 
-def _apply_clipboard_path(path: str) -> None:
-    """Apply a clipboardpath setting immediately."""
-    dirname = os.path.dirname(path)
-    basename = os.path.basename(path)
-    if dirname:
-        current = os.environ.get("PATH", "")
-        parts = current.split(os.pathsep)
-        if dirname not in parts:
-            os.environ["PATH"] = dirname + os.pathsep + current
-    if basename:
-        try:
-            pyperclip.set_clipboard(basename)
-        except Exception:
-            pass
 
 
 class ConfigOptionMixin:
@@ -157,7 +143,7 @@ class ConfigOptionMixin:
             setattr(self.config, name, value)
             _log.debug(f"set {name} = {value!r}")
             if value:
-                _apply_clipboard_path(value)
+                self._apply_clipboard_path(value)
             return None
         _log.warning(f"set: unknown option {name!r}")
         return f"set: unknown option '{name}'"
@@ -165,6 +151,42 @@ class ConfigOptionMixin:
 
     def _resolve_name(self, name: str) -> str:
         return _ALIASES.get(name.lower(), name.lower())
+
+
+    def _apply_clipboard_path(self, path: str) -> None:
+        """Apply a clipboardpath setting immediately.
+
+        Bounded across repeated :set clipboardpath calls: we remember
+        the dirname that *we* prepended to PATH (if any) and remove it
+        before prepending a new one.  If the new dirname was already in
+        PATH (we didn't add it), PATH is left alone and our memory is
+        forgotten so a later reconfigure does not accidentally remove
+        an entry the user or the environment owns.
+        """
+        dirname = os.path.dirname(path)
+        basename = os.path.basename(path)
+
+        if dirname:
+            current = os.environ.get("PATH", "")
+            parts = current.split(os.pathsep)
+
+            prev = getattr(self, "_clipboard_prepended_dirname", None)
+            if prev is not None and prev in parts:
+                parts = [p for p in parts if p != prev]
+            self._clipboard_prepended_dirname = None
+
+            if dirname in parts:
+                os.environ["PATH"] = os.pathsep.join(parts)
+            else:
+                parts.insert(0, dirname)
+                os.environ["PATH"] = os.pathsep.join(parts)
+                self._clipboard_prepended_dirname = dirname
+
+        if basename:
+            try:
+                pyperclip.set_clipboard(basename)
+            except Exception:
+                pass
 
 
     def _apply_memoryformatter(self, value: str) -> str | None:
