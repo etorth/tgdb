@@ -17,6 +17,7 @@ Public implementation of the disassembly-pane package.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from collections.abc import Callable
 
@@ -28,6 +29,8 @@ from textual.widget import Widget
 
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
+
+_log = logging.getLogger("tgdb.disasm")
 
 
 _ASM_TOKEN_GROUPS: list[tuple] = [
@@ -440,7 +443,8 @@ class DisasmPane(PaneBase):
             return
         try:
             raw = await self._disasm_function_fn(spec)
-        except Exception:
+        except Exception as exc:
+            _log.debug(f"disasm prime_function {spec!r} failed: {exc!r}")
             raw = []
         if not raw:
             return
@@ -488,12 +492,14 @@ class DisasmPane(PaneBase):
         if filename and self._disasm_fn is not None:
             try:
                 raw = await self._disasm_fn(filename, line)
-            except Exception:
+            except Exception as exc:
+                _log.debug(f"disasm fetch {filename}:{line} failed: {exc!r}")
                 raw = []
         elif current_addr and self._disasm_pc_fn is not None:
             try:
                 raw = await self._disasm_pc_fn(current_addr)
-            except Exception:
+            except Exception as exc:
+                _log.debug(f"disasm fetch PC={current_addr} failed: {exc!r}")
                 raw = []
         else:
             return

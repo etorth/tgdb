@@ -16,6 +16,7 @@ stops.
 
 
 import asyncio
+import logging
 
 from textual.widgets.tree import TreeNode
 
@@ -27,6 +28,8 @@ from ..varobj_tree import VarobjTreePane
 from .reconcile import LocalVariablePaneReconcileMixin
 from .support import LocalVariablePaneSupportMixin
 from .update import LocalVariablePaneUpdateMixin
+
+_log = logging.getLogger("tgdb.locals")
 
 
 class LocalVariablePane(
@@ -185,6 +188,7 @@ class LocalVariablePane(
             return
 
         self._rebuild_gen += 1
+        _log.debug(f"set_variables gen={self._rebuild_gen} count={len(variables)} frame={frame}")
         task = asyncio.create_task(
             self._update_variables(self._rebuild_gen, frame, self._variables),
             name="locals-update",

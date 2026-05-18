@@ -189,6 +189,7 @@ class GDBRequestMixin:
         Called when the inferior starts running — any in-flight data
         collection is stale.
         """
+        cancelled = []
         for attr in (
             "_frame_cancel_token",
             "_locals_cancel_token",
@@ -197,8 +198,12 @@ class GDBRequestMixin:
             "_breakpoints_cancel_token",
         ):
             token = getattr(self, attr, 0)
+            if token:
+                cancelled.append(attr)
             self.send_cancel_token(token)
             setattr(self, attr, 0)
+        if cancelled:
+            _log.debug(f"cancelled data requests: {cancelled}")
 
 
     def request_source_files(self) -> None:
