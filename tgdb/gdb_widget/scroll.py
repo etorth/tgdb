@@ -345,7 +345,19 @@ class ScrollMixin:
                 self.refresh()
             else:
                 self._await_g = True
+                self._dot_pending = False
             return
+
+        # Apostrophe-then-dot: '.' jumps to the bottom of scrollback.
+        # Consumed here (before the generic elif chain) so any other
+        # follow-up key cancels the pending state instead of leaving
+        # a stale '.' trap hanging around between keystrokes.
+        if self._dot_pending:
+            self._dot_pending = False
+            if char == ".":
+                self._scroll_offset = 0
+                self.refresh()
+                return
 
         # All other keys reset the pending 'g' state
         self._await_g = False
@@ -382,13 +394,10 @@ class ScrollMixin:
             self._scroll_offset = len(self._scrollback)
             self.refresh()
         elif key == "apostrophe":
-            # '' prefix handled at app level; '.' → jump to bottom
+            # '' prefix handled at app level; '.' → jump to bottom.
+            # Consumption of the follow-up '.' happens at the top of
+            # this function so any other intermediate key cancels.
             self._dot_pending = True
-        elif self._dot_pending:
-            self._dot_pending = False
-            if char == ".":
-                self._scroll_offset = 0
-                self.refresh()
         elif key == "slash":
             self._search_active = True
             self._search_forward = True
