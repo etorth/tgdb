@@ -44,8 +44,14 @@ class HistoryMixin:
             i += 1
             if not stripped:
                 continue
-            # Heredoc entry: "python << EOF" … "EOF"
-            m = re.match(r"^(python|py)\s+<<\s+(\S+)\s*$", stripped, re.IGNORECASE)
+            # Heredoc entry: "python << EOF" … "EOF".  Whitespace around
+            # ``<<`` and the marker must use ``\s*`` to stay in sync with
+            # the live-input regex in ``command_line_bar/keys.py`` and the
+            # rc-loader regex in ``config/execution.py`` — otherwise a tight
+            # form like ``python<<EOF`` is accepted at the prompt but
+            # silently dis-aggregates on reload, leaking body lines as
+            # separate flat history entries.
+            m = re.match(r"^(python|py)\s*<<\s*(\S+)\s*$", stripped, re.IGNORECASE)
             if m:
                 marker = m.group(2)
                 # Collect verbatim: header + body lines + closing marker
