@@ -52,7 +52,9 @@ class ParsingMixin:
                 await self.request_current_stack_frames(report_error=False)
                 await self.request_current_threads(report_error=False)
                 await self.request_current_registers(report_error=False)
-                await self.request_breakpoints(report_error=False)
+                # No request_breakpoints here: GDB emits =breakpoint-modified
+                # on hit-count bump (the only field that changes on *stopped),
+                # which _handle_async routes through _update_breakpoint_from_mi.
             except (GDBRequestCancelled, GDBRequestTimeout):
                 _log.debug("stopped data collection cancelled (inferior resumed)")
         elif cls == "running":
@@ -106,11 +108,17 @@ class ParsingMixin:
                 f"len={results.get('len', '?')}"
             )
             self.on_memory_changed()
-        elif cls == "breakpoint-modified":
+        elif cls in ("breakpoint-created", "breakpoint-modified"):
+            # GDB emits =breakpoint-created on insert (from MI, the GDB
+            # console, or rc-file replay) and =breakpoint-modified on
+            # any field change (hit count, enable/disable, condition,
+            # etc.).  Routing both through _update_breakpoint_from_mi
+            # keeps self.breakpoints incrementally accurate without an
+            # explicit -break-list poll.  The helper already handles
+            # both "new number" (append) and "existing number" (update)
+            # and fires on_breakpoints() itself — no second call here.
             bkpt = results.get("bkpt", {})
             if bkpt:
-                # _update_breakpoint_from_mi already calls on_breakpoints(); no
-                # second call needed here.
                 self._update_breakpoint_from_mi(bkpt)
         elif cls == "breakpoint-deleted":
             # Narrow the except scope to the int() conversion only — the

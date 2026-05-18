@@ -295,49 +295,13 @@ class GDBRequestMixin:
 
 
     def set_breakpoint(self, location: str, temporary: bool = False) -> None:
+        # No follow-up -break-list poll: GDB emits =breakpoint-created
+        # right after the insert, which the parsing layer routes into
+        # self.breakpoints incrementally (see ParsingMixin._handle_async).
         flag = ""
         if temporary:
             flag = "-t "
         self.mi_command(f"-break-insert {flag}{location}")
-        # Signal the long-lived debouncer worker (started in ``run_async``).
-        # Worker coalesces rapid set_breakpoint() calls into a single
-        # ``-break-list`` after a 100 ms quiet window.  Setting an
-        # ``asyncio.Event`` is non-blocking and does not create a task.
-        if self._break_list_dirty is not None:
-            self._break_list_dirty.set()
-
-
-    async def _break_list_worker(self) -> None:
-        """Coalesce ``set_breakpoint`` notifications into one refresh.
-
-        Waits for ``_break_list_dirty`` then watches for a 100 ms quiet
-        window before issuing ``request_breakpoints``.  Any additional
-        ``set_breakpoint`` during the window restarts the timer.
-        """
-        dirty = self._break_list_dirty
-        if dirty is None:
-            return
-        while True:
-            try:
-                await dirty.wait()
-            except asyncio.CancelledError:
-                return
-            dirty.clear()
-            # Debounce: drain further notifications inside a 100 ms window.
-            while True:
-                try:
-                    await asyncio.wait_for(dirty.wait(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    break
-                except asyncio.CancelledError:
-                    return
-                dirty.clear()
-            try:
-                await self.request_breakpoints()
-            except asyncio.CancelledError:
-                return
-            except (GDBRequestCancelled, GDBRequestTimeout):
-                pass
 
 
     def delete_breakpoint(self, number: int) -> None:

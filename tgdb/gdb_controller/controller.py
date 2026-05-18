@@ -24,7 +24,7 @@ import ptyprocess
 
 from .requests import GDBRequestMixin
 from .results import GDBResultMixin
-from ..async_util import _on_task_done, spawn_eager_task
+from ..async_util import spawn_eager_task
 from .types import (  # noqa: F401 — re-exported
     Breakpoint,
     Frame,
@@ -144,15 +144,6 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._token: int = 1
         self._pending: dict[int, PendingEntry] = {}
         self._request_meta: dict[int, dict[str, object]] = {}
-        # Long-lived worker that coalesces rapid ``set_breakpoint`` calls
-        # into a single ``-break-list`` refresh.  ``set_breakpoint`` is
-        # sync (called from sync Textual handlers), so it cannot await a
-        # 100 ms debounce itself; instead it sets ``_break_list_dirty``
-        # and the worker consumes the event with a quiet-window timer.
-        # Replaces the prior pattern of spawning one fire-and-forget
-        # task per ``set_breakpoint`` call.
-        self._break_list_task: asyncio.Task | None = None
-        self._break_list_dirty: asyncio.Event | None = None
         self.breakpoints: list[Breakpoint] = []
         self.source_files: list[str] = []
         self.current_frame: Frame | None = None
@@ -385,18 +376,6 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             except Exception:
                 _log.debug("GDB terminate() raised", exc_info=True)
 
-        # Cancel the debounced break-list refresh if one is in flight.
-        # ``set_breakpoint`` schedules ``_delayed_break_list`` via
-        # ``create_task``; without an explicit cancel here, that task
-        # eventually wakes up after the sleep, calls ``mi_command``
-        # against the now-closed MI fd (a no-op thanks to the
-        # ``self._mi_master_fd < 0`` guard), and exits.  Harmless but
-        # wasteful, and a fragile invariant — if the guard ever moves
-        # the cleanup path becomes a real bug.  Cancel deterministically.
-        if self._break_list_task is not None and not self._break_list_task.done():
-            self._break_list_task.cancel()
-        self._break_list_task = None
-
         # Cancel the socket dispatch loop so it does not try to process
         # frames after the controller is torn down.
         for task in list(self._io_tasks):
@@ -460,16 +439,6 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # add_reader on the console fd wakes instantly when data is available,
         # matching cgdb's select()-based approach with no timeout.
         self._console_done: asyncio.Future = loop.create_future()
-
-        # Start the long-lived break-list debouncer worker.  ``Event``
-        # must be constructed inside the running loop (3.10+ no longer
-        # binds to the running loop on creation, but for clarity we
-        # initialise both event and worker here).
-        self._break_list_dirty = asyncio.Event()
-        self._break_list_task = asyncio.create_task(
-            self._break_list_worker(), name="break-list-debouncer",
-        )
-        self._break_list_task.add_done_callback(_on_task_done)
 
         # Register readable callbacks — fires as soon as the fd has data,
         # with zero polling delay (unlike asyncio.sleep(0.02)).
