@@ -14,6 +14,7 @@ the value-changed highlight survive across snapshots.
 import re
 
 from rich.text import Text
+from textual.css.query import NoMatches
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
@@ -139,7 +140,7 @@ class RegisterPane(PaneBase):
     def _rebuild_tree(self) -> None:
         try:
             tree = self.query_one(Tree)
-        except Exception:
+        except NoMatches:
             return
 
         # Save current expansion state of category nodes before rebuild.
@@ -162,7 +163,7 @@ class RegisterPane(PaneBase):
 
         new_values: dict[str, str] = {}
         for group_name in _CATEGORY_ORDER:
-            entries = buckets.get(group_name) or []
+            entries = buckets[group_name]
             if not entries:
                 continue
             label = f"{group_name}  ({len(entries)})"
