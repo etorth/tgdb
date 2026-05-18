@@ -1,13 +1,21 @@
 """Rendering mixin for CommandLineBar."""
 
+from rich.cells import cell_len, set_cell_size
 from rich.text import Text
 
 
 def _pad_crop(text: str, w: int) -> str:
-    """Return *text* truncated or space-padded to exactly *w* characters."""
-    if len(text) >= w:
-        return text[:w]
-    return text + " " * (w - len(text))
+    """Return *text* truncated or space-padded to exactly *w* terminal cells.
+
+    Uses cell-width arithmetic (``rich.cells``) so wide-cell characters
+    (CJK, many emoji) consume the right amount of horizontal space.
+    ``len(text)``-based crop produced visually short or overflowing
+    lines whenever the buffer contained non-ASCII content.
+    """
+    cells = cell_len(text)
+    if cells >= w:
+        return set_cell_size(text, w)
+    return text + " " * (w - cells)
 
 
 class RenderMixin:
