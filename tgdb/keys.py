@@ -371,7 +371,7 @@ class KeyRoutingMixin:
             bar.feed_key(key, char)
             # If the message was dismissed (non-scroll), sync to TGDB mode so
             # the next replay token sees the correct mode.
-            if not bar._msg_lines:
+            if not bar.is_message_showing():
                 self._switch_to_tgdb()
         except NoMatches:
             pass
@@ -385,11 +385,7 @@ class KeyRoutingMixin:
         except NoMatches:
             return False
         if key in ("enter", "return"):
-            cmd = bar._input_buf
-            bar._reset_history_browse()
-            bar._input_active = False
-            bar._input_buf = ""
-            bar.refresh()
+            cmd = bar.take_pending_command()
             # Post CommandSubmit so the command goes through the async task
             # path (_run_cmd_task / execute_async) — same as manual Enter.
             # This is important for :python blocks which need 'await' support.
@@ -521,7 +517,7 @@ class KeyRoutingMixin:
                 status = self.query_one("#cmdline", CommandLineBar)
                 status.feed_key(key, char)
                 event.stop()
-                if not status._msg_lines:
+                if not status.is_message_showing():
                     self._switch_to_tgdb()
             except NoMatches:
                 pass

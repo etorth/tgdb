@@ -136,3 +136,32 @@ class CommandLineBar(
         self._streaming_buf: str = ""  # accumulated output from running task
         self._collected_lines: list[str] = []  # all output lines collected during task
         self._task_gen: int = 0  # generation counter for task isolation
+
+
+    # ------------------------------------------------------------------
+    # Public read-only accessors used by the replay-key dispatcher.
+    # Keeps callers off the private attributes — they only need answers,
+    # not handles to internal state.
+    # ------------------------------------------------------------------
+
+
+    def is_message_showing(self) -> bool:
+        """Return True while a multi-line status/error message is displayed."""
+        return bool(self._msg_lines)
+
+
+    def take_pending_command(self) -> str:
+        """Pop the current input buffer and reset input state.
+
+        Used by the replay-key dispatcher when an Enter token is replayed
+        while in CMD mode: it needs the buffered command string and an
+        atomic clear of the editing state so the next replay token does
+        not see stale input.
+        """
+        cmd = self._input_buf
+        self._reset_history_browse()
+        self._input_active = False
+        self._input_buf = ""
+        self._cursor_pos = 0
+        self.refresh()
+        return cmd
