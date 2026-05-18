@@ -58,6 +58,11 @@ class ConfigOptionMixin:
     async def _cmd_set(self, args: list[str]) -> str | None:
         if not args:
             return "set: missing argument"
+        if len(args) > 1:
+            # ``:set tabstop 4`` (space form) was silently dropping the
+            # value and no-op'ing.  Reject so the user gets feedback;
+            # they almost certainly meant ``:set tabstop=4``.
+            return "set: unexpected extra arguments (use '=', e.g. set tabstop=4)"
 
         expr = args[0]
         # Check ``=value`` form before ``no``-prefix.  ``:set notimeout=1``
