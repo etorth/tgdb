@@ -147,22 +147,22 @@ class _TitleBar(Widget):
     def _do_drag(self, screen_x: int, screen_y: int) -> None:
         """Walk up the widget tree to find the first vertical container
         where the pane is NOT the first item, then trigger a resize."""
-        pane = self._pane
-        child = pane
+        # Lazy import to avoid a pane_base ↔ workspace import cycle.
+        from .workspace import PaneContainer
+
+        child = self._pane
         while child.parent is not None:
             parent = child.parent
-            # Duck-type check for PaneContainer with vertical orientation
             if (
-                getattr(parent, "orientation", None) == "vertical"
-                and hasattr(parent, "_items")
-                and hasattr(parent, "_resize_from_title_drag")
+                isinstance(parent, PaneContainer)
+                and parent.orientation == "vertical"
             ):
                 items = parent._items
                 if child in items:
                     idx = items.index(child)
                     if idx > 0:
                         parent._resize_from_title_drag(
-                            items[idx - 1], items[idx], screen_y
+                            items[idx - 1], items[idx], screen_y,
                         )
                         return
                     # idx == 0 → this pane is first; keep walking up
