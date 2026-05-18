@@ -1,5 +1,6 @@
 """Command-dispatch helpers for the configuration package."""
 
+import inspect
 import logging
 import os
 import re
@@ -117,7 +118,10 @@ class ConfigExecutionMixin:
             eval_expr = eval_match.group(2)
             handler = self._handlers.get(eval_cmd)
             if handler is not None:
-                return handler([eval_expr] if eval_expr else [])
+                result = handler([eval_expr] if eval_expr else [])
+                if inspect.isawaitable(result):
+                    return await result
+                return result
             return None
 
         map_match = re.match(
@@ -149,7 +153,10 @@ class ConfigExecutionMixin:
             return await self._cmd_history_run(raw_cmd)
 
         if cmd in self._handlers:
-            return self._handlers[cmd](args)
+            result = self._handlers[cmd](args)
+            if inspect.isawaitable(result):
+                return await result
+            return result
 
         return await self._dispatch_builtin_command(cmd, raw_cmd, args, print_fn, line)
 

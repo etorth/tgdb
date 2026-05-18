@@ -15,9 +15,11 @@ stops.
 """
 
 
+import asyncio
+
 from textual.widgets.tree import TreeNode
 
-from ..async_util import supervise
+from ..async_util import _on_task_done
 from ..config import Config
 from ..gdb_controller import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
@@ -183,7 +185,8 @@ class LocalVariablePane(
             return
 
         self._rebuild_gen += 1
-        supervise(
+        task = asyncio.create_task(
             self._update_variables(self._rebuild_gen, frame, self._variables),
             name="locals-update",
         )
+        task.add_done_callback(_on_task_done)

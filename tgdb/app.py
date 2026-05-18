@@ -20,7 +20,6 @@ import asyncio
 from textual.app import App
 from textual.widget import Widget
 
-from .async_util import supervise
 from .command_line_bar import CommandLineBar
 from .config import Config, ConfigParser
 from .context_menu import ContextMenu

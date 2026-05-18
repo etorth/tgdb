@@ -2,8 +2,7 @@
 
 import logging
 
-from ..async_util import supervise
-from .errors import GDBRequestCancelled, GDBRequestFailed
+from .errors import GDBRequestCancelled, GDBRequestFailed, GDBRequestTimeout
 
 _log = logging.getLogger("tgdb.gdb_controller")
 
@@ -11,7 +10,7 @@ _log = logging.getLogger("tgdb.gdb_controller")
 class GDBResultMixin:
     """Mixin providing MI result dispatch and state publication."""
 
-    def _handle_result(self, rec: dict) -> None:
+    async def _handle_result(self, rec: dict) -> None:
         cls = rec.get("message", "")
         results = rec.get("payload") or {}
         token = rec.get("token")
@@ -74,7 +73,7 @@ class GDBResultMixin:
         if cls == "error":
             self._handle_error_result(meta, results)
         elif cls in ("done", "running"):
-            self._handle_done_result(meta, results)
+            await self._handle_done_result(meta, results)
 
 
     def _handle_error_result(self, meta: dict, results: dict) -> None:
@@ -104,7 +103,7 @@ class GDBResultMixin:
                 self.on_error(msg)
 
 
-    def _handle_done_result(self, meta: dict, results: dict) -> None:
+    async def _handle_done_result(self, meta: dict, results: dict) -> None:
         self._handle_breakpoint_result(results)
         self._handle_source_file_result(results)
         self._handle_source_files_result(results)
@@ -112,7 +111,7 @@ class GDBResultMixin:
         self._handle_stack_result(results)
         self._handle_threads_result(results)
         self._handle_register_result(results)
-        self._handle_frame_result(meta, results)
+        await self._handle_frame_result(meta, results)
 
 
     def _handle_breakpoint_result(self, results: dict) -> None:
@@ -181,7 +180,7 @@ class GDBResultMixin:
             self._emit_registers()
 
 
-    def _handle_frame_result(self, meta: dict, results: dict) -> None:
+    async def _handle_frame_result(self, meta: dict, results: dict) -> None:
         kind = meta.get("kind")
         # Only the request kinds that explicitly ask for the *current
         # frame* should overwrite ``self.current_frame`` and forward to
@@ -220,7 +219,10 @@ class GDBResultMixin:
         else:
             self.request_source_file(report_error=report)
 
-        supervise(self.request_current_frame_locals(report_error=False), name="frame-result-locals")
-        supervise(self.request_current_stack_frames(report_error=False), name="frame-result-stack")
-        supervise(self.request_current_threads(report_error=False), name="frame-result-threads")
-        supervise(self.request_current_registers(report_error=False), name="frame-result-registers")
+        try:
+            await self.request_current_frame_locals(report_error=False)
+            await self.request_current_stack_frames(report_error=False)
+            await self.request_current_threads(report_error=False)
+            await self.request_current_registers(report_error=False)
+        except (GDBRequestCancelled, GDBRequestTimeout):
+            _log.debug("frame-result data collection cancelled")

@@ -9,12 +9,13 @@ mirrors GDB-style hex+ASCII dumps; users can swap in their own through
 ``:set memoryformatter='MyFormatter(...)'``.
 """
 
+import asyncio
 from collections.abc import Callable
 
 from rich.text import Text
 from textual.widget import Widget
 
-from ..async_util import supervise
+from ..async_util import _on_task_done
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
 from .formatter import MemoryFormatter, is_valid_formatter
@@ -179,10 +180,11 @@ class MemoryPane(PaneBase):
         self._formatter = formatter
         self._content.set_formatter(formatter)
         if self._current_address and self._explicit_size is None:
-            supervise(
+            task = asyncio.create_task(
                 self._fetch(self._current_address, self._request_size()),
                 name="memory-formatter-resize",
             )
+            task.add_done_callback(_on_task_done)
 
 
     def _bytes_per_row(self) -> int:
@@ -202,33 +204,25 @@ class MemoryPane(PaneBase):
         return rows * self._bytes_per_row()
 
 
-    def set_address(self, addr: str, size: int | None = None) -> None:
+    async def set_address(self, addr: str, size: int | None = None) -> None:
         """Request a new memory dump starting at *addr*."""
         self._current_address = addr
         self._explicit_size = size
-        supervise(
-            self._fetch(addr, self._request_size()), name="memory-fetch",
-        )
+        await self._fetch(addr, self._request_size())
 
 
-    def refresh_memory(self) -> None:
+    async def refresh_memory(self) -> None:
         """Re-fetch the current region (used after each GDB stop)."""
         if not self._current_address:
             return
-        supervise(
-            self._fetch(self._current_address, self._request_size()),
-            name="memory-refresh",
-        )
+        await self._fetch(self._current_address, self._request_size())
 
 
-    def on_resize(self, event) -> None:
+    async def on_resize(self, event) -> None:
         # When the user grows the pane, refetch so newly-visible rows are
         # populated with real data instead of blank padding.
         if self._current_address and self._explicit_size is None:
-            supervise(
-                self._fetch(self._current_address, self._request_size()),
-                name="memory-resize",
-            )
+            await self._fetch(self._current_address, self._request_size())
 
 
     async def _fetch(self, addr: str, size: int) -> None:

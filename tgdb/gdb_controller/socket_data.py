@@ -42,6 +42,7 @@ import logging
 import os
 import zlib
 
+from ..async_util import spawn_eager_task
 from .errors import GDBRequestCancelled, GDBRequestTimeout
 from .types import (
     Breakpoint,
@@ -117,7 +118,7 @@ class SocketDataMixin:
     """
 
     def _on_sock_readable(self) -> None:
-        """Drain the socket and signal the dispatch loop."""
+        """Drain the socket and spawn tasks for complete frames."""
         try:
             while True:
                 chunk = os.read(self._sock_tgdb, 65536)
@@ -141,166 +142,172 @@ class SocketDataMixin:
             self._sock_buf = b""
             return
 
-        self._sock_event.set()
+        self._spawn_sock_frame_tasks()
 
 
     def _unregister_sock(self) -> None:
-        """Remove the socket asyncio reader, discard buffer, wake dispatch loop."""
+        """Remove the socket asyncio reader, discard buffer."""
         try:
             asyncio.get_running_loop().remove_reader(self._sock_tgdb)
         except Exception:
             pass
         self._sock_buf = b""
-        # Wake the dispatch loop so it can observe the cancellation.
-        self._sock_event.set()
 
 
-    async def _sock_dispatch_long_run_loop(self) -> None:
-        """Async dispatch loop for socket frames.
-
-        Waits for ``_sock_event`` (set by the sync fd callback
-        ``_on_sock_readable``), then processes all complete frames in
-        ``_sock_buf``.  Because this is an async coroutine, data
-        handlers like ``_handle_sock_frame_info`` can ``await``
-        convenience function requests instead of using fire-and-forget
-        ``supervise`` calls.
-
-        The loop exits cleanly when its hosting ``asyncio.Task`` is
-        cancelled (during ``terminate()`` or ``run_async`` cleanup).
-        """
-        try:
-            while True:
-                await self._sock_event.wait()
-                self._sock_event.clear()
-                await self._process_sock_frames()
-        except asyncio.CancelledError:
-            return
-
-
-    async def _process_sock_frames(self) -> None:
-        """Parse and dispatch complete frames from the unified socket.
-
-        The tag byte determines the frame structure:
-        - No-payload tags: 1 byte total (tag only).
-        - Fixed-payload tags: 1 + N bytes (tag + known payload size).
-        - Varint-payload tags: 1 + zigzag varint (tag + varint).
-        - Variable-length tags: 1 + 1 + varint + payload (tag + ctl + len + data).
-        """
-        objfiles_pending = False
-        pending_regnums: set[int] = set()
-
+    def _spawn_sock_frame_tasks(self) -> None:
+        """Extract complete socket frames and spawn one eager task per frame."""
         while self._sock_buf:
-            tag_byte = self._sock_buf[0]
+            frame_data = self._extract_one_sock_frame()
+            if frame_data is None:
+                break
+            spawn_eager_task(
+                self._process_sock_frame(frame_data),
+                self._io_tasks,
+                name="sock-process",
+            )
 
-            if tag_byte in _ZERO_PAYLOAD_TAGS:
-                self._sock_buf = self._sock_buf[1:]
-                if tag_byte in (ord(b"O"), ord(b"F"), ord(b"C")):
-                    objfiles_pending = True
-                elif tag_byte == ord(b"X"):
-                    try:
-                        self.on_gdb_exiting()
-                    except Exception:
-                        _log.debug("gdb_exiting callback raised", exc_info=True)
 
-            elif tag_byte in _FIXED_PAYLOAD:
-                fixed_size = _FIXED_PAYLOAD[tag_byte]
-                total = 1 + fixed_size
-                if len(self._sock_buf) < total:
-                    break
-                payload = self._sock_buf[1:total]
-                self._sock_buf = self._sock_buf[total:]
+    def _extract_one_sock_frame(self) -> tuple | None:
+        """Extract one complete frame from ``_sock_buf``.
 
-                if tag_byte == ord(b"I"):
-                    try:
-                        if payload[0] == 0:
-                            self.on_inferior_call_pre()
-                        else:
-                            self.on_inferior_call_post()
-                    except Exception:
-                        _log.debug("inferior_call callback raised", exc_info=True)
+        Returns a tuple describing the frame, or ``None`` if the buffer
+        does not contain a complete frame yet.  Advances ``_sock_buf``
+        past the consumed bytes on success.
 
-            elif tag_byte in _VARINT_TAGS:
-                raw, after = _decode_varint(self._sock_buf, 1)
-                if raw is None:
-                    break
-                self._sock_buf = self._sock_buf[after:]
+        Return shapes by tag type:
 
-                if tag_byte == ord(b"R"):
-                    regnum = raw - 1
-                    if regnum < 0:
-                        regnum = -1
-                    pending_regnums.add(regnum)
+        - Zero-payload: ``(tag_byte,)``
+        - Fixed-payload: ``(tag_byte, payload_bytes)``
+        - Varint: ``(tag_byte, decoded_int)``
+        - Variable-length: ``(tag_byte, ctl_byte, raw_payload)``
+        - Unknown tag: ``(tag_byte,)`` (one byte consumed)
+        """
+        if not self._sock_buf:
+            return None
+        tag_byte = self._sock_buf[0]
 
-            elif tag_byte in _VAR_LEN_TAGS:
-                if len(self._sock_buf) < 3:
-                    break
-                ctl = self._sock_buf[1]
-                payload_len, after = _decode_varint(self._sock_buf, 2)
-                if payload_len is None:
-                    break
-                if payload_len > _SOCK_BUF_MAX_BYTES:
-                    _log.warning(f"socket: invalid payload size {payload_len}; resetting")
-                    self._sock_buf = b""
-                    return
-                total = after + payload_len
-                if len(self._sock_buf) < total:
-                    break
-                payload = self._sock_buf[after:total]
-                self._sock_buf = self._sock_buf[total:]
+        if tag_byte in _ZERO_PAYLOAD_TAGS:
+            self._sock_buf = self._sock_buf[1:]
+            return (tag_byte,)
 
-                if ctl & _CTL_COMPRESSED:
-                    try:
-                        payload = zlib.decompress(payload)
-                    except Exception as exc:
-                        _log.warning(f"socket: decompress failed (tag={chr(tag_byte)!r}): {exc!r}")
-                        continue
+        if tag_byte in _FIXED_PAYLOAD:
+            fixed_size = _FIXED_PAYLOAD[tag_byte]
+            total = 1 + fixed_size
+            if len(self._sock_buf) < total:
+                return None
+            payload = self._sock_buf[1:total]
+            self._sock_buf = self._sock_buf[total:]
+            return (tag_byte, payload)
 
-                if tag_byte == ord(b"D"):
-                    try:
-                        msg = payload.decode("utf-8", errors="replace").rstrip("\n")
-                    except Exception:
-                        msg = "<decode error>"
-                    _log.debug(f"SOCK<- gdb-python: {msg}")
-                elif tag_byte in _DATA_TAGS:
-                    # Data tags embed [varint MI token][JSON payload].
-                    mi_token, json_start = _decode_varint(payload, 0)
-                    if mi_token is None:
-                        _log.warning(f"socket: missing MI token (tag={chr(tag_byte)!r})")
-                        continue
-                    try:
-                        data = json.loads(payload[json_start:])
-                    except Exception as exc:
-                        _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
-                        continue
-                    self._try_resolve_sock_pending(mi_token, tag_byte, data)
-                    await self._dispatch_sock_data(tag_byte, data)
-                else:
-                    try:
-                        data = json.loads(payload)
-                    except Exception as exc:
-                        _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
-                        continue
-                    await self._dispatch_sock_data(tag_byte, data)
+        if tag_byte in _VARINT_TAGS:
+            raw, after = _decode_varint(self._sock_buf, 1)
+            if raw is None:
+                return None
+            self._sock_buf = self._sock_buf[after:]
+            return (tag_byte, raw)
 
-            else:
-                _log.debug(f"socket: unknown tag 0x{tag_byte:02x}")
-                self._sock_buf = self._sock_buf[1:]
+        if tag_byte in _VAR_LEN_TAGS:
+            if len(self._sock_buf) < 3:
+                return None
+            payload_len, after = _decode_varint(self._sock_buf, 2)
+            if payload_len is None:
+                return None
+            if payload_len > _SOCK_BUF_MAX_BYTES:
+                _log.warning(f"socket: invalid payload size {payload_len}; resetting")
+                self._sock_buf = b""
+                return None
+            total = after + payload_len
+            if len(self._sock_buf) < total:
+                return None
+            ctl = self._sock_buf[1]
+            payload = self._sock_buf[after:total]
+            self._sock_buf = self._sock_buf[total:]
+            return (tag_byte, ctl, payload)
 
-        # Coalesced event dispatch — at most one callback per tag per read.
-        if objfiles_pending:
-            try:
-                self.on_objfiles_changed()
-            except Exception:
-                _log.debug("on_objfiles_changed callback raised", exc_info=True)
+        # Unknown tag — skip one byte.
+        _log.debug(f"socket: unknown tag 0x{tag_byte:02x}")
+        self._sock_buf = self._sock_buf[1:]
+        return (tag_byte,)
 
-        if pending_regnums:
-            if -1 in pending_regnums:
-                pending_regnums = {-1}
-            for regnum in pending_regnums:
+
+    async def _process_sock_frame(self, frame: tuple) -> None:
+        """Handle a single extracted socket frame.
+
+        Most tags complete synchronously (no real await); only the
+        ``f`` (frame-info) tag triggers follow-up MI round-trips.
+        """
+        tag_byte = frame[0]
+
+        if tag_byte in _ZERO_PAYLOAD_TAGS:
+            if tag_byte in (ord(b"O"), ord(b"F"), ord(b"C")):
+                try:
+                    self.on_objfiles_changed()
+                except Exception:
+                    _log.debug("on_objfiles_changed callback raised", exc_info=True)
+            elif tag_byte == ord(b"X"):
+                try:
+                    self.on_gdb_exiting()
+                except Exception:
+                    _log.debug("gdb_exiting callback raised", exc_info=True)
+
+        elif tag_byte in _FIXED_PAYLOAD:
+            payload = frame[1]
+            if tag_byte == ord(b"I"):
+                try:
+                    if payload[0] == 0:
+                        self.on_inferior_call_pre()
+                    else:
+                        self.on_inferior_call_post()
+                except Exception:
+                    _log.debug("inferior_call callback raised", exc_info=True)
+
+        elif tag_byte in _VARINT_TAGS:
+            raw = frame[1]
+            if tag_byte == ord(b"R"):
+                regnum = raw - 1
+                if regnum < 0:
+                    regnum = -1
                 try:
                     self.on_register_changed(regnum)
                 except Exception:
                     _log.debug("on_register_changed callback raised", exc_info=True)
+
+        elif tag_byte in _VAR_LEN_TAGS:
+            ctl = frame[1]
+            payload = frame[2]
+
+            if ctl & _CTL_COMPRESSED:
+                try:
+                    payload = zlib.decompress(payload)
+                except Exception as exc:
+                    _log.warning(f"socket: decompress failed (tag={chr(tag_byte)!r}): {exc!r}")
+                    return
+
+            if tag_byte == ord(b"D"):
+                try:
+                    msg = payload.decode("utf-8", errors="replace").rstrip("\n")
+                except Exception:
+                    msg = "<decode error>"
+                _log.debug(f"SOCK<- gdb-python: {msg}")
+            elif tag_byte in _DATA_TAGS:
+                mi_token, json_start = _decode_varint(payload, 0)
+                if mi_token is None:
+                    _log.warning(f"socket: missing MI token (tag={chr(tag_byte)!r})")
+                    return
+                try:
+                    data = json.loads(payload[json_start:])
+                except Exception as exc:
+                    _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
+                    return
+                self._try_resolve_sock_pending(mi_token, tag_byte, data)
+                await self._dispatch_sock_data(tag_byte, data)
+            else:
+                try:
+                    data = json.loads(payload)
+                except Exception as exc:
+                    _log.warning(f"socket: JSON decode failed (tag={chr(tag_byte)!r}): {exc!r}")
+                    return
+                await self._dispatch_sock_data(tag_byte, data)
 
     async def _dispatch_sock_data(self, tag_byte: int, data) -> None:
         """Route a decoded socket data frame to the appropriate handler."""

@@ -1,5 +1,6 @@
 """Workspace and pane-management helpers for the application package."""
 
+import asyncio
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -24,7 +25,7 @@ from .evaluate_pane import EvaluatePane
 from .memory_pane import MemoryPane
 from .disasm_pane import DisasmPane
 from .workspace import EmptyPane, PaneContainer, Splitter
-from .async_util import supervise
+from .async_util import _on_task_done
 
 if TYPE_CHECKING:
     from .main import TGDBApp
@@ -152,18 +153,17 @@ class WorkspaceMixin:
             return
         frame = self.gdb.current_frame
         if frame is not None and frame.addr:
-            supervise(
-                pane.refresh_disasm(
-                    frame.fullname or frame.file or "",
-                    frame.line,
-                    current_addr=frame.addr,
-                    thread_id=self.gdb.current_thread_id,
-                    func=frame.func,
-                ),
-                name="disasm-pane-prime",
+            coro = pane.refresh_disasm(
+                frame.fullname or frame.file or "",
+                frame.line,
+                current_addr=frame.addr,
+                thread_id=self.gdb.current_thread_id,
+                func=frame.func,
             )
-            return
-        supervise(pane.prime_function("main"), name="disasm-pane-prime-main")
+        else:
+            coro = pane.prime_function("main")
+        task = asyncio.create_task(coro, name="disasm-pane-prime")
+        task.add_done_callback(_on_task_done)
 
 
 

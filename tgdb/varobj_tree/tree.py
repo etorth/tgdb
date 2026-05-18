@@ -8,7 +8,6 @@ from textual.css.query import NoMatches
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from ..async_util import supervise
 
 
 _log = logging.getLogger("tgdb.varobj_tree")
@@ -155,7 +154,7 @@ class VarobjTreeMixin:
             break
 
 
-    def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
+    async def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
         node = event.node
         data = node.data
         if not isinstance(data, dict):
@@ -170,7 +169,7 @@ class VarobjTreeMixin:
             from_idx = data.get("from_idx", 0)
             parent_displayhint = data.get("displayhint", "")
             if varobj_name and self._var_list_children:
-                supervise(self._load_more_children(node, varobj_name, from_idx, parent_displayhint), name="varobj-load-more")
+                await self._load_more_children(node, varobj_name, from_idx, parent_displayhint)
                 return
 
             data["loaded"] = False
@@ -181,7 +180,7 @@ class VarobjTreeMixin:
             data["loaded"] = False
             return
 
-        supervise(self._load_children(node, varobj_name), name="varobj-load-children")
+        await self._load_children(node, varobj_name)
 
 
     def _get_node_at_screen(self, screen_x: int, screen_y: int) -> TreeNode | None:

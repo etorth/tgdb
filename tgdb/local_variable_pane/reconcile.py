@@ -4,7 +4,6 @@ Reconciliation helpers for the local-variable pane.
 
 from textual.widgets import Tree
 
-from ..async_util import supervise
 from ..gdb_controller import Frame, LocalVariable
 from .shared import BindingEntry, BindingKey, ExpansionPath, _log, _suppress_children, _type_needs_name_fallback
 
@@ -702,7 +701,7 @@ class LocalVariablePaneReconcileMixin:
                 node_data["loaded"] = False
                 node.remove_children()
                 node.add_leaf("⏳ loading...")
-                supervise(self._load_children(node, new_varobj), name="locals-load-children")
+                await self._load_children(node, new_varobj)
             elif not has_children:
                 self._collapse_to_leaf_node(node, exp, value, marker_active=False)
 
@@ -743,15 +742,15 @@ class LocalVariablePaneReconcileMixin:
             self._set_node_marker_active(node, new_marker_active)
 
 
-    def _invalidate_typechanged_binding(self, varobj_name: str) -> BindingKey | None:
+    async def _invalidate_typechanged_binding(self, varobj_name: str) -> BindingKey | None:
         """Drop local tracking for a varobj whose type just changed.
 
         Called from ``_apply_changelist`` when the changelist reports
         ``type_changed=true`` or when a dynamic printer's child shape
         transition makes the GDB-side varobj cache inconsistent.
         Removes the BindingKey from ``_tracked``, purges varobj/child
-        mappings, removes the now-stale TreeNode, and supervises an
-        async ``-var-delete`` so the old GDB-side varobj does not leak.
+        mappings, removes the now-stale TreeNode, and issues an async
+        ``-var-delete`` so the old GDB-side varobj does not leak.
 
         Returns the dropped BindingKey (or ``None`` if no matching key
         was found) so the caller can schedule an immediate re-add in
@@ -776,10 +775,7 @@ class LocalVariablePaneReconcileMixin:
             node.remove()
 
         if self._var_delete is not None:
-            supervise(
-                self._delete_varobj_safe(varobj_name),
-                name="locals-typechanged-delete",
-            )
+            await self._delete_varobj_safe(varobj_name)
 
         return dropped_key
 
@@ -899,7 +895,7 @@ class LocalVariablePaneReconcileMixin:
         return any(exp not in expected_exps for exp in tracked_exps)
 
 
-    def _apply_changelist(self, changelist: list[dict], skip_varobjs: frozenset[str] = frozenset()) -> None:
+    async def _apply_changelist(self, changelist: list[dict], skip_varobjs: frozenset[str] = frozenset()) -> None:
         """Apply ``-var-update`` results to the live tree."""
         _log.debug(f"changelist: {len(changelist)} changes")
 
@@ -920,9 +916,9 @@ class LocalVariablePaneReconcileMixin:
                 # ``_varobj_type`` would take the wrong branch.  Drop
                 # this binding from local tracking so the next
                 # reconciliation pass re-creates it from scratch with
-                # current type info, and supervise the GDB-side delete
+                # current type info, and delete the GDB-side varobj
                 # so the orphaned varobj does not leak.
-                self._invalidate_typechanged_binding(varobj_name)
+                await self._invalidate_typechanged_binding(varobj_name)
                 continue
 
             node = self._varobj_to_node.get(varobj_name)
@@ -982,7 +978,7 @@ class LocalVariablePaneReconcileMixin:
                 # to the normal clear-children path below.
                 new_displayhint = change.get("displayhint", data.get("displayhint", ""))
                 data["displayhint"] = new_displayhint
-                dropped_key = self._invalidate_typechanged_binding(varobj_name)
+                dropped_key = await self._invalidate_typechanged_binding(varobj_name)
                 if dropped_key is not None:
                     self._shape_readd_keys.add(dropped_key)
                 continue
@@ -990,6 +986,6 @@ class LocalVariablePaneReconcileMixin:
             data["loaded"] = False
             node.remove_children()
             if node.is_expanded:
-                supervise(self._load_children(node, varobj_name), name="locals-load-children")
+                await self._load_children(node, varobj_name)
             else:
                 node.add_leaf("⏳ loading...")

@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.css.query import NoMatches
 from textual.widget import Widget
 
-from .async_util import supervise
+from .async_util import _on_task_done
 from .command_line_bar import CommandLineBar, CompletionPopup
 from .context_menu import ContextMenu
 from .file_dialog import FileDialog
@@ -145,8 +145,14 @@ class AppCoreMixin:
             self._show_status(f"Failed to start GDB: {exc}")
             return
 
-        self._gdb_task = supervise(self.gdb.run_async(), name="gdb-run")
-        supervise(self._request_initial_location(), name="request-initial-location")
+        self._gdb_task = asyncio.create_task(
+            self.gdb.run_async(), name="gdb-run",
+        )
+        self._gdb_task.add_done_callback(_on_task_done)
+        _init_loc_task = asyncio.create_task(
+            self._request_initial_location(), name="request-initial-location",
+        )
+        _init_loc_task.add_done_callback(_on_task_done)
 
         self._set_mode("GDB_PROMPT")
         gdb_widget.focus()

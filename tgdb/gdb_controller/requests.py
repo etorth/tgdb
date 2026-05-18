@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from ..async_util import supervise
+from ..async_util import _on_task_done
 from .errors import GDBRequestCancelled, GDBRequestFailed, GDBRequestTimeout
 from .types import PendingEntry, quote_mi_string
 
@@ -297,10 +297,11 @@ class GDBRequestMixin:
         # window survives; the new task starts a fresh sleep+refresh.
         if self._break_list_task is not None and not self._break_list_task.done():
             self._break_list_task.cancel()
-        self._break_list_task = supervise(
+        self._break_list_task = asyncio.create_task(
             self._delayed_break_list(),
             name="refresh-breakpoints-debounced",
         )
+        self._break_list_task.add_done_callback(_on_task_done)
 
 
     async def _delayed_break_list(self) -> None:

@@ -422,7 +422,7 @@ class LocalVariablePaneUpdateMixin:
             return []
 
         if self._rebuild_gen == gen:
-            self._apply_changelist(changelist, skip_varobjs=stale_varobjs)
+            await self._apply_changelist(changelist, skip_varobjs=stale_varobjs)
 
         return changelist
 

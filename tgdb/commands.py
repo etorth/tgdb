@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from .source_widget import SourceFile
 from .memory_pane import MemoryPane
-from .async_util import supervise
 
 if TYPE_CHECKING:
     from .main import TGDBApp
@@ -298,7 +297,7 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_evaluate(self: "TGDBApp", args: list) -> str | None:
+    async def _cmd_evaluate(self: "TGDBApp", args: list) -> str | None:
         """Add an expression to the Evaluations pane: :evaluate expr."""
         if not args:
             return "evaluate: requires an expression (e.g. :evaluate myvar)"
@@ -306,12 +305,12 @@ class CommandsMixin:
         evaluate_pane = getattr(self, "_evaluate_pane", None)
         if evaluate_pane is None:
             return "evaluate: Evaluations pane is not open (add it from context menu first)"
-        evaluate_pane.add_expression(expr)
+        await evaluate_pane.add_expression(expr)
         self._show_status(f"Evaluating: {expr}")
         return None
 
 
-    def _cmd_unevaluate(self: "TGDBApp", args: list) -> str | None:
+    async def _cmd_unevaluate(self: "TGDBApp", args: list) -> str | None:
         """Remove an expression by 1-based index: :unevaluate N."""
         if not args:
             return "unevaluate: requires an index (e.g. :unevaluate 1)"
@@ -322,7 +321,7 @@ class CommandsMixin:
         evaluate_pane = getattr(self, "_evaluate_pane", None)
         if evaluate_pane is None:
             return "unevaluate: Evaluations pane is not open"
-        removed = evaluate_pane.remove_expression(idx - 1)
+        removed = await evaluate_pane.remove_expression(idx - 1)
         if removed:
             self._show_status(f"Removed: {removed}")
         else:
@@ -330,7 +329,7 @@ class CommandsMixin:
         return None
 
 
-    def _cmd_memory(self: "TGDBApp", args: list) -> str | None:
+    async def _cmd_memory(self: "TGDBApp", args: list) -> str | None:
         """Inspect memory in a Memory pane: :memory addr [size].
 
         addr may be a hex literal (0x...), decimal, or a GDB expression.
@@ -357,15 +356,12 @@ class CommandsMixin:
             None,
         )
         if empty is not None:
-            empty.set_address(addr, size)
+            await empty.set_address(addr, size)
             return None
         if not mounted:
             return "memory: Add one memory pane from context menu first"
         target = mounted[-1]
-        supervise(
-            self._spawn_memory_pane(target, addr, size),
-            name="cmd-memory-spawn",
-        )
+        await self._spawn_memory_pane(target, addr, size)
         return None
 
 
@@ -390,7 +386,7 @@ class CommandsMixin:
             new_container = PaneContainer(self.hl, orientation="vertical")
             await parent.replace_item(target, new_container)
             await new_container.set_items([target, pane])
-        pane.set_address(addr, size)
+        await pane.set_address(addr, size)
 
 
     def _cmd_disasm(self: "TGDBApp", args: list) -> str | None:

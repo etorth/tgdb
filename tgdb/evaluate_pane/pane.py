@@ -11,7 +11,6 @@ from collections.abc import Callable, Coroutine
 
 from textual.widgets import Tree
 
-from ..async_util import supervise
 from ..config import Config
 from ..highlight_groups import HighlightGroups
 from ..varobj_tree import VarobjTreePane
@@ -78,15 +77,15 @@ class EvaluatePane(VarobjTreePane):
         """Legacy compatibility shim — no-op in the tree-based implementation."""
 
 
-    def add_expression(self, expr: str) -> None:
+    async def add_expression(self, expr: str) -> None:
         """Append a watch expression and start creating its varobj tree node."""
         idx = len(self._expressions)
         self._expressions.append(expr)
         self._expr_varobjs.append("")
-        supervise(self._create_expression_node(idx, expr), name="watch-create-expr")
+        await self._create_expression_node(idx, expr)
 
 
-    def remove_expression(self, index: int) -> str | None:
+    async def remove_expression(self, index: int) -> str | None:
         """Remove one watch expression by 0-based index and return it."""
         if not (0 <= index < len(self._expressions)):
             return None
@@ -103,7 +102,7 @@ class EvaluatePane(VarobjTreePane):
             if removed_varobj in self._varobj_names:
                 self._varobj_names.remove(removed_varobj)
             if self._var_delete:
-                supervise(self._delete_varobj_safe(removed_varobj), name="watch-delete-varobj")
+                await self._delete_varobj_safe(removed_varobj)
 
         return removed_expr
 
@@ -118,7 +117,7 @@ class EvaluatePane(VarobjTreePane):
         except Exception:
             return
 
-        self._apply_watch_changelist(changelist)
+        await self._apply_watch_changelist(changelist)
 
 
     async def _create_expression_node(self, idx: int, expr: str) -> None:
@@ -144,7 +143,7 @@ class EvaluatePane(VarobjTreePane):
         if idx >= len(self._expressions) or self._expressions[idx] != expr:
             varobj_name = info.get("name", "")
             if varobj_name and self._var_delete:
-                supervise(self._delete_varobj_safe(varobj_name), name="watch-delete-varobj")
+                await self._delete_varobj_safe(varobj_name)
             return
 
         varobj_name = info.get("name", "")
@@ -176,7 +175,7 @@ class EvaluatePane(VarobjTreePane):
             self._varobj_to_node[varobj_name] = node
 
 
-    def _apply_watch_changelist(self, changelist: list[dict]) -> None:
+    async def _apply_watch_changelist(self, changelist: list[dict]) -> None:
         """Apply ``-var-update`` results to the watch tree."""
         for change in changelist:
             varobj_name = change.get("name", "")
@@ -209,6 +208,6 @@ class EvaluatePane(VarobjTreePane):
             data["loaded"] = False
             node.remove_children()
             if node.is_expanded:
-                supervise(self._load_children(node, varobj_name), name="watch-load-children")
+                await self._load_children(node, varobj_name)
             else:
                 node.add_leaf("⏳ loading...")

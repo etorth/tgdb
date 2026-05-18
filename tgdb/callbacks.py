@@ -6,7 +6,7 @@ import os
 
 from textual.css.query import NoMatches
 
-from .async_util import supervise
+from .async_util import _on_task_done
 from .source_widget import (
     ToggleBreakpoint,
     OpenFileDialog,
@@ -233,10 +233,11 @@ class CallbacksMixin:
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
             return
-        self._cmd_task = supervise(
+        self._cmd_task = asyncio.create_task(
             self._run_cmd_task(msg.command, history_text=msg.history_text),
             name="cmd-task",
         )
+        self._cmd_task.add_done_callback(_on_task_done)
 
 
     async def _run_cmd_task(self, cmd: str, *, history_text: str = "") -> None:
@@ -389,7 +390,7 @@ class CallbacksMixin:
         self._switch_to_tgdb()
 
 
-    def _ui_on_stopped(self, frame: Frame) -> None:
+    async def _ui_on_stopped(self, frame: Frame) -> None:
         """GDB stopped — update source view to executing location."""
         path = frame.file or frame.fullname
         _log.info(f"stopped frame={path}:{frame.line} func={frame.func}")
@@ -409,21 +410,15 @@ class CallbacksMixin:
         # long enough to make the console look hung after commands like `start`.
         if self._file_dialog_pending:
             self.gdb.request_source_files()
-        supervise(
-            self._refresh_breakpoints_async(),
-            name="refresh-breakpoints",
-        )
-        # Refresh watch and disasm panes when stopped
+
+        coros: list = [self._refresh_breakpoints_async()]
         if self._evaluate_pane is not None:
-            supervise(
-                self._evaluate_pane.refresh_all(),
-                name="evaluate-pane-refresh",
-            )
+            coros.append(self._evaluate_pane.refresh_all())
         if self._disasm_pane is not None:
             current_addr = ""
             if self.gdb.current_frame is not None:
                 current_addr = self.gdb.current_frame.addr
-            supervise(
+            coros.append(
                 self._disasm_pane.refresh_disasm(
                     path or "",
                     frame.line,
@@ -431,16 +426,19 @@ class CallbacksMixin:
                     thread_id=self.gdb.current_thread_id,
                     func=frame.func,
                 ),
-                name="disasm-pane-refresh",
             )
         if self._memory_panes:
             for pane in self._memory_panes:
                 if pane.parent is not None:
-                    pane.refresh_memory()
+                    coros.append(pane.refresh_memory())
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                _log.error(f"pane refresh error: {r!r}", exc_info=r)
 
 
 
-    def _ui_on_register_changed(self, regnum: int) -> None:
+    async def _ui_on_register_changed(self, regnum: int) -> None:
         """User wrote a register from the CLI (e.g. ``set $rax=0x1234``).
 
         GDB does not emit any MI async record for register writes outside
@@ -455,10 +453,7 @@ class CallbacksMixin:
         if self._register_pane is None or self._register_pane.parent is None:
             return
         try:
-            supervise(
-                self.gdb.request_current_registers(report_error=False),
-                name="register-changed-refresh",
-            )
+            await self.gdb.request_current_registers(report_error=False)
         except Exception:
             pass
 
@@ -494,7 +489,7 @@ class CallbacksMixin:
         self._show_status("inferior call …")
 
 
-    def _ui_on_inferior_call_post(self) -> None:
+    async def _ui_on_inferior_call_post(self) -> None:
         """Inferior call finished — its side effects are now visible.
 
         ``print foo()`` can change locals, registers, and arbitrary memory.
@@ -514,30 +509,27 @@ class CallbacksMixin:
             return
         if self.gdb._locals_cancel_token in self.gdb._pending:
             return
+
+        coros: list = []
         try:
-            supervise(
-                self.gdb.request_current_frame_locals(report_error=False),
-                name="inferior-call-post-locals",
-            )
+            coros.append(self.gdb.request_current_frame_locals(report_error=False))
         except Exception:
             pass
         if self._register_pane is not None and self._register_pane.parent is not None:
             try:
-                supervise(
-                    self.gdb.request_current_registers(report_error=False),
-                    name="inferior-call-post-registers",
-                )
+                coros.append(self.gdb.request_current_registers(report_error=False))
             except Exception:
                 pass
         if self._evaluate_pane is not None:
-            supervise(
-                self._evaluate_pane.refresh_all(),
-                name="evaluate-pane-refresh",
-            )
+            coros.append(self._evaluate_pane.refresh_all())
         if self._memory_panes:
             for pane in self._memory_panes:
                 if pane.parent is not None:
-                    pane.refresh_memory()
+                    coros.append(pane.refresh_memory())
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                _log.error(f"pane refresh error: {r!r}", exc_info=r)
 
 
     def _ui_on_gdb_exiting(self) -> None:
@@ -559,7 +551,7 @@ class CallbacksMixin:
         self._ui_gdb_exit()
 
 
-    def _ui_on_frame_changed(self, frame: Frame) -> None:
+    async def _ui_on_frame_changed(self, frame: Frame) -> None:
         """The selected frame changed — update source and dependent panes.
 
         Fired when a ``*stopped`` async record, ``=thread-selected``
@@ -580,16 +572,15 @@ class CallbacksMixin:
                     src.exe_line = frame.line
                     src.move_to(frame.line)
                 self._update_status_file_info()
+
+        coros: list = []
         if self._evaluate_pane is not None:
-            supervise(
-                self._evaluate_pane.refresh_all(),
-                name="evaluate-pane-refresh",
-            )
+            coros.append(self._evaluate_pane.refresh_all())
         if self._disasm_pane is not None:
             current_addr = ""
             if self.gdb.current_frame is not None:
                 current_addr = self.gdb.current_frame.addr
-            supervise(
+            coros.append(
                 self._disasm_pane.refresh_disasm(
                     path or "",
                     frame.line,
@@ -597,12 +588,16 @@ class CallbacksMixin:
                     thread_id=self.gdb.current_thread_id,
                     func=frame.func,
                 ),
-                name="disasm-pane-refresh",
             )
         if self._memory_panes:
             for pane in self._memory_panes:
                 if pane.parent is not None:
-                    pane.refresh_memory()
+                    coros.append(pane.refresh_memory())
+        if coros:
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            for r in results:
+                if isinstance(r, Exception):
+                    _log.error(f"pane refresh error: {r!r}", exc_info=r)
 
 
     def _ui_on_memory_changed(self) -> None:
@@ -619,20 +614,18 @@ class CallbacksMixin:
         self.set_timer(0.05, self._flush_memory_changed)
 
 
-    def _flush_memory_changed(self) -> None:
+    async def _flush_memory_changed(self) -> None:
         self._memory_changed_pending = False
-        supervise(
-            self.gdb.request_current_frame_locals(report_error=False),
-            name="memory-changed-locals",
-        )
+        coros: list = [self.gdb.request_current_frame_locals(report_error=False)]
         if self._evaluate_pane is not None:
-            supervise(
-                self._evaluate_pane.refresh_all(),
-                name="evaluate-after-memory-changed",
-            )
+            coros.append(self._evaluate_pane.refresh_all())
         for pane in self._memory_panes:
             if pane.parent is not None:
-                pane.refresh_memory()
+                coros.append(pane.refresh_memory())
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                _log.error(f"pane refresh error: {r!r}", exc_info=r)
 
 
     async def _refresh_breakpoints_async(self) -> None:
