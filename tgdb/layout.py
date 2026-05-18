@@ -219,6 +219,8 @@ class LayoutMixin:
             src = self._get_source_view(mounted_only=True)
             gdb = self._get_gdb_widget(mounted_only=True)
             if src is None or gdb is None:
+                # Widgets not yet mounted — don't stamp _last_split_setting
+                # so the next call (after mount) actually re-runs.
                 return
             if orientation_changed:
                 container.set_orientation(self.cfg.winsplitorientation)
@@ -262,11 +264,15 @@ class LayoutMixin:
                     gdb.styles.width = "1fr"
                     gdb.styles.height = gdb_size
         except NoMatches:
-            pass
-        finally:
-            self._last_split_setting = split
-            self._last_orientation = self.cfg.winsplitorientation
-            self._preserve_window_shift_once = False
+            # Container not mounted yet — same reasoning as above; do
+            # not stamp the bookkeeping fields below.
+            return
+        # Only update bookkeeping on the success path so a missed apply
+        # (widget not mounted) doesn't trick a later call into skipping
+        # the real work because "we already did that setting".
+        self._last_split_setting = split
+        self._last_orientation = self.cfg.winsplitorientation
+        self._preserve_window_shift_once = False
 
 
     def on_drag_resize(self: "TGDBApp", msg: DragResize) -> None:
