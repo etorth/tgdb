@@ -56,7 +56,9 @@ def spawn_eager_task(
     loop = asyncio.get_running_loop()
     task = asyncio.Task(coro, loop=loop, eager_start=True, name=name)
     if task.done():
-        exc = task.exception() if not task.cancelled() else None
+        exc = None
+        if not task.cancelled():
+            exc = task.exception()
         if exc is not None:
             _log.error(
                 f"unhandled exception in task {name!r}: {exc!r}",

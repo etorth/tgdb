@@ -125,7 +125,10 @@ class LocalVariablePaneReconcileMixin:
                 gen, tree, binding, restore, shadowed_keys, marker_active, min_depth_by_name,
             )
 
-        var_expr = f"*({type_str}*){binding_addr}" if use_addr else variable.name
+        if use_addr:
+            var_expr = f"*({type_str}*){binding_addr}"
+        else:
+            var_expr = variable.name
 
         try:
             info = await self._var_create(var_expr)
@@ -880,7 +883,10 @@ class LocalVariablePaneReconcileMixin:
             # contain a ``.`` (which would mark a grandchild).
             if "." in name[len(prefix):]:
                 continue
-            data = node.data if isinstance(node.data, dict) else {}
+            if isinstance(node.data, dict):
+                data = node.data
+            else:
+                data = {}
             exp = data.get("exp", "")
             if exp:
                 tracked_exps.append(exp)

@@ -241,7 +241,10 @@ class KeyRoutingMixin:
                     # compute ``chr(-11)`` and ValueError out of the replay
                     # loop, leaking a partial map expansion to the GDB PTY.
                     code = ord(token[5].upper()) - 64
-                    char = chr(code) if 0 <= code <= 31 else ""
+                    if 0 <= code <= 31:
+                        char = chr(code)
+                    else:
+                        char = ""
                 else:
                     char = ""
                 if char:

@@ -169,7 +169,10 @@ class GDBRequestMixin:
             self._request_meta.pop(token, None)
 
         if not expect_socket:
-            message = result.get("message", "") if isinstance(result, dict) else ""
+            if isinstance(result, dict):
+                message = result.get("message", "")
+            else:
+                message = ""
             if message == "error" and raise_on_error:
                 payload = result.get("payload") or {}
                 if isinstance(payload, dict):

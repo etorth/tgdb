@@ -116,7 +116,10 @@ def _send_sock_frame(tag, payload):
     if fd is None:
         return False
 
-    tag_byte = tag.encode("ascii")[:1] if isinstance(tag, str) else tag[:1]
+    if isinstance(tag, str):
+        tag_byte = tag.encode("ascii")[:1]
+    else:
+        tag_byte = tag[:1]
 
     if len(payload) >= _COMPRESS_THRESHOLD:
         payload = zlib.compress(payload)

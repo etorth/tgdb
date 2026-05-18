@@ -404,6 +404,9 @@ class CommandsMixin:
                 return f"disasm: unknown value {args[0]!r} (use on/off)"
         else:
             src.disasm_mode = not getattr(src, "disasm_mode", False)
-        state = "on" if getattr(src, "disasm_mode", False) else "off"
+        if getattr(src, "disasm_mode", False):
+            state = "on"
+        else:
+            state = "off"
         self._show_status(f"Disassembly: {state}")
         return None

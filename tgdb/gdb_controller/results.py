@@ -24,7 +24,10 @@ class GDBResultMixin:
                 mi_value = ""
                 if isinstance(results, dict):
                     mi_value = results.get("value", "")
-                status = mi_value.strip('"') if isinstance(mi_value, str) else ""
+                if isinstance(mi_value, str):
+                    status = mi_value.strip('"')
+                else:
+                    status = ""
 
                 if cls == "error" or status == "failed":
                     meta = self._request_meta.pop(token, {})
