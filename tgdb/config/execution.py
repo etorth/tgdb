@@ -108,8 +108,13 @@ class ConfigExecutionMixin:
         if command_match:
             return await self._cmd_command(command_match.group(1))
 
+        # ``evaluate`` needs verbatim tail (multi-token C expressions),
+        # so it bypasses shlex.  ``signal`` used to share this codepath
+        # but signal arguments are a single token (name or number), so
+        # it goes through normal shlex parsing now; ``_cmd_signal``
+        # validates argv length.
         eval_match = re.match(
-            r"^(evaluate|signal)\b\s*(.*)",
+            r"^(evaluate)\b\s*(.*)",
             line,
             re.DOTALL | re.IGNORECASE,
         )

@@ -293,6 +293,8 @@ class CommandsMixin:
         """Send a signal to the inferior: :signal SIGNAME (e.g. SIGTERM, 9)."""
         if not args:
             return "signal: requires a signal name or number (e.g. :signal SIGTERM)"
+        if len(args) > 1:
+            return "signal: too many arguments (expected one signal name or number)"
         self.gdb.send_signal(args[0])
         return None
 
