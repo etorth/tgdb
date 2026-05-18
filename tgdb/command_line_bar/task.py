@@ -18,7 +18,7 @@ class CommandLineTaskMixin:
         return self._task_gen
 
 
-    def append_output(self, chunk: str, *, task_gen: int = 0) -> None:
+    def append_output(self, chunk: str, *, task_gen: int) -> None:
         if not chunk:
             return
 
