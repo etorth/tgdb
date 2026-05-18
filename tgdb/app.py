@@ -168,18 +168,6 @@ class TGDBApp(
         self._mode: str = "GDB_PROMPT"
         self._await_mark_jump: bool = False
         self._await_mark_set: bool = False
-        self._split_ratio: float = 0.5
-        self._cur_win_split: int = {
-            "gdb_full": -2,
-            "gdb_big": -1,
-            "even": 0,
-            "src_big": 1,
-            "src_full": 2,
-        }.get(self.cfg.winsplit.lower(), 0)
-        self._window_shift: int = 0
-        self._last_split_setting: str = ""
-        self._last_orientation: str = ""
-        self._preserve_window_shift_once: bool = False
         self._file_dialog_pending: bool = False
         self._inf_tty_fd: int | None = None
         self._shutting_down: bool = False

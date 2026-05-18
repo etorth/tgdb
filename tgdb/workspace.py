@@ -35,8 +35,7 @@ class DragResize(Message):
 class TitleBarResized(Message):
     """Posted after a title-bar drag resizes two items in a vertical PaneContainer.
 
-    ``new_before_size`` is the resulting pixel height of the *before* pane so
-    that the app can sync its internal ``_window_shift`` state.
+    ``new_before_size`` is the resulting pixel height of the *before* pane.
     """
 
     def __init__(self, container: "PaneContainer", new_before_size: int) -> None:
@@ -386,6 +385,74 @@ class PaneContainer(Widget):
         return before, after
 
 
+    def resize_first_child(self, delta: int) -> bool:
+        """Grow (delta > 0) or shrink (delta < 0) the first item by *delta*
+        cells along the orientation axis.
+
+        The remaining items absorb the change proportionally to their
+        current sizes so their relative ratios are preserved.  Returns
+        False when there is nothing to resize (fewer than two items,
+        zero axis size, or the requested delta would violate the
+        per-item minimum).
+
+        Used for the root-level keyboard shortcuts ``-``/``=`` and
+        ``_``/``+``; nested containers can call it directly too.
+        """
+        n = len(self._items)
+        if n < 2 or delta == 0:
+            return False
+
+        self._capture_layout_weights()
+        is_horizontal = self.orientation == "horizontal"
+        if is_horizontal:
+            min_size = self.min_item_width
+            sizes = [item.size.width for item in self._items]
+        else:
+            min_size = self.min_item_height
+            sizes = [item.size.height for item in self._items]
+
+        if any(s <= 0 for s in sizes):
+            return False
+        total = sum(sizes)
+        if total < n * max(1, min_size):
+            return False
+
+        first_min = max(1, min_size)
+        first_max = total - (n - 1) * first_min
+        first_new = max(first_min, min(first_max, sizes[0] + delta))
+        if first_new == sizes[0]:
+            return False
+
+        remaining = total - first_new
+        rest_sum = sum(sizes[1:])
+        if rest_sum <= 0:
+            return False
+
+        new_sizes = [first_new]
+        for i in range(1, n):
+            share = remaining * sizes[i] / rest_sum
+            new_sizes.append(max(first_min, int(round(share))))
+
+        # Fix rounding drift so total matches.
+        drift = total - sum(new_sizes)
+        if drift != 0 and n > 1:
+            # Apply to the largest of the trailing items so the first
+            # child's chosen size is preserved exactly.
+            largest_idx = 1 + max(
+                range(n - 1),
+                key=lambda j: new_sizes[1 + j],
+            )
+            new_sizes[largest_idx] = max(first_min, new_sizes[largest_idx] + drift)
+
+        if any(s < first_min for s in new_sizes):
+            return False
+
+        self._weights = new_sizes
+        self._apply_orientation()
+        self.refresh(layout=True)
+        return True
+
+
     def _capture_layout_weights(self) -> None:
         is_horizontal = self.orientation == "horizontal"
         if not self._items:
@@ -499,8 +566,6 @@ class PaneContainer(Widget):
         splitter = msg.splitter
         if splitter is None or splitter.parent is not self:
             return
-        # Always handle the drag; do NOT stop the message so it can bubble to
-        # the app for top-level _window_shift bookkeeping.
         self._resize_from_drag(splitter, msg.screen_x, msg.screen_y)
 
 
@@ -533,5 +598,5 @@ class PaneContainer(Widget):
         self._weights[after_index] = new_after
         self._apply_orientation()
         self.refresh(layout=True)
-        # Notify the app so it can sync _window_shift for proper on_resize behaviour.
+        # Notify the app for any container-level bookkeeping it may need.
         self.post_message(TitleBarResized(self, new_before))

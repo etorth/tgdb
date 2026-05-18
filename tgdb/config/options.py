@@ -29,9 +29,6 @@ _ALIASES: dict[str, str] = {
     "tm": "timeoutlen",
     "ttm": "ttimeoutlen",
     "ts": "tabstop",
-    "wmh": "winminheight",
-    "wmw": "winminwidth",
-    "wso": "winsplitorientation",
     "ws": "wrapscan",
 }
 

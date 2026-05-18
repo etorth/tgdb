@@ -763,10 +763,3 @@ class CallbacksMixin:
         self.km.ttimeout_ms = cfg.ttimeoutlen
         self.km.timeout_enabled = cfg.timeout
         self.km.ttimeout_enabled = cfg.ttimeout
-        if cfg.winsplitorientation != self._last_orientation:
-            self._set_window_shift_from_ratio(
-                cfg.winsplitorientation == "horizontal",
-                self._split_ratio,
-            )
-            self._preserve_window_shift_once = True
-        self._apply_split()

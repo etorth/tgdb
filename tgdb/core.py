@@ -33,9 +33,12 @@ class AppCoreMixin:
                 id="gdb-pane",
             )
         with Widget(id="global-container"):
+            # Root container starts empty.  ``on_mount`` runs the rc
+            # file and, if the root is still empty afterwards, installs
+            # the default source-on-top / gdb-on-bottom layout.
             yield PaneContainer(
                 self.hl,
-                orientation=self.cfg.winsplitorientation,
+                orientation="vertical",
                 id="split-container",
             )
             yield CommandLineBar(
@@ -70,12 +73,10 @@ class AppCoreMixin:
         gdb_widget.imap_feed = self._imap_feed
         gdb_widget.imap_replay = self._replay_gdb_key_sequence
 
-        try:
-            container = self.query_one("#split-container", PaneContainer)
-            await container.set_items([source_view, gdb_widget])
-        except Exception as exc:
-            self._show_status(f"Failed to initialize workspace: {exc}")
-            return
+        # Leave the root container empty here.  After the rc file
+        # has had a chance to install its own layout (see
+        # _load_rc_async below) the post-rc step will install the
+        # default source/gdb split if the user did not.
 
         try:
             file_dialog = self.query_one("#file-dlg", FileDialog)
@@ -207,20 +208,46 @@ class AppCoreMixin:
 
 
     async def _load_rc_async(self) -> None:
-        if self._rc_file == "NONE":
-            return
-        path: str | None
-        if self._rc_file:
-            path = self._rc_file
-        else:
-            default_path = self.cp.default_rc_path()
-            if default_path is None:
-                return
-            path = str(default_path)
-        error = await self.cp.load_file_async(path)
-        if error:
-            self._show_status(error)
+        # Resolve the rc-file path.  ``"NONE"`` is the explicit
+        # opt-out (``tgdb --rc NONE``); an empty value means use the
+        # default XDG location.
+        path: str | None = None
+        if self._rc_file != "NONE":
+            if self._rc_file:
+                path = self._rc_file
+            else:
+                default_path = self.cp.default_rc_path()
+                if default_path is not None:
+                    path = str(default_path)
+        if path is not None:
+            error = await self.cp.load_file_async(path)
+            if error:
+                self._show_status(error)
         self._sync_config()
+        # After the rc file has had a chance to install its own pane
+        # layout, fall back to the cgdb-style source-on-top /
+        # gdb-on-bottom default when the root container is still
+        # empty.  Run unconditionally — even when the rc file is
+        # absent (``--rc NONE`` or no XDG file) so the user always
+        # gets a working initial view.
+        await self._install_default_layout_if_empty()
+
+
+    async def _install_default_layout_if_empty(self) -> None:
+        """Install the source/gdb default layout when the root is empty."""
+        source_view = self._get_source_view()
+        gdb_widget = self._get_gdb_widget()
+        if source_view is None or gdb_widget is None:
+            return
+        try:
+            container = self.query_one("#split-container", PaneContainer)
+        except NoMatches:
+            return
+        if container.items:
+            return
+        if container.orientation != "vertical":
+            await container.set_orientation_async("vertical")
+        await container.set_items([source_view, gdb_widget])
 
 
     def _set_mode(self, mode: str) -> None:

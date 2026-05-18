@@ -47,15 +47,11 @@ class Config:
     tabstop: int = 8
     timeoutlen: int = 1000
     ttimeoutlen: int = 100
-    winminheight: int = 0
-    winminwidth: int = 0
 
     # String / enum options
     tgdbmodekey: str = "escape"  # key name
     executinglinedisplay: str = "longarrow"  # shortarrow|longarrow|highlight|block
     selectedlinedisplay: str = "block"
-    winsplit: str = "even"  # src_full|src_big|even|gdb_big|gdb_full
-    winsplitorientation: str = "vertical"  # horizontal|vertical
     syntax: str = "on"  # on|off|c|asm|…
 
     # Path options (stored verbatim — no lowercasing)
@@ -116,15 +112,11 @@ _INT_OPTIONS = {
     "tabstop",
     "timeoutlen",
     "ttimeoutlen",
-    "winminheight",
-    "winminwidth",
 }
 _STR_OPTIONS = {
     "tgdbmodekey",
     "executinglinedisplay",
     "selectedlinedisplay",
-    "winsplit",
-    "winsplitorientation",
     "syntax",
 }
 # Path options: stored verbatim (no lowercasing); setting one may have side-effects.
