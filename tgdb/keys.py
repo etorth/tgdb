@@ -118,8 +118,12 @@ class KeyRoutingMixin:
         if not self._in_map_replay:
             result = self.km.feed("tgdb", key)
             if result == []:
-                # Buffering — key consumed but no action yet
+                # Buffering — key consumed but no action yet.  Arm
+                # an idle-flush timer so the buffer doesn't sit
+                # forever waiting for a follow-up keypress.
+                self._arm_km_flush_timer("tgdb")
                 return True
+            self._cancel_km_flush_timer("tgdb")
             if result != [key]:
                 # The map fired — replay the expansion
                 self._replay_key_sequence(result)
@@ -191,6 +195,49 @@ class KeyRoutingMixin:
 
 
     # ------------------------------------------------------------------
+    # Key-mapper idle-flush timer
+    # ------------------------------------------------------------------
+
+
+    def _arm_km_flush_timer(self: "TGDBApp", mode: str) -> None:
+        """Schedule a flush of the *mode* buffer after ``timeoutlen`` ms.
+
+        Cancels any prior timer for the mode so each new keypress
+        resets the idle window.  When the timer fires, ``flush()``
+        resolves the buffer greedily and the resulting tokens are
+        replayed through the mode's normal dispatch path.
+        """
+        self._cancel_km_flush_timer(mode)
+        if not self.km.timeout_enabled:
+            return
+        delay = max(0.0, self.km.timeout_ms / 1000.0)
+        self._km_flush_timer[mode] = self.set_timer(
+            delay,
+            lambda: self._fire_km_flush_timer(mode),
+        )
+
+
+    def _cancel_km_flush_timer(self: "TGDBApp", mode: str) -> None:
+        timer = self._km_flush_timer.pop(mode, None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                pass
+
+
+    def _fire_km_flush_timer(self: "TGDBApp", mode: str) -> None:
+        self._km_flush_timer.pop(mode, None)
+        tokens = self.km.flush(mode)
+        if not tokens:
+            return
+        if mode == "tgdb":
+            self._replay_key_sequence(tokens)
+        elif mode == "gdb":
+            self._replay_gdb_key_sequence(tokens)
+
+
+    # ------------------------------------------------------------------
     # imap support — GDB-mode key mapper
     # ------------------------------------------------------------------
 
@@ -207,7 +254,11 @@ class KeyRoutingMixin:
             return [key]
         result = self.km.feed("gdb", key)
         if result == []:
+            # Arm idle-flush timer so a partial map sequence doesn't
+            # stay buffered indefinitely.
+            self._arm_km_flush_timer("gdb")
             return None  # still buffering
+        self._cancel_km_flush_timer("gdb")
         return result
 
 

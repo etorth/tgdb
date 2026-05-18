@@ -131,6 +131,13 @@ class TGDBApp(
         super().__init__(**kwargs)
         self.hl = HighlightGroups()
         self.km = KeyMapper()
+        # Per-mode timer that flushes the key-mapper buffer after
+        # ``timeoutlen`` ms of idle.  Without this, a partial map
+        # sequence (e.g. user typed ``g`` of ``gg``) sits in the
+        # buffer indefinitely; vim's idle-timeout behaviour is
+        # restored by re-arming the timer on every feed() that
+        # leaves the buffer non-empty.
+        self._km_flush_timer: dict[str, object | None] = {}
         self.cfg = Config()
         self.cp = ConfigParser(self.cfg, self.hl, self.km)
         self._initial_source_pending = bool(gdb_args)
