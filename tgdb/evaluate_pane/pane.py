@@ -8,7 +8,6 @@ through the public methods documented on the class below.
 """
 
 import logging
-from collections.abc import Callable, Coroutine
 
 from textual.widgets import Tree
 
@@ -31,9 +30,6 @@ class EvaluatePane(VarobjTreePane):
     ``set_var_callbacks(var_create, var_list_children, var_delete, var_update, var_eval_expr)``
         Inject the async callbacks used to create, expand, delete and update
         varobjs.  Must be called before ``add_expression``.
-
-    ``set_eval_fn(fn)``
-        Legacy compatibility shim.  No-op in the tree-based implementation.
 
     ``add_expression(expr)``
         Append a new watch expression and create its root varobj tree node.
@@ -87,10 +83,6 @@ class EvaluatePane(VarobjTreePane):
 
     def title(self) -> str:
         return "EVALUATIONS"
-
-
-    def set_eval_fn(self, fn: Callable) -> None:
-        """Legacy compatibility shim — no-op in the tree-based implementation."""
 
 
     async def add_expression(self, expr: str) -> None:
