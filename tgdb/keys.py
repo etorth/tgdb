@@ -296,6 +296,15 @@ class KeyRoutingMixin:
         if self._mode == "TGDB":
             return self._dispatch_tgdb_replay_key(key, char)
 
+        if self._mode == "GDB_SCROLL":
+            # Replayed keys in scroll mode must go through the GDB
+            # widget's scroll-mode handler (Vi-style navigation),
+            # not straight to the inferior PTY.
+            gdb_w = self._get_gdb_widget(mounted_only=True)
+            if gdb_w is not None:
+                gdb_w._content._handle_scroll_key(key, char)
+            return False
+
         # GDB_PROMPT mode — forward char or Enter to the terminal
         if char:
             self.gdb.send_input(char.encode())
