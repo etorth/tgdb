@@ -64,6 +64,7 @@ class _ThreadContent(Widget):
         width = max(1, self.size.width or 1)
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
+        rendered = 0
         for i, thread in enumerate(self._threads[:height]):
             if i > 0:
                 result.append("\n")
@@ -72,10 +73,15 @@ class _ThreadContent(Widget):
             else:
                 style = self.hl.style("Normal")
             result.append(fit_cells(self._thread_text(thread), width), style=style)
-        remaining = height - min(height, len(self._threads))
-        for i in range(max(0, remaining)):
-            result.append("\n")
+            rendered += 1
+        remaining = height - rendered
+        for _ in range(max(0, remaining)):
+            # See stack_pane: skip the leading separator so an empty list
+            # doesn't overflow the widget by one row.
+            if rendered > 0:
+                result.append("\n")
             result.append(" " * width, style=self.hl.style("Normal"))
+            rendered += 1
         return result
 
 

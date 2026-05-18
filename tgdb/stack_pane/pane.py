@@ -57,6 +57,7 @@ class _StackContent(Widget):
         width = max(1, self.size.width or 1)
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
+        rendered = 0
         for i, frame in enumerate(self._frames[:height]):
             if i > 0:
                 result.append("\n")
@@ -65,10 +66,16 @@ class _StackContent(Widget):
             else:
                 style = self.hl.style("Normal")
             result.append(fit_cells(self._frame_text(frame), width), style=style)
-        remaining = height - min(height, len(self._frames))
-        for i in range(max(0, remaining)):
-            result.append("\n")
+            rendered += 1
+        remaining = height - rendered
+        for _ in range(max(0, remaining)):
+            # Only insert a separator when content has already been emitted.
+            # Otherwise the very first padding row produces a leading blank
+            # line and the widget overflows by one (height+1 rendered lines).
+            if rendered > 0:
+                result.append("\n")
             result.append(" " * width, style=self.hl.style("Normal"))
+            rendered += 1
         return result
 
 
