@@ -188,6 +188,3 @@ class RenderMixin:
         return t
 
 
-    def _render_input_with_popup(self, w: int, style: str) -> Text:
-        """Deprecated — popup is now a separate floating widget."""
-        return self._render_input(w, style)
