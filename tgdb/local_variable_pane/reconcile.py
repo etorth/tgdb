@@ -708,8 +708,13 @@ class LocalVariablePaneReconcileMixin:
             label = self._build_value_label(exp, value, has_children, collapse_compound=True, marker_active=False)
             node.set_label(label)
 
-            if isinstance(node_data, dict) and node_data.get("loaded") and has_children and new_varobj:
-                node_data["loaded"] = False
+            if (
+                isinstance(node_data, dict)
+                and node_data.get("load_status") == "loaded"
+                and has_children
+                and new_varobj
+            ):
+                node_data["load_status"] = "idle"
                 node.remove_children()
                 node.add_leaf("⏳ loading...")
                 await self._load_children(node, new_varobj)
@@ -962,7 +967,7 @@ class LocalVariablePaneReconcileMixin:
 
             node.set_label(label)
 
-            if change.get("new_num_children") is None or not data.get("loaded"):
+            if change.get("new_num_children") is None or data.get("load_status") != "loaded":
                 continue
 
             if (
@@ -997,7 +1002,7 @@ class LocalVariablePaneReconcileMixin:
                     self._shape_readd_keys.add(dropped_key)
                 continue
 
-            data["loaded"] = False
+            data["load_status"] = "idle"
             node.remove_children()
             if node.is_expanded:
                 await self._load_children(node, varobj_name)

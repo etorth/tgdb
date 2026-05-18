@@ -92,7 +92,7 @@ class VarobjTreeSupportMixin:
         }
 
         if has_children:
-            data["loaded"] = False
+            data["load_status"] = "idle"
             node = parent.add(label, expand=False, data=data)
             node.add_leaf("⏳ loading...")
             return node
@@ -125,7 +125,7 @@ class VarobjTreeSupportMixin:
 
         data["varobj"] = ""
         data["has_children"] = False
-        data["loaded"] = False
+        data["load_status"] = "idle"
         data["displayhint"] = ""
         data["marker_active"] = marker_active
 

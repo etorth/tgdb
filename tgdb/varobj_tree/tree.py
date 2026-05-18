@@ -92,26 +92,34 @@ class VarobjTreeMixin:
         if not data.get("has_children"):
             return False
 
-        if data.get("loaded"):
+        status = data.get("load_status", "idle")
+        # ``loading`` is treated the same as ``loaded`` for the re-entry
+        # guard: another coroutine is already fetching, don't queue a
+        # second fetch.  Returning False (vs True for loaded) keeps the
+        # caller's "do we have children yet" semantics correct.
+        if status == "loaded":
             return True
+        if status == "loading":
+            return False
 
         varobj_name = data.get("varobj", "")
         if not varobj_name or not self._var_list_children:
             return False
 
-        data["loaded"] = True
+        data["load_status"] = "loading"
         node.remove_children()
         displayhint = data.get("displayhint", "")
 
         try:
             children, has_more = await self._var_list_children(varobj_name, limit=self._child_fetch_limit(displayhint))
         except Exception as exc:
-            data["loaded"] = False
+            data["load_status"] = "idle"
             _log.warning(f"failed to load children for {varobj_name}: {exc}")
             node.add_leaf(f"⚠ {exc}")
             return False
 
         if not children:
+            data["load_status"] = "loaded"
             node.add_leaf("(empty)")
             return False
 
@@ -119,6 +127,7 @@ class VarobjTreeMixin:
         if has_more:
             self._add_load_more_node(node, varobj_name, len(children), displayhint)
 
+        data["load_status"] = "loaded"
         return True
 
 
@@ -160,27 +169,34 @@ class VarobjTreeMixin:
         if not isinstance(data, dict):
             return
 
-        if data.get("loaded"):
+        status = data.get("load_status", "idle")
+        if status in ("loading", "loaded"):
             return
 
-        data["loaded"] = True
+        data["load_status"] = "loading"
         if data.get("load_more"):
             varobj_name = data.get("varobj", "")
             from_idx = data.get("from_idx", 0)
             parent_displayhint = data.get("displayhint", "")
             if varobj_name and self._var_list_children:
                 await self._load_more_children(node, varobj_name, from_idx, parent_displayhint)
+                data["load_status"] = "loaded"
                 return
 
-            data["loaded"] = False
+            data["load_status"] = "idle"
             return
 
         varobj_name = data.get("varobj", "")
         if not varobj_name or not self._var_list_children:
-            data["loaded"] = False
+            data["load_status"] = "idle"
             return
 
         await self._load_children(node, varobj_name)
+        # _load_children handles its own error transitions; ensure we
+        # mark loaded on the success path.  If _load_children set
+        # ``load_status = "idle"`` due to an exception, leave it alone.
+        if data.get("load_status") == "loading":
+            data["load_status"] = "loaded"
 
 
     def _get_node_at_screen(self, screen_x: int, screen_y: int) -> TreeNode | None:
@@ -207,17 +223,23 @@ class VarobjTreeMixin:
         except Exception as exc:
             data = node.data
             if isinstance(data, dict):
-                data["loaded"] = False
+                data["load_status"] = "idle"
             node.add_leaf(f"⚠ {exc}")
             node.expand()
             return
 
         if not children:
+            data = node.data
+            if isinstance(data, dict):
+                data["load_status"] = "loaded"
             node.add_leaf("(empty)")
             node.expand()
             return
 
         await self._add_children(node, children, displayhint, flat_limit=0)
+        data = node.data
+        if isinstance(data, dict):
+            data["load_status"] = "loaded"
         node.expand()
 
 
@@ -265,13 +287,19 @@ class VarobjTreeMixin:
             return
 
         displayhint = data.get("displayhint", "")
-        data["loaded"] = True
+        data["load_status"] = "loading"
 
         if _is_collection_displayhint(displayhint):
             await self._load_children(node, varobj_name)
             node.expand()
         else:
             await self._expand_node_unlimited(node, varobj_name, displayhint)
+
+        # _load_children / _expand_node_unlimited set ``load_status``
+        # to ``"loaded"`` (or back to ``"idle"`` on error) themselves;
+        # only stamp success here if neither side did.
+        if data.get("load_status") == "loading":
+            data["load_status"] = "loaded"
 
         for child_node in self._iter_expandable_child_nodes(node):
             await self.do_expand_limited(child_node, _depth + 1)
@@ -295,9 +323,16 @@ class VarobjTreeMixin:
             return
 
         displayhint = data.get("displayhint", "")
-        data["loaded"] = True
+        data["load_status"] = "loading"
 
         await self._expand_node_unlimited(node, varobj_name, displayhint)
+        # _expand_node_unlimited handles success/error transitions
+        # itself; in case it left us in ``"loading"`` (no callback or
+        # missing varobj_name) reset to ``"idle"`` so a later expand
+        # can retry.
+        if data.get("load_status") == "loading":
+            data["load_status"] = "idle"
+
         for child_node in self._iter_expandable_child_nodes(node):
             await self.do_expand_full(child_node, _depth + 1)
 
@@ -332,11 +367,13 @@ class VarobjTreeMixin:
             children, has_more = await self._var_list_children(varobj_name, limit=self._child_fetch_limit(parent_displayhint))
         except Exception as exc:
             if isinstance(data, dict):
-                data["loaded"] = False
+                data["load_status"] = "idle"
             node.add_leaf(f"⚠ {exc}")
             return
 
         if not children:
+            if isinstance(data, dict):
+                data["load_status"] = "loaded"
             node.add_leaf("(empty)")
             return
 
@@ -344,6 +381,8 @@ class VarobjTreeMixin:
         await self._add_children(node, children, parent_displayhint)
         if has_more:
             self._add_load_more_node(node, varobj_name, len(children), parent_displayhint)
+        if isinstance(data, dict):
+            data["load_status"] = "loaded"
 
 
     def _add_load_more_node(self, parent: TreeNode, varobj_name: str, from_idx: int, parent_displayhint: str) -> None:
@@ -359,7 +398,7 @@ class VarobjTreeMixin:
             expand=False,
             data={
                 "load_more": True,
-                "loaded": False,
+                "load_status": "idle",
                 "varobj": varobj_name,
                 "from_idx": from_idx,
                 "displayhint": parent_displayhint,

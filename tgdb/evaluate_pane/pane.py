@@ -207,10 +207,10 @@ class EvaluatePane(VarobjTreePane):
             label = self._build_value_label(exp, new_value, has_children)
             node.set_label(label)
 
-            if change.get("new_num_children") is None or not data.get("loaded"):
+            if change.get("new_num_children") is None or data.get("load_status") != "loaded":
                 continue
 
-            data["loaded"] = False
+            data["load_status"] = "idle"
             node.remove_children()
             if node.is_expanded:
                 await self._load_children(node, varobj_name)
