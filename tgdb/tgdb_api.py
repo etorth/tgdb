@@ -36,10 +36,14 @@ container tree starting from the root PaneContainer:
 """
 
 import enum
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .app import TGDBApp
+
+
+_log = logging.getLogger("tgdb.api")
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +72,13 @@ class Pane(enum.Enum):
     DISASM = "disasm"
 
 
+def _pane_label(p) -> str:
+    """Stable string form of a Pane / SplitMode value for log output."""
+    if isinstance(p, (Pane, SplitMode)):
+        return p.value
+    return str(p)
+
+
 # ---------------------------------------------------------------------------
 # PaneHandle
 # ---------------------------------------------------------------------------
@@ -88,11 +99,13 @@ class PaneHandle:
 
     async def attach(self, pane_type: Pane) -> None:
         """Replace the cell's current content with a named pane widget."""
+        _log.info(f"api: attach(address={self._address}, pane={_pane_label(pane_type)})")
         await self._screen._do_attach(self._address, pane_type)
 
 
     async def detach(self) -> None:
         """Replace the cell's content with an EmptyPane."""
+        _log.info(f"api: detach(address={self._address})")
         await self._screen._do_detach(self._address)
 
 
@@ -163,6 +176,7 @@ class TGDBScreen:
 
     async def close_all_panes(self) -> None:
         """Remove all workspace panes and reset to a single empty cell."""
+        _log.info("api: close_all_panes()")
         await self._do_close_all()
 
 
@@ -179,14 +193,14 @@ class TGDBScreen:
         * If the orientations differ, the target is wrapped in a new container
           of the requested *mode* and the new empty cell is added alongside it.
         """
-        if pane is not None:
-            await self._do_split(list(pane), mode)
-        else:
-            await self._do_split([], mode)
+        target = [] if pane is None else list(pane)
+        _log.info(f"api: split(pane={target}, mode={_pane_label(mode)})")
+        await self._do_split(target, mode)
 
 
     async def close(self, address: list[int]) -> None:
         """Delete the workspace cell at *address* (equivalent to context-menu Delete)."""
+        _log.info(f"api: close(address={list(address)})")
         await self._do_close(list(address))
 
 

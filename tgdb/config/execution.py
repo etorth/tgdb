@@ -47,7 +47,7 @@ class ConfigExecutionMixin:
         except OSError as exc:
             return f"source: cannot open '{path}': {exc}"
 
-        _log.info(f"loading rc file: {path}")
+        _log.info(f"loading rc file: {path} ({len(raw_lines)} lines)")
         index = 0
         while index < len(raw_lines):
             line = raw_lines[index].rstrip("\n")
@@ -95,6 +95,18 @@ class ConfigExecutionMixin:
             line = line[1:].strip()
         if not line or line.startswith("#"):
             return None
+
+        # Log every command that actually reaches dispatch.  This funnel
+        # is shared between rc-file lines (via ``load_file_async``) and
+        # interactive commandline submissions (via ``_run_cmd_task``),
+        # so a single log line per call captures both paths.  Multi-line
+        # bodies (heredoc Python blocks) are abbreviated to keep the
+        # log readable.
+        if "\n" in line:
+            head, _, _rest = line.partition("\n")
+            _log.info(f"execute: {head!r} (+{line.count(chr(10))} more lines)")
+        else:
+            _log.info(f"execute: {line!r}")
 
         py_match = re.match(
             r"^(python|pyfile|pyf|py)\s*(.*)",
