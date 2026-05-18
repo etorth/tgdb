@@ -10,6 +10,7 @@ mirrors GDB-style hex+ASCII dumps; users can swap in their own through
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 
 from rich.text import Text
@@ -19,6 +20,8 @@ from ..async_util import _on_task_done
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
 from .formatter import MemoryFormatter, is_valid_formatter
+
+_log = logging.getLogger("tgdb.memory")
 
 
 class _MemoryContent(Widget):
@@ -68,7 +71,8 @@ class _MemoryContent(Widget):
         if callable(header_fn):
             try:
                 header_text = header_fn(width, height, hl)
-            except Exception:
+            except Exception as exc:
+                _log.debug(f"memory formatter header error: {exc!r}")
                 header_text = None
 
         if isinstance(header_text, Text) and len(header_text):
@@ -90,7 +94,8 @@ class _MemoryContent(Widget):
         body: Text | str | None = None
         try:
             body = formatter.format(width, body_height, self._blocks, hl)
-        except Exception:
+        except Exception as exc:
+            _log.debug(f"memory formatter body error: {exc!r}")
             body = None
         if isinstance(body, Text):
             result.append_text(body)
@@ -229,7 +234,8 @@ class MemoryPane(PaneBase):
         if self._read_fn:
             try:
                 raw = await self._read_fn(addr, size)
-            except Exception:
+            except Exception as exc:
+                _log.debug(f"memory read failed addr={addr} size={size}: {exc!r}")
                 raw = []
             self._content.set_blocks(raw)
 

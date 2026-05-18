@@ -1,6 +1,7 @@
 """Workspace and pane-management helpers for the application package."""
 
 import asyncio
+import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,8 @@ from .async_util import _on_task_done
 
 if TYPE_CHECKING:
     from .main import TGDBApp
+
+_log = logging.getLogger("tgdb.workspace")
 
 
 class WorkspaceMixin:
@@ -153,6 +156,7 @@ class WorkspaceMixin:
             return
         frame = self.gdb.current_frame
         if frame is not None and frame.addr:
+            _log.debug(f"priming disasm pane at {frame.addr} ({frame.func})")
             coro = pane.refresh_disasm(
                 frame.fullname or frame.file or "",
                 frame.line,
@@ -161,6 +165,7 @@ class WorkspaceMixin:
                 func=frame.func,
             )
         else:
+            _log.debug("priming disasm pane with main()")
             coro = pane.prime_function("main")
         task = asyncio.create_task(coro, name="disasm-pane-prime")
         task.add_done_callback(_on_task_done)
@@ -208,7 +213,9 @@ class WorkspaceMixin:
     def _create_pane(self: "TGDBApp", pane_kind: str) -> Widget | None:
         descriptor = self._pane_descriptors.get(pane_kind)
         if descriptor is None:
+            _log.warning(f"unknown pane kind: {pane_kind!r}")
             return None
+        _log.debug(f"creating pane: {pane_kind}")
         return descriptor.create()
 
 

@@ -17,6 +17,8 @@ from .source_widget import SourceView
 from .workspace import PaneContainer
 from .xdg_path import XDGPath
 
+_log = logging.getLogger("tgdb.app")
+
 
 class AppCoreMixin:
     """Mixin providing app composition, lifecycle, and focus helpers."""
@@ -142,9 +144,11 @@ class AppCoreMixin:
         try:
             self.gdb.start(rows=40, cols=200)
         except Exception as exc:
+            _log.error(f"failed to start GDB: {exc!r}")
             self._show_status(f"Failed to start GDB: {exc}")
             return
 
+        _log.info("GDB controller started, launching run_async")
         self._gdb_task = asyncio.create_task(
             self.gdb.run_async(), name="gdb-run",
         )
@@ -167,9 +171,7 @@ class AppCoreMixin:
         except NoMatches:
             return
         except Exception as exc:
-            logging.getLogger("tgdb.app").warning(
-                f"failed to persist command history: {exc!r}"
-            )
+            _log.warning(f"failed to persist command history: {exc!r}")
 
 
     def _close_inferior_tty(self) -> None:
@@ -183,12 +185,11 @@ class AppCoreMixin:
 
             os.close(fd)
         except OSError as exc:
-            logging.getLogger("tgdb.app").debug(
-                f"failed to close inferior-tty fd {fd}: {exc!r}"
-            )
+            _log.debug(f"failed to close inferior-tty fd {fd}: {exc!r}")
 
 
     async def on_unmount(self) -> None:
+        _log.info("app unmounting, shutting down")
         self._shutting_down = True
         self._save_history_to_disk()
         self._close_inferior_tty()

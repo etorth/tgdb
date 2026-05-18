@@ -437,7 +437,6 @@ class CallbacksMixin:
                 _log.error(f"pane refresh error: {r!r}", exc_info=r)
 
 
-
     async def _ui_on_register_changed(self, regnum: int) -> None:
         """User wrote a register from the CLI (e.g. ``set $rax=0x1234``).
 
@@ -454,8 +453,8 @@ class CallbacksMixin:
             return
         try:
             await self.gdb.request_current_registers(report_error=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug(f"register refresh failed: {exc!r}")
 
 
     def _ui_on_objfiles_changed(self) -> None:
@@ -513,13 +512,13 @@ class CallbacksMixin:
         coros: list = []
         try:
             coros.append(self.gdb.request_current_frame_locals(report_error=False))
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug(f"inferior-call-post locals request failed: {exc!r}")
         if self._register_pane is not None and self._register_pane.parent is not None:
             try:
                 coros.append(self.gdb.request_current_registers(report_error=False))
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug(f"inferior-call-post registers request failed: {exc!r}")
         if self._evaluate_pane is not None:
             coros.append(self._evaluate_pane.refresh_all())
         if self._memory_panes:

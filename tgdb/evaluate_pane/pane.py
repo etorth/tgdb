@@ -7,6 +7,7 @@ constructs the pane, injects the varobj callbacks, then mutates the watch list
 through the public methods documented on the class below.
 """
 
+import logging
 from collections.abc import Callable, Coroutine
 
 from textual.widgets import Tree
@@ -15,6 +16,8 @@ from ..config import Config
 from ..highlight_groups import HighlightGroups
 from ..varobj_tree import VarobjTreePane
 from ..varobj_tree.tree import _suppress_children
+
+_log = logging.getLogger("tgdb.evaluate")
 
 
 class EvaluatePane(VarobjTreePane):
@@ -114,7 +117,8 @@ class EvaluatePane(VarobjTreePane):
 
         try:
             changelist = await self._var_update("*")
-        except Exception:
+        except Exception as exc:
+            _log.debug(f"evaluate refresh_all var-update failed: {exc!r}")
             return
 
         await self._apply_watch_changelist(changelist)
@@ -132,7 +136,8 @@ class EvaluatePane(VarobjTreePane):
 
         try:
             info = await self._var_create(expr)
-        except Exception:
+        except Exception as exc:
+            _log.debug(f"evaluate var-create failed for {expr!r}: {exc!r}")
             if idx < len(self._expressions) and self._expressions[idx] == expr:
                 tree.root.add_leaf(
                     f"{expr} = <error>",
