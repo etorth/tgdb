@@ -160,27 +160,33 @@ class _GDBContent(ScrollMixin, Widget):
         buf = self._screen.buffer
 
         # Pop from the RIGHT (most recently pushed = topmost row just before
-        # the last shrink).  Reversed so the oldest restored row goes to row 0.
-        to_restore: list[dict | None] = []
+        # the last shrink).  Stop at the first injected entry (raw is None):
+        # injected lines have no pyte row to restore, so we leave them at the
+        # top of scrollback rather than dropping them from both deques.
+        to_restore: list[dict] = []
         for _ in range(n_restore):
-            self._scrollback.pop()  # keep display deque in sync
+            if not self._scrollback_raw or self._scrollback_raw[-1] is None:
+                break
+            self._scrollback.pop()
             to_restore.append(self._scrollback_raw.pop())
+        if not to_restore:
+            return
+        n_real = len(to_restore)
         ordered = list(reversed(to_restore))
 
-        # Shift existing content down by n_restore.
+        # Shift existing content down by n_real.
         new_entries: dict = {}
         for old_r in list(buf.keys()):
-            new_entries[old_r + n_restore] = buf[old_r]
+            new_entries[old_r + n_real] = buf[old_r]
         buf.clear()
         buf.update(new_entries)
 
         # Place restored rows at the top.
         for i, raw in enumerate(ordered):
-            if raw is not None:
-                buf[i] = raw
+            buf[i] = raw
 
         cy = self._screen.cursor.y
-        self._screen.cursor.y = min(new_rows - 1, cy + n_restore)
+        self._screen.cursor.y = min(new_rows - 1, cy + n_real)
         self._screen.dirty.update(range(new_rows))
 
 
