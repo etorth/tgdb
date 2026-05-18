@@ -498,15 +498,22 @@ class CallbacksMixin:
         covered by ``on_memory_changed``; we still touch them defensively
         in case the call changed only its own locals.
 
-        Skips when a locals request is already in flight.  The GDB-side
-        ``_collect_locals()`` evaluates every variable's value, which can
-        itself trigger ``InferiorCallPostEvent`` (e.g. pretty-printers)
-        — requesting another collect while one is running creates a
-        feedback loop.
+        Skips when the locals pipeline is still active.  The pipeline
+        spans two phases: (1) the raw ``_collect_locals()`` MI command,
+        and (2) the subsequent reconciliation that issues ``-var-create``
+        / ``-var-update`` for each local.  Both phases can trigger
+        ``InferiorCallPostEvent`` (pretty-printers calling into the
+        inferior); requesting another collect while either is running
+        produces an unbounded feedback loop that eventually trips
+        ``call_function_by_hand_dummy``'s ``thread_fsm`` assertion in
+        ``gdb/infcall.c``.  The cancel-token check covers phase (1);
+        ``_locals_pane._reconcile_active`` covers phase (2).
         """
         if self.gdb is None or self.gdb._inferior_running:
             return
         if self.gdb._locals_cancel_token in self.gdb._pending:
+            return
+        if self._locals_pane is not None and self._locals_pane._reconcile_active > 0:
             return
 
         coros: list = []

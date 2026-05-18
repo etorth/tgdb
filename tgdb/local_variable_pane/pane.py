@@ -144,6 +144,17 @@ class LocalVariablePane(
         # on the pane (not as a method-local) so the sync _apply_changelist
         # mixin method can communicate with the async _update_variables.
         self._shape_readd_keys: set[tuple[str, str]] = set()
+        # Counter of in-flight _update_variables reconciliations.  The
+        # raw collect-locals MI command resolves before var-create /
+        # var-update kick off, but those calls invoke pretty-printers
+        # that can call into the inferior and emit InferiorCallPostEvent.
+        # _ui_on_inferior_call_post consults this counter to avoid
+        # firing another collect_locals while reconciliation is still
+        # running, which otherwise produces an unbounded feedback loop
+        # and eventually trips gdb's call_function_by_hand_dummy
+        # assertion (infcall.c:1594).  A counter (not a bool) is used
+        # so overlapping reconciliations stay tracked correctly.
+        self._reconcile_active: int = 0
 
 
     def title(self) -> str:
@@ -189,6 +200,7 @@ class LocalVariablePane(
 
         self._rebuild_gen += 1
         _log.debug(f"set_variables gen={self._rebuild_gen} count={len(variables)} frame={frame}")
+        self._reconcile_active += 1
         task = asyncio.create_task(
             self._update_variables(self._rebuild_gen, frame, self._variables),
             name="locals-update",

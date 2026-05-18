@@ -435,139 +435,147 @@ class LocalVariablePaneReconcileMixin:
 
     async def _update_variables(self, gen: int, frame: Frame | None, variables: list[LocalVariable]) -> None:
         """Incrementally reconcile the locals tree with the current frame."""
-        if self._rebuild_gen != gen:
-            return
-
         try:
-            tree = self.query_one(Tree)
-        except Exception:
-            return
-
-        # Reset the shape-transition tracker — _apply_changelist (run
-        # later inside _update_unchanged_varobjs) populates this set
-        # when it drops a binding due to a dynamic printer's child
-        # shape change (e.g. std::variant alternative switch).  We
-        # consume the set after _apply_changelist returns to re-add
-        # the invalidated bindings within the same reconciliation
-        # pass, so the user does not see the variable disappear.
-        self._shape_readd_keys = set()
-
-        # Fast path: variables published by _publish_locals_async() carry addr
-        # and is_shadowed directly from GDB Python — no extra MI round-trips.
-        if variables and variables[0].addr:
-            new_bindings, new_binding_keys, shadowed_keys = self._bindings_from_local_variables(variables)
-        else:
-            # Fallback: evaluate addresses via &name.
-            addrs = await self._eval_variable_addresses(gen, variables)
-            if addrs is None:
-                return
-
             if self._rebuild_gen != gen:
                 return
 
-            new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(variables, addrs)
+            try:
+                tree = self.query_one(Tree)
+            except Exception:
+                return
 
-        new_frame_key = self._build_frame_key(frame, new_binding_keys)
-        current_keys = set(self._tracked.keys())
+            # Reset the shape-transition tracker — _apply_changelist (run
+            # later inside _update_unchanged_varobjs) populates this set
+            # when it drops a binding due to a dynamic printer's child
+            # shape change (e.g. std::variant alternative switch).  We
+            # consume the set after _apply_changelist returns to re-add
+            # the invalidated bindings within the same reconciliation
+            # pass, so the user does not see the variable disappear.
+            self._shape_readd_keys = set()
 
-        self._remove_out_of_scope_placeholders(new_binding_keys)
+            # Fast path: variables published by _publish_locals_async() carry addr
+            # and is_shadowed directly from GDB Python — no extra MI round-trips.
+            if variables and variables[0].addr:
+                new_bindings, new_binding_keys, shadowed_keys = self._bindings_from_local_variables(variables)
+            else:
+                # Fallback: evaluate addresses via &name.
+                addrs = await self._eval_variable_addresses(gen, variables)
+                if addrs is None:
+                    return
 
-        to_remove = self._build_removed_bindings(current_keys, new_binding_keys)
-        to_add = self._build_added_bindings(current_keys, new_bindings)
-        to_reanchor = self._build_reanchor_bindings(current_keys, new_bindings, shadowed_keys)
+                if self._rebuild_gen != gen:
+                    return
 
-        kept = current_keys & new_binding_keys
-        _log.info(
-            f"reconcile: vars={len(variables)} tracked={len(current_keys)} "
-            f"kept={len(kept)} add={len(to_add)} remove={len(to_remove)} "
-            f"reanchor={len(to_reanchor)} frame_key_changed={new_frame_key != self._frame_key}"
-        )
-        if _log.isEnabledFor(10):
-            for name, addr, _var in to_add:
-                _log.debug(f"  + {name} @ {addr}")
-            for name, addr in to_remove:
-                _log.debug(f"  - {name} @ {addr}")
-            for name, addr, _var in to_reanchor:
-                _log.debug(f"  ~ {name} @ {addr}")
+                new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(variables, addrs)
 
-        dynamic_root_overrides = self._build_dynamic_root_value_overrides(variables)
+            new_frame_key = self._build_frame_key(frame, new_binding_keys)
+            current_keys = set(self._tracked.keys())
 
-        no_change = not to_remove and not to_add and not to_reanchor and new_frame_key == self._frame_key
-        if no_change:
-            changelist = await self._update_unchanged_varobjs(gen, set(), dynamic_root_overrides)
+            self._remove_out_of_scope_placeholders(new_binding_keys)
+
+            to_remove = self._build_removed_bindings(current_keys, new_binding_keys)
+            to_add = self._build_added_bindings(current_keys, new_bindings)
+            to_reanchor = self._build_reanchor_bindings(current_keys, new_bindings, shadowed_keys)
+
+            kept = current_keys & new_binding_keys
+            _log.info(
+                f"reconcile: vars={len(variables)} tracked={len(current_keys)} "
+                f"kept={len(kept)} add={len(to_add)} remove={len(to_remove)} "
+                f"reanchor={len(to_reanchor)} frame_key_changed={new_frame_key != self._frame_key}"
+            )
+            if _log.isEnabledFor(10):
+                for name, addr, _var in to_add:
+                    _log.debug(f"  + {name} @ {addr}")
+                for name, addr in to_remove:
+                    _log.debug(f"  - {name} @ {addr}")
+                for name, addr, _var in to_reanchor:
+                    _log.debug(f"  ~ {name} @ {addr}")
+
+            dynamic_root_overrides = self._build_dynamic_root_value_overrides(variables)
+
+            no_change = not to_remove and not to_add and not to_reanchor and new_frame_key == self._frame_key
+            if no_change:
+                changelist = await self._update_unchanged_varobjs(gen, set(), dynamic_root_overrides)
+                if self._rebuild_gen != gen:
+                    return
+                # Re-add bindings that _apply_changelist invalidated due to a
+                # dynamic-printer shape transition.  Empty fast-return when
+                # there were none, which is the common case.
+                if self._shape_readd_keys:
+                    if not await self._readd_shape_transitioned_bindings(
+                        gen, tree, new_bindings, shadowed_keys,
+                    ):
+                        return
+                    self._sort_root_children_by_line(tree, new_bindings)
+                if changelist or self._rebuild_gen == gen:
+                    self._sync_shadow_labels(shadowed_keys)
+                return
+
+            if self._frame_key is not None and self._frame_key != new_frame_key:
+                self._saved_expansions[self._frame_key] = self._collect_expanded_paths()
+
+            self._frame_key = new_frame_key
+
+            stale_varobjs = self._build_stale_varobjs(to_remove, to_reanchor)
+            changelist = await self._update_unchanged_varobjs(gen, stale_varobjs, dynamic_root_overrides)
             if self._rebuild_gen != gen:
                 return
-            # Re-add bindings that _apply_changelist invalidated due to a
-            # dynamic-printer shape transition.  Empty fast-return when
-            # there were none, which is the common case.
+
+            # Re-add shape-transitioned bindings before the to_reanchor /
+            # to_remove / to_add processing so the rest of the pipeline
+            # operates on a tree whose invalidated nodes have been
+            # restored to their post-transition state.
             if self._shape_readd_keys:
                 if not await self._readd_shape_transitioned_bindings(
                     gen, tree, new_bindings, shadowed_keys,
                 ):
                     return
-                self._sort_root_children_by_line(tree, new_bindings)
-            if changelist or self._rebuild_gen == gen:
-                self._sync_shadow_labels(shadowed_keys)
-            return
 
-        if self._frame_key is not None and self._frame_key != new_frame_key:
-            self._saved_expansions[self._frame_key] = self._collect_expanded_paths()
-
-        self._frame_key = new_frame_key
-
-        stale_varobjs = self._build_stale_varobjs(to_remove, to_reanchor)
-        changelist = await self._update_unchanged_varobjs(gen, stale_varobjs, dynamic_root_overrides)
-        if self._rebuild_gen != gen:
-            return
-
-        # Re-add shape-transitioned bindings before the to_reanchor /
-        # to_remove / to_add processing so the rest of the pipeline
-        # operates on a tree whose invalidated nodes have been
-        # restored to their post-transition state.
-        if self._shape_readd_keys:
-            if not await self._readd_shape_transitioned_bindings(
-                gen, tree, new_bindings, shadowed_keys,
-            ):
-                return
-
-        to_reanchor = self._demote_out_of_scope_reanchors(to_reanchor, changelist, to_remove)
-        if self._rebuild_gen != gen:
-            return
-
-        for binding_name, binding_addr, variable in to_reanchor:
-            await self._reanchor_var(gen, binding_name, binding_addr, variable, tree)
+            to_reanchor = self._demote_out_of_scope_reanchors(to_reanchor, changelist, to_remove)
             if self._rebuild_gen != gen:
                 return
 
-        if not await self._remove_gone_bindings(gen, to_remove):
-            return
+            for binding_name, binding_addr, variable in to_reanchor:
+                await self._reanchor_var(gen, binding_name, binding_addr, variable, tree)
+                if self._rebuild_gen != gen:
+                    return
 
-        restore: set[ExpansionPath] = set()
-        if new_frame_key:
-            restore = self._saved_expansions.get(new_frame_key, set())
+            if not await self._remove_gone_bindings(gen, to_remove):
+                return
 
-        # Promote placeholders whose unparseable-type variable is no longer
-        # shadowed.  This must happen before _add_new_bindings so we don't
-        # try to add a binding that was just promoted.
-        promoted = await self._promote_placeholders(gen, tree, new_bindings, restore, shadowed_keys)
-        if self._rebuild_gen != gen:
-            return
+            restore: set[ExpansionPath] = set()
+            if new_frame_key:
+                restore = self._saved_expansions.get(new_frame_key, set())
 
-        # Filter out keys that were just promoted from placeholders — those
-        # already have real varobj nodes and must not be re-added.
-        # No sort: preserve original order from get_locals_b64() (declaration
-        # order, newest last).
-        to_add_filtered = [b for b in to_add if (b[0], b[1]) not in promoted]
+            # Promote placeholders whose unparseable-type variable is no longer
+            # shadowed.  This must happen before _add_new_bindings so we don't
+            # try to add a binding that was just promoted.
+            promoted = await self._promote_placeholders(gen, tree, new_bindings, restore, shadowed_keys)
+            if self._rebuild_gen != gen:
+                return
 
-        if not await self._add_new_bindings(gen, tree, to_add_filtered, restore, shadowed_keys, new_bindings):
-            return
+            # Filter out keys that were just promoted from placeholders — those
+            # already have real varobj nodes and must not be re-added.
+            # No sort: preserve original order from get_locals_b64() (declaration
+            # order, newest last).
+            to_add_filtered = [b for b in to_add if (b[0], b[1]) not in promoted]
 
-        # Ensure root children are in declaration-line order.  Due to async
-        # varobj creation (name fallback) and the double-fire pattern, nodes
-        # may have been appended out of order.
-        self._sort_root_children_by_line(tree, new_bindings)
+            if not await self._add_new_bindings(gen, tree, to_add_filtered, restore, shadowed_keys, new_bindings):
+                return
 
-        self._sync_shadow_labels(shadowed_keys)
+            # Ensure root children are in declaration-line order.  Due to async
+            # varobj creation (name fallback) and the double-fire pattern, nodes
+            # may have been appended out of order.
+            self._sort_root_children_by_line(tree, new_bindings)
+
+            self._sync_shadow_labels(shadowed_keys)
+        finally:
+            # Counter paired with the increment in set_variables; gates
+            # _ui_on_inferior_call_post so pretty-printer-driven inferior
+            # calls during var-create / var-update don't re-enter and
+            # spawn another collect_locals (see comment on
+            # _reconcile_active in pane.py for the full rationale).
+            self._reconcile_active -= 1
 
 
     def _sort_root_children_by_line(self, tree: Tree, new_bindings: list[BindingEntry]) -> None:
