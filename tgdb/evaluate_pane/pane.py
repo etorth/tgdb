@@ -68,8 +68,21 @@ class EvaluatePane(VarobjTreePane):
                  default ``Config()`` is used when omitted.
         """
         super().__init__(hl, cfg, **kwargs)
-        self._expressions: list[str] = []
-        self._expr_varobjs: list[str] = []
+        # Each watch carries a stable monotonic id so an in-flight
+        # ``-var-create`` await can find its target after the watch
+        # list has been mutated (e.g. user :unevaluate'd a different
+        # entry, shifting the indices).  Display order matches
+        # insertion order; the id never changes once assigned.
+        self._watches: list[tuple[int, str, str]] = []  # (id, expr, varobj_name)
+        self._next_watch_id: int = 0
+
+
+    def _find_watch_index(self, watch_id: int) -> int:
+        """Return the current 0-based index of *watch_id*, or -1 if removed."""
+        for i, (wid, _expr, _vname) in enumerate(self._watches):
+            if wid == watch_id:
+                return i
+        return -1
 
 
     def title(self) -> str:
@@ -82,19 +95,18 @@ class EvaluatePane(VarobjTreePane):
 
     async def add_expression(self, expr: str) -> None:
         """Append a watch expression and start creating its varobj tree node."""
-        idx = len(self._expressions)
-        self._expressions.append(expr)
-        self._expr_varobjs.append("")
-        await self._create_expression_node(idx, expr)
+        watch_id = self._next_watch_id
+        self._next_watch_id += 1
+        self._watches.append((watch_id, expr, ""))
+        await self._create_expression_node(watch_id, expr)
 
 
     async def remove_expression(self, index: int) -> str | None:
         """Remove one watch expression by 0-based index and return it."""
-        if not (0 <= index < len(self._expressions)):
+        if not (0 <= index < len(self._watches)):
             return None
 
-        removed_expr = self._expressions.pop(index)
-        removed_varobj = self._expr_varobjs.pop(index)
+        _wid, removed_expr, removed_varobj = self._watches.pop(index)
 
         if removed_varobj:
             node = self._varobj_to_node.pop(removed_varobj, None)
@@ -124,8 +136,13 @@ class EvaluatePane(VarobjTreePane):
         await self._apply_watch_changelist(changelist)
 
 
-    async def _create_expression_node(self, idx: int, expr: str) -> None:
-        """Create a varobj for *expr* and add it as a root tree node."""
+    async def _create_expression_node(self, watch_id: int, expr: str) -> None:
+        """Create a varobj for *expr* and add it as a root tree node.
+
+        ``watch_id`` is the stable id assigned in ``add_expression``; the
+        watch may be at any current index by the time the ``-var-create``
+        await resumes, or may have been removed entirely.
+        """
         if not self._var_create:
             return
 
@@ -138,21 +155,25 @@ class EvaluatePane(VarobjTreePane):
             info = await self._var_create(expr)
         except Exception as exc:
             _log.debug(f"evaluate var-create failed for {expr!r}: {exc!r}")
-            if idx < len(self._expressions) and self._expressions[idx] == expr:
+            if self._find_watch_index(watch_id) >= 0:
                 tree.root.add_leaf(
                     f"{expr} = <error>",
                     data={"varobj": "", "exp": expr, "has_children": False, "displayhint": ""},
                 )
             return
 
-        if idx >= len(self._expressions) or self._expressions[idx] != expr:
+        idx = self._find_watch_index(watch_id)
+        if idx < 0:
+            # Watch was removed while -var-create was in flight; drop
+            # the orphan varobj GDB just created for us.
             varobj_name = info.get("name", "")
             if varobj_name and self._var_delete:
                 await self._delete_varobj_safe(varobj_name)
             return
 
         varobj_name = info.get("name", "")
-        self._expr_varobjs[idx] = varobj_name
+        # Update the tuple in place (id, expr are stable).
+        self._watches[idx] = (watch_id, expr, varobj_name)
 
         if varobj_name:
             if varobj_name not in self._varobj_names:
