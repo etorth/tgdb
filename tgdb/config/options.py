@@ -60,17 +60,22 @@ class ConfigOptionMixin:
             return "set: missing argument"
 
         expr = args[0]
-        if expr.startswith("no"):
-            name = self._resolve_name(expr[2:])
-            if name in _BOOL_OPTIONS:
-                setattr(self.config, name, False)
-                return None
+        # Check ``=value`` form before ``no``-prefix.  ``:set notimeout=1``
+        # is contradictory (``no`` says false, ``=1`` says truthy) and
+        # previously fell into the ``no``-branch first, silently flipping
+        # ``timeout`` off and discarding the ``=1`` — make the explicit
+        # form take precedence so the inconsistency surfaces as an error.
         if "=" in expr:
             name, _, value = expr.partition("=")
             name = self._resolve_name(name.strip())
             if name == "history":
                 return self._cmd_set_history_n(value.strip())
             return await self._set_option(name, value.strip())
+        if expr.startswith("no"):
+            name = self._resolve_name(expr[2:])
+            if name in _BOOL_OPTIONS:
+                setattr(self.config, name, False)
+                return None
         name = self._resolve_name(expr)
         if name in _BOOL_OPTIONS:
             setattr(self.config, name, True)
