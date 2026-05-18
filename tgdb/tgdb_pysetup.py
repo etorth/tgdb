@@ -706,17 +706,88 @@ def _collect_frame_info(cancel_token=0):
 def _collect_breakpoints(cancel_token=0):
     """Collect breakpoint info and send via data socket (tag ``b``).
 
-    Mirrors the data that ``-break-list`` returns.
+    Emits one entry per addressable location.  For multi-location
+    breakpoints (template instantiations, inlined call sites, ...) the
+    parent is omitted and each ``gdb.BreakpointLocation`` is emitted as
+    a separate entry with a dotted id like ``"3.1"`` — matching the
+    flatten model the tgdb-side parser expects.  Mirrors the structure
+    of ``-break-list`` output, including its ``locations=[...]`` shape.
     """
     breakpoints = []
     for bp in gdb.breakpoints():
         if not bp.is_valid():
             continue
-        loc = bp.location or ""
-        fullname = ""
-        file_name = ""
-        line_num = 0
 
+        loc_str = bp.location or ""
+
+        # gdb.BreakpointLocation was added in GDB 13; older GDBs lack
+        # the ``locations`` attribute entirely.  Feature-detect once
+        # per breakpoint instead of failing the whole collection.
+        bp_locations = None
+        try:
+            bp_locations = bp.locations
+        except AttributeError:
+            bp_locations = None
+
+        if bp_locations:
+            # Multi-location case: emit one entry per child.  Child id
+            # is ``"<parent>.<1-based index>"``; this is the same form
+            # GDB prints in ``info breakpoints`` and in MI's
+            # ``locations`` array.
+            for idx, child in enumerate(bp_locations, start=1):
+                try:
+                    src = child.source  # (filename, line) or None
+                except (gdb.error, RuntimeError):
+                    src = None
+                file_name = ""
+                fullname = ""
+                line_num = 0
+                if src is not None:
+                    try:
+                        symtab, line_num = src
+                        if symtab is not None:
+                            file_name = symtab.filename or ""
+                            fullname = symtab.fullname() or ""
+                    except (TypeError, ValueError, AttributeError):
+                        pass
+                # ``child.fullname`` (string) exists on newer GDBs and
+                # may be richer than the symtab path; prefer it when
+                # available.
+                try:
+                    cf = child.fullname
+                    if cf:
+                        fullname = cf
+                except (AttributeError, gdb.error, RuntimeError):
+                    pass
+
+                try:
+                    addr = "0x%x" % int(child.address)
+                except (AttributeError, TypeError, ValueError, gdb.error, RuntimeError):
+                    addr = ""
+
+                try:
+                    child_enabled = bool(child.enabled)
+                except (AttributeError, gdb.error, RuntimeError):
+                    child_enabled = bool(bp.enabled)
+
+                breakpoints.append({
+                    "number": "%d.%d" % (bp.number, idx),
+                    "file": file_name,
+                    "fullname": fullname,
+                    "line": int(line_num or 0),
+                    "addr": addr,
+                    "enabled": child_enabled,
+                    "temporary": bp.temporary,
+                    "location": loc_str,
+                })
+            continue
+
+        # Single-location fallback: keep the prior decode_line-based
+        # path so older GDBs (no BreakpointLocation) still produce
+        # something useful.
+        file_name = ""
+        fullname = ""
+        line_num = 0
         if bp.location:
             try:
                 sal = gdb.decode_line(bp.location)
@@ -730,14 +801,14 @@ def _collect_breakpoints(cancel_token=0):
                 pass
 
         breakpoints.append({
-            "number": bp.number,
+            "number": str(bp.number),
             "file": file_name,
             "fullname": fullname,
-            "line": line_num,
+            "line": int(line_num or 0),
             "addr": "",
             "enabled": bp.enabled,
             "temporary": bp.temporary,
-            "location": loc,
+            "location": loc_str,
         })
 
     _send_sock_payload("b", breakpoints, cancel_token)
