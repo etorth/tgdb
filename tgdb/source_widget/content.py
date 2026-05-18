@@ -270,6 +270,7 @@ class _SourceContent(
         self._last_jump_path: str = ""
         self._count_buf: str = ""         # numeric repeat-count being typed (e.g. "20" before 'j')
         self._g_pressed: bool = False     # True after first 'g' keypress (waiting for 'gg')
+        self._g_count: int = 0            # count prefix captured at the first 'g' (0 = none)
         self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)
         self._show_logo: bool = False  # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}

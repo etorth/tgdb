@@ -95,8 +95,8 @@ class SourceNavigationMixin:
         self.scroll_down(self._visible_height() // 2)
 
 
-    def goto_top(self) -> None:
-        self.move_to(1)
+    def goto_top(self, line: int = 1) -> None:
+        self.move_to(max(1, line))
 
 
     def goto_bottom(self, line: int | None = None) -> None:

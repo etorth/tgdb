@@ -144,9 +144,12 @@ class SourceKeyMixin:
         if self._g_pressed:
             self._g_pressed = False
             if char == "g":
+                target = self._g_count if self._g_count > 0 else 1
+                self._g_count = 0
                 self._count_buf = ""
-                self.goto_top()
+                self.goto_top(target)
                 return True
+            self._g_count = 0
             self._count_buf = ""
 
         if char.isdigit() and (char != "0" or self._count_buf):
@@ -164,6 +167,7 @@ class SourceKeyMixin:
             return True
         if char == "g":
             self._g_pressed = True
+            self._g_count = count if has_prefix else 0
             return True
         return self._handle_pane_and_gdb_key(key, char)
 
