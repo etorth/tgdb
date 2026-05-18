@@ -85,6 +85,7 @@ class CommandLineKeyMixin:
         if key in ("enter", "return"):
             line = self._input_buf
             self._input_buf = ""
+            self._cursor_pos = 0
             if line.strip() == self._ml_marker:
                 code = "\n".join(self._ml_buf)
                 cmd = self._ml_cmd
@@ -100,13 +101,54 @@ class CommandLineKeyMixin:
             self.refresh()
             return True
 
-        if key in ("backspace", "ctrl+h"):
-            self._input_buf = self._input_buf[:-1]
+        # Cursor movement within the current heredoc line.  Previously
+        # absent — multi-line input was effectively append-only with no
+        # way to fix a typo mid-line.
+        if key in ("left", "ctrl+b"):
+            if self._cursor_pos > 0:
+                self._cursor_pos -= 1
+                self.refresh()
+            return True
+        if key in ("right", "ctrl+f"):
+            if self._cursor_pos < len(self._input_buf):
+                self._cursor_pos += 1
+                self.refresh()
+            return True
+        if key in ("home", "ctrl+a"):
+            self._cursor_pos = 0
+            self.refresh()
+            return True
+        if key in ("end", "ctrl+e"):
+            self._cursor_pos = len(self._input_buf)
             self.refresh()
             return True
 
+        if key in ("backspace", "ctrl+h"):
+            if self._cursor_pos > 0:
+                self._input_buf = (
+                    self._input_buf[: self._cursor_pos - 1]
+                    + self._input_buf[self._cursor_pos:]
+                )
+                self._cursor_pos -= 1
+                self.refresh()
+            return True
+
+        if key == "delete":
+            if self._cursor_pos < len(self._input_buf):
+                self._input_buf = (
+                    self._input_buf[: self._cursor_pos]
+                    + self._input_buf[self._cursor_pos + 1:]
+                )
+                self.refresh()
+            return True
+
         if char and char.isprintable():
-            self._input_buf += char
+            self._input_buf = (
+                self._input_buf[: self._cursor_pos]
+                + char
+                + self._input_buf[self._cursor_pos:]
+            )
+            self._cursor_pos += 1
             self.refresh()
             return True
 
