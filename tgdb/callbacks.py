@@ -399,9 +399,8 @@ class CallbacksMixin:
 
     async def _ui_on_stopped(self, frame: Frame) -> None:
         """GDB stopped — update source view to executing location."""
-        path = frame.file or frame.fullname
-        _log.info(f"stopped frame={path}:{frame.line} func={frame.func}")
         path = frame.fullname or frame.file
+        _log.info(f"stopped frame={path}:{frame.line} func={frame.func}")
         if path and os.path.isfile(path):
             src = self._get_source_view()
             if src is not None:
