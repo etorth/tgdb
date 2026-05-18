@@ -341,8 +341,12 @@ class TGDBScreen:
                 await pane_widget.remove()
 
         parent = widget.parent
-        if isinstance(parent, PaneContainer):
-            await parent.replace_item(widget, pane_widget)
+        if not isinstance(parent, PaneContainer):
+            # Target slot is not under a PaneContainer — nothing to
+            # replace, and triggering ``requester()`` for an unattached
+            # pane would refresh data the user can never see.
+            return
+        await parent.replace_item(widget, pane_widget)
         descriptor = app._pane_descriptors.get(pane_kind)
         if descriptor is not None and descriptor.requester is not None:
             descriptor.requester()
