@@ -224,5 +224,4 @@ class LocalVariablePane(
 
         self._rebuild_gen += 1
         _log.debug(f"set_variables gen={self._rebuild_gen} count={len(variables)} frame={frame}")
-        self._reconcile_active += 1
         await self._update_variables(self._rebuild_gen, frame, self._variables)

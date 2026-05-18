@@ -435,6 +435,9 @@ class LocalVariablePaneReconcileMixin:
 
     async def _update_variables(self, gen: int, frame: Frame | None, variables: list[LocalVariable]) -> None:
         """Incrementally reconcile the locals tree with the current frame."""
+        # Increment + decrement live together so a raise between
+        # set_variables and the reconcile body cannot leak the counter.
+        self._reconcile_active += 1
         try:
             if self._rebuild_gen != gen:
                 return
