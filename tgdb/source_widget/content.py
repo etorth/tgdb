@@ -195,7 +195,12 @@ class SourceSearchMixin:
             self.post_message(SearchCancel())
         elif key in ("enter", "return"):
             self._search_active = False
-            self._search_pattern = self._search_buf
+            # vim-style: empty Enter re-uses the prior pattern.  Only
+            # commit ``_search_pattern`` when the user typed something,
+            # otherwise an empty `/<CR>` would wipe the previous pattern
+            # and break the subsequent `n`/`N` recall.
+            if self._search_buf:
+                self._search_pattern = self._search_buf
             if self._search_pattern:
                 initial_source_pending = getattr(self.app, "_initial_source_pending", False)
                 if self.source_file is None and initial_source_pending:
