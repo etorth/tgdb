@@ -47,7 +47,7 @@ from .commands import CommandsMixin
 from .core import AppCoreMixin
 from .keys import KeyRoutingMixin
 from .layout import LayoutMixin
-from .workspace import PaneContainer, PaneDescriptor
+from .workspace import PaneDescriptor
 from .workspace_actions import WorkspaceMixin
 
 

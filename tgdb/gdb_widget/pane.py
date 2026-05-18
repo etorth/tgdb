@@ -9,8 +9,6 @@ The heavy-lifting terminal widget lives in ``content.py`` so this module can
 stay focused on the public pane interface.
 """
 
-from collections.abc import Callable
-
 from textual import events
 
 from ..highlight_groups import HighlightGroups

@@ -1,6 +1,5 @@
 """Base class for varobj-tree panes (LocalVariablePane, EvaluatePane)."""
 
-import asyncio
 import re
 from collections.abc import Callable, Coroutine
 
