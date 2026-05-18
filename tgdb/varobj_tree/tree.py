@@ -262,6 +262,50 @@ class VarobjTreeMixin:
         return expandable_children
 
 
+    async def _do_expand_recursive(
+        self, node: TreeNode, *, limited: bool, _depth: int = 0,
+    ) -> None:
+        """Shared implementation for do_expand_limited / do_expand_full.
+
+        When *limited* is True, array/map-like nodes honour
+        ``cfg.expandchildlimit`` (one "load more" sentinel below the
+        first batch); other compound nodes still load all children.
+        When *limited* is False, every compound node loads all of
+        its children unconditionally.
+        """
+        if _depth > 20:
+            return
+
+        data = node.data
+        if not isinstance(data, dict):
+            return
+
+        varobj_name = data.get("varobj", "")
+        if not varobj_name or not self._var_list_children:
+            return
+
+        displayhint = data.get("displayhint", "")
+        data["load_status"] = "loading"
+
+        if limited and _is_collection_displayhint(displayhint):
+            await self._load_children(node, varobj_name)
+            node.expand()
+        else:
+            await self._expand_node_unlimited(node, varobj_name, displayhint)
+
+        # ``_load_children`` / ``_expand_node_unlimited`` already
+        # transition load_status to ``"loaded"`` (success) or
+        # ``"idle"`` (error); only stamp ``"loaded"`` here if neither
+        # side did so the flag never gets stuck on ``"loading"``.
+        if data.get("load_status") == "loading":
+            data["load_status"] = "loaded"
+
+        for child_node in self._iter_expandable_child_nodes(node):
+            await self._do_expand_recursive(
+                child_node, limited=limited, _depth=_depth + 1,
+            )
+
+
     async def do_expand_limited(self, node: TreeNode, _depth: int = 0) -> None:
         """Recursively expand a subtree using the pane's "expand some" policy.
 
@@ -275,34 +319,7 @@ class VarobjTreeMixin:
         The method is safe to call repeatedly. If the pane is not fully wired
         yet (for example callbacks are missing), it becomes a no-op.
         """
-        if _depth > 20:
-            return
-
-        data = node.data
-        if not isinstance(data, dict):
-            return
-
-        varobj_name = data.get("varobj", "")
-        if not varobj_name or not self._var_list_children:
-            return
-
-        displayhint = data.get("displayhint", "")
-        data["load_status"] = "loading"
-
-        if _is_collection_displayhint(displayhint):
-            await self._load_children(node, varobj_name)
-            node.expand()
-        else:
-            await self._expand_node_unlimited(node, varobj_name, displayhint)
-
-        # _load_children / _expand_node_unlimited set ``load_status``
-        # to ``"loaded"`` (or back to ``"idle"`` on error) themselves;
-        # only stamp success here if neither side did.
-        if data.get("load_status") == "loading":
-            data["load_status"] = "loaded"
-
-        for child_node in self._iter_expandable_child_nodes(node):
-            await self.do_expand_limited(child_node, _depth + 1)
+        await self._do_expand_recursive(node, limited=True, _depth=_depth)
 
 
     async def do_expand_full(self, node: TreeNode, _depth: int = 0) -> None:
@@ -311,30 +328,7 @@ class VarobjTreeMixin:
         This is the "load everything" companion to ``do_expand_limited`` and is
         intended for UI actions such as an "Expand All" context-menu command.
         """
-        if _depth > 20:
-            return
-
-        data = node.data
-        if not isinstance(data, dict):
-            return
-
-        varobj_name = data.get("varobj", "")
-        if not varobj_name or not self._var_list_children:
-            return
-
-        displayhint = data.get("displayhint", "")
-        data["load_status"] = "loading"
-
-        await self._expand_node_unlimited(node, varobj_name, displayhint)
-        # _expand_node_unlimited handles success/error transitions
-        # itself; in case it left us in ``"loading"`` (no callback or
-        # missing varobj_name) reset to ``"idle"`` so a later expand
-        # can retry.
-        if data.get("load_status") == "loading":
-            data["load_status"] = "idle"
-
-        for child_node in self._iter_expandable_child_nodes(node):
-            await self.do_expand_full(child_node, _depth + 1)
+        await self._do_expand_recursive(node, limited=False, _depth=_depth)
 
 
     def do_fold(self, node: TreeNode) -> None:
