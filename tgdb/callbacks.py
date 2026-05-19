@@ -706,7 +706,19 @@ class CallbacksMixin:
 
 
     async def _request_initial_location(self) -> None:
-        """Mirror cgdb startup: query current location without surfacing noise."""
+        """Mirror cgdb startup: query current location without surfacing noise.
+
+        Best-effort: if GDB is busy, the request may time out.  A common
+        cause is attaching to a multi-threaded process via ``-pid``: GDB
+        prints many ``[New LWP ...]`` lines and, with pagination enabled,
+        shows ``--Type <RET> for more, q to quit, c to continue--`` which
+        blocks ALL MI commands until the user responds in the console pane.
+        Adding ``set pagination off`` or ``set height 0`` to ``.gdbinit``
+        prevents this.
+
+        We log the failure and continue — the user can trigger a location
+        query later by stepping or setting a breakpoint.
+        """
         await asyncio.sleep(0.5)
         await self.gdb.request_current_location(report_error=False)
 
