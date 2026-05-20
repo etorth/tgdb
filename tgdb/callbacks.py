@@ -723,6 +723,22 @@ class CallbacksMixin:
         await self.gdb.request_current_location(report_error=False)
 
 
+    async def _attach_pid_async(self) -> None:
+        """Attach to a process by PID using the pysetup convenience function.
+
+        Called after pysetup is loaded and tgdbrc is executed.  Uses
+        ``_tgdb_RSVD_attach_pid`` which temporarily sets ``height 0``
+        to suppress GDB pagination prompts that would otherwise block
+        the MI channel when many LWP lines are printed.
+        """
+        pid = self._attach_pid
+        _log.info(f"attaching to pid {pid} via convenience function")
+        self.gdb.mi_command(
+            f'-interpreter-exec console "python _tgdb_RSVD_attach_pid({pid})"',
+            report_error=False,
+        )
+
+
     def _ui_gdb_exit(self) -> None:
         # Mirror cgdb: when GDB exits (EOF/error on primary PTY), exit immediately.
         # cgdb calls cgdb_cleanup_and_exit(0) in tgdb_process() on size<=0.

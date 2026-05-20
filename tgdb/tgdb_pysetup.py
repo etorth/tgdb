@@ -33,6 +33,17 @@ def _str_unlimited(val) -> str:
     with gdb.with_parameter("max-value-size", "unlimited"):
         return str(val)
 
+
+def _tgdb_RSVD_attach_pid(pid):
+    """Attach to a process with pagination disabled.
+
+    Temporarily sets ``height 0`` so the many ``[New LWP ...]`` lines
+    printed during attach don't trigger ``--Type <RET> for more--``
+    which would block the MI channel.
+    """
+    with gdb.with_parameter("height", 0):
+        gdb.execute(f"attach {pid}")
+
 # ---------------------------------------------------------------------------
 # Varint helpers — unsigned LEB128
 #

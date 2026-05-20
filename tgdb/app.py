@@ -126,6 +126,7 @@ class TGDBApp(
         gdb_path: str = "gdb",
         gdb_args: list[str] | None = None,
         rc_file: str | None = None,
+        attach_pid: int | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -140,7 +141,8 @@ class TGDBApp(
         self._km_flush_timer: dict[str, object | None] = {}
         self.cfg = Config()
         self.cp = ConfigParser(self.cfg, self.hl, self.km)
-        self._initial_source_pending = bool(gdb_args)
+        self._initial_source_pending = bool(gdb_args) or (attach_pid is not None)
+        self._attach_pid: int | None = attach_pid
         self._register_commands()
 
         # Wire the tgdb stdlib singleton to this app instance.

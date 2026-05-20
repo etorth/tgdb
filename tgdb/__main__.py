@@ -90,13 +90,10 @@ Examples:
     else:
         args = parser.parse_args()
         gdb_args = []
-        if args.pid is not None:
-            gdb_args.extend(["-p", str(args.pid)])
-        else:
-            if args.program:
-                gdb_args.append(args.program)
-            if args.core_or_pid:
-                gdb_args.append(args.core_or_pid)
+        if args.program:
+            gdb_args.append(args.program)
+        if args.core_or_pid:
+            gdb_args.append(args.core_or_pid)
 
     if args.cd:
         os.chdir(args.cd)
@@ -117,6 +114,7 @@ Examples:
         gdb_path=args.debugger,
         gdb_args=gdb_args,
         rc_file=args.rcfile,
+        attach_pid=args.pid,
     )
     app.run(mouse=True)
 
