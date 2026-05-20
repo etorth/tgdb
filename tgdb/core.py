@@ -161,13 +161,11 @@ class AppCoreMixin:
         self._set_mode("GDB_PROMPT")
         gdb_widget.focus()
 
-        # _request_initial_location and _load_rc_async are independent
-        # one-shots — run them in parallel and await both before on_mount
-        # finishes, instead of leaking a fire-and-forget task.
-        await asyncio.gather(
-            self._request_initial_location(),
-            self._load_rc_async(),
-        )
+        # _request_initial_location must run after _load_rc_async so that
+        # rc-file settings (e.g. "set pagination off") are applied first.
+
+        await self._load_rc_async()
+        await self._request_initial_location()
 
 
     def _save_history_to_disk(self) -> None:
