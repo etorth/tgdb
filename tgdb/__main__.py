@@ -21,8 +21,8 @@ Examples:
   tgdb myprogram
   tgdb -d /usr/bin/gdb myprogram
   tgdb --args myprogram arg1 arg2
+  tgdb --args -p 12345
   tgdb myprogram core
-  tgdb --pid 12345
 """,
     )
     parser.add_argument(
@@ -46,17 +46,9 @@ Examples:
         help="Read configuration from FILE instead of ~/.config/tgdb/tgdbrc; use NONE to skip",
     )
     parser.add_argument(
-        "-p",
-        "--pid",
-        metavar="PID",
-        type=int,
-        default=None,
-        help="Attach to running process with given PID",
-    )
-    parser.add_argument(
         "--args",
         action="store_true",
-        help="Pass remaining arguments as program + arguments to GDB",
+        help="Pass remaining arguments verbatim to GDB (e.g. --args -p PID)",
     )
     parser.add_argument(
         "--log",
@@ -80,23 +72,20 @@ Examples:
         help="Core file or PID to attach",
     )
 
-    # Support --args: everything after --args is program + its args
+    # Support --args: everything after --args is passed verbatim to GDB.
     if "--args" in sys.argv:
         idx = sys.argv.index("--args")
         pre_args = sys.argv[1:idx]
         post_args = sys.argv[idx + 1 :]
         args = parser.parse_args(pre_args)
-        gdb_args = ["--args"] + post_args
+        gdb_args = post_args
     else:
         args = parser.parse_args()
         gdb_args = []
-        if args.pid is not None:
-            gdb_args.extend(["-p", str(args.pid)])
-        else:
-            if args.program:
-                gdb_args.append(args.program)
-            if args.core_or_pid:
-                gdb_args.append(args.core_or_pid)
+        if args.program:
+            gdb_args.append(args.program)
+        if args.core_or_pid:
+            gdb_args.append(args.core_or_pid)
 
     if args.cd:
         os.chdir(args.cd)
