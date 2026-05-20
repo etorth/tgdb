@@ -5,13 +5,6 @@ import os
 import threading
 import zlib
 
-# Lift GDB's memory read limit so str(val) never fails for large variables.
-try:
-    gdb.execute("set max-value-size unlimited", to_string=True)
-except gdb.error:
-    pass
-
-
 _sock_fd = None
 _event_handlers_connected = False
 
@@ -36,6 +29,9 @@ _CTL_COMPRESSED = 0x01
 # Payloads at or above this size are zlib-compressed automatically.
 _COMPRESS_THRESHOLD = 64
 
+def _str_unlimited(val) -> str:
+    with gdb.with_parameter("max-value-size", "unlimited"):
+        return str(val)
 
 # ---------------------------------------------------------------------------
 # Varint helpers — unsigned LEB128
@@ -319,12 +315,12 @@ def _format_value(val):
 
     Uses ``format_string(max_elements=0)`` when available (GDB 9.1+)
     to avoid contaminating global ``set print elements`` settings.
-    Falls back to ``str(val)`` on older builds.
+    Falls back to ``_str_unlimited(val)`` on older builds.
     """
     try:
         return val.format_string(max_elements=0)
     except (TypeError, AttributeError):
-        return str(val)
+        return _str_unlimited(val)
 
 
 def _is_builtin_local_name(name):
@@ -637,7 +633,7 @@ def _collect_registers(cancel_token=0):
                 try:
                     val_str = val.format_string(format="x")
                 except (TypeError, AttributeError):
-                    val_str = str(val)
+                    val_str = _str_unlimited(val)
             except gdb.error:
                 val_str = ""
 
