@@ -19,6 +19,7 @@ import signal
 import socket
 import termios
 from collections.abc import Callable
+from pathlib import Path
 
 import ptyprocess
 
@@ -258,11 +259,24 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             # Keep slave fd open — if we close it before GDB opens it, the master
             # immediately returns EIO (no slave reader). GDB opens its own copy.
 
+            # Resolve pysetup path — sourced on the command line so that
+            # pagination is disabled before -p <pid> triggers attach.
+            setup_path = Path(__file__).resolve().parents[1] / "tgdb_pysetup.py"
+            setup_path_str = str(setup_path).replace("\\", "\\\\").replace('"', '\\"')
+
             # Spawn GDB:
-            #   --nw              : no TUI
-            #   -ex "new-ui mi X" : open MI channel on secondary PTY
-            cmd = [self.gdb_path, "--nw", "-ex", f"new-ui mi {mi_slave_name}"]
+            #   --nw                     : no TUI
+            #   -ex "source pysetup.py"  : load helpers + disable pagination
+            #   -ex "new-ui mi X"        : open MI channel on secondary PTY
+            #   <user args>              : may include -p <pid>
+            #   -ex "python _tgdb_RSVD_restore_user_defs()" : restore height
+            cmd = [
+                self.gdb_path, "--nw",
+                "-ex", f"source {setup_path_str}",
+                "-ex", f"new-ui mi {mi_slave_name}",
+            ]
             cmd.extend(self.gdb_args)
+            cmd.extend(["-ex", "python _tgdb_RSVD_restore_user_defs()"])
             self._proc = ptyprocess.PtyProcess.spawn(
                 cmd,
                 dimensions=(rows, cols),
@@ -453,9 +467,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             loop.add_reader(self._sock_tgdb, self._on_sock_readable)
         _log.info("MI reader started")
 
-        # Load tgdb's embedded GDB/Python helpers before stop handling needs
-        # them, then enable pretty-printing for logical varobj children.
-        self.load_tgdb_pysetup(report_error=False)
+        # pysetup is already sourced via the command line (-ex "source ...").
+        # Enable pretty-printing for logical varobj children.
         self.mi_command("-enable-pretty-printing", report_error=False)
         # Tell GDB which fd to ping on every event we care about. Sent after
         # pysetup so the helper is defined; MI commands are FIFO so ordering

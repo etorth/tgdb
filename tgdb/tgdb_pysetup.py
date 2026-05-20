@@ -33,6 +33,28 @@ def _str_unlimited(val) -> str:
     with gdb.with_parameter("max-value-size", "unlimited"):
         return str(val)
 
+
+# ---------------------------------------------------------------------------
+# Pagination suppression for attach
+#
+# When tgdb spawns GDB with -p <pid>, GDB may print many "[New LWP ...]"
+# lines that overflow the terminal height and trigger pagination prompts.
+# pysetup is sourced before -p on the command line, so we disable pagination
+# here.  After attach completes, _tgdb_RSVD_restore_user_defs() restores
+# the original settings.
+# ---------------------------------------------------------------------------
+
+_saved_height = gdb.parameter("height")
+gdb.execute("set height 0", to_string=True)
+
+
+def _tgdb_RSVD_restore_user_defs():
+    """Restore user settings that were overridden for safe attach."""
+    if _saved_height is None or _saved_height == 0:
+        gdb.execute("set height 0", to_string=True)
+    else:
+        gdb.execute(f"set height {_saved_height}", to_string=True)
+
 # ---------------------------------------------------------------------------
 # Varint helpers — unsigned LEB128
 #
