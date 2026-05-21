@@ -336,15 +336,33 @@ def _send_sock_payload(tag, data, token=0):
     return _send_sock_frame(tag, payload)
 
 
-def _format_value(val):
-    """Format a gdb.Value with unlimited elements per-call.
+# Maximum number of elements to format when stringifying container values.
+# Controlled by tgdb's ``expandchildlimit`` config option.  When the config
+# value is 0 ("no limit"), we still use a safe default (100) here to avoid
+# hanging on huge vectors.  tgdb pushes updates via
+# ``_tgdb_RSVD_set_max_format_elements()``.
+_max_format_elements = 100
 
-    Uses ``format_string(max_elements=0)`` when available (GDB 9.1+)
-    to avoid contaminating global ``set print elements`` settings.
+
+def _tgdb_RSVD_set_max_format_elements(n):
+    """Set the element cap used by _format_value.  Called by tgdb on config sync."""
+    global _max_format_elements
+    if n <= 0:
+        _max_format_elements = 100
+    else:
+        _max_format_elements = n
+
+
+def _format_value(val):
+    """Format a gdb.Value with a capped element count.
+
+    Uses ``format_string(max_elements=_max_format_elements)`` when available
+    (GDB 9.1+) to avoid both contaminating global ``set print elements``
+    settings and hanging on huge containers (e.g. vectors with 30000+ items).
     Falls back to ``_str_unlimited(val)`` on older builds.
     """
     try:
-        return val.format_string(max_elements=0)
+        return val.format_string(max_elements=_max_format_elements)
     except (TypeError, AttributeError):
         return _str_unlimited(val)
 

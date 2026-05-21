@@ -775,3 +775,9 @@ class CallbacksMixin:
         self.km.ttimeout_ms = cfg.ttimeoutlen
         self.km.timeout_enabled = cfg.timeout
         self.km.ttimeout_enabled = cfg.ttimeout
+        # Push element formatting limit to GDB-side pysetup.
+        ecl = cfg.expandchildlimit
+        self.gdb.mi_command(
+            f'-interpreter-exec console "python _tgdb_RSVD_set_max_format_elements({ecl})"',
+            report_error=False,
+        )
