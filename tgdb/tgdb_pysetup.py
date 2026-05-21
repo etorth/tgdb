@@ -100,7 +100,7 @@ def _decode_varint(buf, offset=0):
 # Mirrors the tgdb-side pattern in ``tgdb/log.py``:
 # - Default level is WARNING so ``_log.debug(...)`` calls are free when
 #   tgdb is run without ``--log``.
-# - When tgdb passes ``log_enabled=True`` via ``register_socket_fd()``,
+# - When tgdb passes ``log_enabled=True`` via ``_tgdb_RSVD_register_socket_fd()``,
 #   the level is raised to DEBUG and a custom handler sends messages
 #   through the socket (tag ``D``) to appear in tgdb's log file.
 # ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ def _finish_token(token):
         _cancel_tokens.discard(token)
 
 
-def register_socket_fd(fd, log_enabled=False):
+def _tgdb_RSVD_register_socket_fd(fd, log_enabled=False):
     """Wire GDB Python events and data collection to an AF_UNIX socket.
 
     tgdb creates an ``AF_UNIX`` socketpair before forking GDB and passes

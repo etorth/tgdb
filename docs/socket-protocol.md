@@ -9,7 +9,7 @@ writes data/events to tgdb, and tgdb can write cancel tokens back to GDB.
 
 Before forking GDB, tgdb creates a `socket.socketpair(AF_UNIX, SOCK_STREAM)`
 and passes one end's fd to the GDB process.  At GDB startup, `tgdb_pysetup.py`
-is sourced and `register_socket_fd(fd)` wires GDB Python event handlers and
+is sourced and `_tgdb_RSVD_register_socket_fd(fd)` wires GDB Python event handlers and
 collection functions to that fd.
 
 The tgdb-side fd is set to non-blocking mode and registered with the asyncio
@@ -342,7 +342,7 @@ reader thread reads in a loop and decodes varints from the byte stream.
 
 ### GDB-side cancel reader
 
-`register_socket_fd()` starts a daemon thread (`tgdb-cancel-reader`) that
+`_tgdb_RSVD_register_socket_fd()` starts a daemon thread (`tgdb-cancel-reader`) that
 reads cancel tokens from the socket and adds them to a thread-safe
 `set[int]` protected by a `threading.Lock`.
 

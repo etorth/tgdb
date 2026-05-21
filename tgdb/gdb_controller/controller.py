@@ -461,7 +461,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # completes synchronously (no await), no scheduling overhead occurs.
         loop.add_reader(self._proc.fd, self._on_console_readable)
         loop.add_reader(self._mi_master_fd, self._on_mi_readable)
-        # Watch the AF_UNIX socket written by ``register_socket_fd`` inside GDB's
+        # Watch the AF_UNIX socket written by ``_tgdb_RSVD_register_socket_fd`` inside GDB's
         # embedded Python.  Carries both lightweight events and bulk data.
         if self._sock_tgdb >= 0:
             loop.add_reader(self._sock_tgdb, self._on_sock_readable)
@@ -476,7 +476,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         if self._sock_gdb >= 0:
             log_enabled = _log.isEnabledFor(logging.DEBUG)
             self.mi_command(
-                f'-interpreter-exec console "python register_socket_fd({self._sock_gdb}, log_enabled={log_enabled})"',
+                f'-interpreter-exec console "python _tgdb_RSVD_register_socket_fd({self._sock_gdb}, log_enabled={log_enabled})"',
                 report_error=False,
             )
 
