@@ -39,20 +39,24 @@ def _str_unlimited(val) -> str:
 #
 # When tgdb spawns GDB with -p <pid>, GDB may print many "[New LWP ...]"
 # lines that overflow the terminal height and trigger pagination prompts.
-# pysetup is sourced before -p on the command line, so we disable pagination
-# here.  After attach completes, _tgdb_RSVD_restore_user_defs() restores
-# the original settings.
+# pysetup is sourced before -p on the command line, so we set height to a
+# magic value large enough to suppress pagination.  After attach completes,
+# _tgdb_RSVD_restore_user_defs() restores the original height — but only
+# if no user -ex command has overridden it in the meantime.
 # ---------------------------------------------------------------------------
 
-_saved_height = gdb.parameter("height")
-gdb.execute("set height 0", to_string=True)
+# GDB's ``set height`` maximum is 32767.  Use the closest prime as a
+# sentinel: if the value is still this when restore runs, no user -ex
+# command changed it and we should restore the saved value.
+_TGDB_INIT_HEIGHT = 32749
+
+_saved_height = gdb.parameter("height") or 0
+gdb.execute(f"set height {_TGDB_INIT_HEIGHT}", to_string=True)
 
 
 def _tgdb_RSVD_restore_user_defs():
     """Restore user settings that were overridden for safe attach."""
-    if _saved_height is None or _saved_height == 0:
-        gdb.execute("set height 0", to_string=True)
-    else:
+    if gdb.parameter("height") == _TGDB_INIT_HEIGHT:
         gdb.execute(f"set height {_saved_height}", to_string=True)
 
 # ---------------------------------------------------------------------------
