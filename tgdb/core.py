@@ -32,7 +32,13 @@ class AppCoreMixin:
                 max_scrollback=self.cfg.scrollbackbuffersize,
                 id="gdb-pane",
             )
-        with Widget(id="global-container"):
+        global_container = Widget(id="global-container")
+        if self._target_width is not None:
+            global_container.styles.width = self._target_width
+        if self._target_height is not None:
+            global_container.styles.height = self._target_height
+
+        with global_container:
             # Root container starts empty.  ``on_mount`` runs the rc
             # file and, if the root is still empty afterwards, installs
             # the default source-on-top / gdb-on-bottom layout.

@@ -128,6 +128,8 @@ class TGDBApp(
         rc_file: str | None = None,
         script_input: str | None = None,
         script_batch: str | None = None,
+        target_width: int | None = None,
+        target_height: int | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -163,6 +165,8 @@ class TGDBApp(
         )
         self._script_input: str | None = script_input
         self._script_batch: str | None = script_batch
+        self._target_width: int | None = target_width
+        self._target_height: int | None = target_height
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: asyncio.Task | None = None

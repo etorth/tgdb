@@ -5,6 +5,16 @@ import os
 import sys
 
 
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}") from None
+    if number <= 0:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}")
+    return number
+
+
 def _wait_for_debugger() -> None:
     from pudb.remote import set_trace
 
@@ -74,6 +84,20 @@ Examples:
         help="Run without a terminal (no UI rendering); useful for CI/batch testing",
     )
     parser.add_argument(
+        "--width",
+        metavar="W",
+        type=_positive_int,
+        default=None,
+        help="Run the TUI with width W columns",
+    )
+    parser.add_argument(
+        "--height",
+        metavar="H",
+        type=_positive_int,
+        default=None,
+        help="Run the TUI with height H rows",
+    )
+    parser.add_argument(
         "--cd",
         metavar="DIR",
         help="Change to DIR before starting GDB",
@@ -125,6 +149,8 @@ Examples:
         rc_file=args.rcfile,
         script_input=args.input,
         script_batch=args.batch,
+        target_width = args.width,
+        target_height = args.height,
     )
     return_code = app.run(mouse=True, headless=args.headless)
 
