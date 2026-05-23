@@ -9,6 +9,7 @@ import asyncio
 import builtins
 import contextlib
 import io
+import logging
 import os
 import textwrap
 import traceback
@@ -17,6 +18,8 @@ from collections.abc import Callable
 from typing import Any
 
 from .types import _TGDB_RESERVED_PREFIX
+
+_log = logging.getLogger("tgdb.config")
 
 
 class PythonExecMixin:
