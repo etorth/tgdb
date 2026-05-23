@@ -145,7 +145,11 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
 
         if isinstance(writer, io.StringIO):
             out = writer.getvalue().rstrip("\n")
-            return out or None
+            # Captured stdout from a successful execution is informational,
+            # not an error.  Only actual exceptions (handled above) produce
+            # error strings.
+            if out:
+                _log.info(f"python stdout: {out!r}")
         return None
 
 
