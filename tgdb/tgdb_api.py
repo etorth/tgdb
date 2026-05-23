@@ -35,6 +35,7 @@ container tree starting from the root PaneContainer:
   [1, 1, 2]   → second child of first child of second child of root
 """
 
+import asyncio
 import enum
 import logging
 from typing import TYPE_CHECKING
@@ -363,7 +364,9 @@ class TGDBScreen:
         await parent.replace_item(widget, pane_widget)
         descriptor = app._pane_descriptors.get(pane_kind)
         if descriptor is not None and descriptor.requester is not None:
-            descriptor.requester()
+            result = descriptor.requester()
+            if asyncio.iscoroutine(result):
+                await result
 
 
     async def _do_detach(self, address: list[int]) -> None:
