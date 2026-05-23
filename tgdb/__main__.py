@@ -69,6 +69,11 @@ Examples:
         help="Execute script FILE after startup; exit on first error or when script finishes",
     )
     parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without a terminal (no UI rendering); useful for CI/batch testing",
+    )
+    parser.add_argument(
         "--cd",
         metavar="DIR",
         help="Change to DIR before starting GDB",
@@ -121,12 +126,14 @@ Examples:
         script_input=args.input,
         script_batch=args.batch,
     )
-    app.run(mouse=True)
+    return_code = app.run(mouse=True, headless=args.headless)
 
     if log_enabled:
         from .log import shutdown as log_shutdown
 
         log_shutdown()
+
+    sys.exit(return_code or 0)
 
 
 if __name__ == "__main__":
