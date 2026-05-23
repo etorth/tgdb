@@ -166,6 +166,7 @@ class AppCoreMixin:
 
         await self._load_rc_async()
         await self._request_initial_location()
+        await self._run_startup_script()
 
 
     def _save_history_to_disk(self) -> None:
@@ -218,9 +219,12 @@ class AppCoreMixin:
                 if default_path is not None:
                     path = str(default_path)
         if path is not None:
-            error = await self.cp.load_file_async(path)
+            error = await self.cp.run_script_async(path)
             if error:
                 self._show_status(error)
+                self.gdb.terminate()
+                self.exit(1)
+                return
         self._sync_config()
         # After the rc file has had a chance to install its own pane
         # layout, fall back to the cgdb-style source-on-top /
@@ -229,6 +233,23 @@ class AppCoreMixin:
         # absent (``--rc NONE`` or no XDG file) so the user always
         # gets a working initial view.
         await self._install_default_layout_if_empty()
+
+
+    async def _run_startup_script(self) -> None:
+        """Execute --input or --batch script after full startup."""
+        script_path = self._script_input or self._script_batch
+        if script_path is None:
+            return
+
+        is_batch = self._script_batch is not None
+        error = await self.cp.run_script_async(script_path)
+
+        if is_batch:
+            self._save_history_to_disk()
+            self.gdb.terminate()
+            self.exit(1 if error else 0)
+        elif error:
+            self._show_status(error)
 
 
     async def _install_default_layout_if_empty(self) -> None:

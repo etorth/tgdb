@@ -40,14 +40,19 @@ class ConfigExecutionMixin:
         return None
 
 
-    async def load_file_async(self, path: str, print_fn: Callable | None = None) -> str | None:
+    async def run_script_async(self, path: str, print_fn: Callable | None = None) -> str | None:
+        """Execute a script file, stopping at the first command error.
+
+        Returns ``None`` on success (all lines executed) or the error
+        string from the first failing command.
+        """
         try:
             with open(path) as handle:
                 raw_lines = handle.readlines()
         except OSError as exc:
             return f"source: cannot open '{path}': {exc}"
 
-        _log.info(f"loading rc file: {path} ({len(raw_lines)} lines)")
+        _log.info(f"running script: {path} ({len(raw_lines)} lines)")
         index = 0
         while index < len(raw_lines):
             line = raw_lines[index].rstrip("\n")
@@ -58,8 +63,6 @@ class ConfigExecutionMixin:
                 continue
 
             check = stripped.lstrip(":")
-            # Accept ``python<<EOF``, ``python <<EOF``, ``python << EOF`` —
-            # vim/cgdb tolerate any whitespace (including none) around ``<<``.
             match = re.match(r"^(python|py)\s*<<\s*(\S+)\s*$", check, re.IGNORECASE)
             if match:
                 cmd_name = match.group(1).lower()
@@ -68,21 +71,20 @@ class ConfigExecutionMixin:
                 while index < len(raw_lines):
                     code_line = raw_lines[index].rstrip("\n")
                     index += 1
-                    # Strict column-0 match (the rstrip above only drops the
-                    # trailing newline).  Using ``.strip() == marker`` would
-                    # close the block on any line whose stripped contents
-                    # equal the marker — including an indented ``EOF`` inside
-                    # a docstring or string literal in the user's script.
                     if code_line == marker:
                         break
                     code_lines.append(code_line)
-                await self.execute_async(
+                error = await self.execute_async(
                     f"{cmd_name}\n" + "\n".join(code_lines),
                     print_fn=print_fn,
                 )
+                if error:
+                    return error
                 continue
 
-            await self.execute_async(stripped, print_fn=print_fn)
+            error = await self.execute_async(stripped, print_fn=print_fn)
+            if error:
+                return error
 
         return None
 
@@ -97,7 +99,7 @@ class ConfigExecutionMixin:
             return None
 
         # Log every command that actually reaches dispatch.  This funnel
-        # is shared between rc-file lines (via ``load_file_async``) and
+        # is shared between script/rc lines (via ``run_script_async``) and
         # interactive commandline submissions (via ``_run_cmd_task``),
         # so a single log line per call captures both paths.  Multi-line
         # bodies (heredoc Python blocks) are abbreviated to keep the
@@ -188,7 +190,7 @@ class ConfigExecutionMixin:
                 body_lines = heredoc_match.group(2).split("\n")
                 code_lines: list[str] = []
                 for body_line in body_lines:
-                    # Strict column-0 marker match — see ``load_file_async``
+                    # Strict column-0 marker match — see ``run_script_async``
                     # for why ``.strip() == marker`` is wrong (indented
                     # ``EOF`` inside the user's code would close the block).
                     if body_line == marker:
@@ -237,7 +239,7 @@ class ConfigExecutionMixin:
         if cmd in ("source", "so"):
             if not args:
                 return "source: missing filename"
-            return await self.load_file_async(
+            return await self.run_script_async(
                 os.path.expanduser(args[0]),
                 print_fn=print_fn,
             )

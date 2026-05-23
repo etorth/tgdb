@@ -50,7 +50,7 @@ class ConfigParser(
         Extend the persistent ``:python`` / ``:pyfile`` namespace with live
         objects such as the app instance.
 
-    ``default_rc_path()``, ``load_file_async(path)``, ``execute_async(line)``
+    ``default_rc_path()``, ``run_script_async(path)``, ``execute_async(line)``
         Resolve, load, and execute config/status-bar commands.
 
     Callers should treat ``ConfigParser`` as the black-box command dispatcher

@@ -57,6 +57,18 @@ Examples:
         help="Write debug log to FILE (default: no log)",
     )
     parser.add_argument(
+        "--input",
+        metavar="FILE",
+        default=None,
+        help="Execute script FILE after startup; stop at first error, then wait for user input",
+    )
+    parser.add_argument(
+        "--batch",
+        metavar="FILE",
+        default=None,
+        help="Execute script FILE after startup; exit on first error or when script finishes",
+    )
+    parser.add_argument(
         "--cd",
         metavar="DIR",
         help="Change to DIR before starting GDB",
@@ -106,6 +118,8 @@ Examples:
         gdb_path=args.debugger,
         gdb_args=gdb_args,
         rc_file=args.rcfile,
+        script_input=args.input,
+        script_batch=args.batch,
     )
     app.run(mouse=True)
 

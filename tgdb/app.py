@@ -126,6 +126,8 @@ class TGDBApp(
         gdb_path: str = "gdb",
         gdb_args: list[str] | None = None,
         rc_file: str | None = None,
+        script_input: str | None = None,
+        script_batch: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -159,6 +161,8 @@ class TGDBApp(
         self._rc_file: str | None = (
             rc_file  # resolved in on_mount after app is ready
         )
+        self._script_input: str | None = script_input
+        self._script_batch: str | None = script_batch
 
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: asyncio.Task | None = None
