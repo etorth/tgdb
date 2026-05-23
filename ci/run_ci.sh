@@ -19,7 +19,7 @@ if [ $# -gt 0 ]; then
     tests=("$@")
 else
     tests=()
-    for d in "$CI_DIR"/test_*/; do
+    for d in "$CI_DIR"/*/; do
         [ -f "$d/run.sh" ] && tests+=("$(basename "$d")")
     done
 fi

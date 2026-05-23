@@ -1,12 +1,11 @@
 #!/bin/bash
-# CI test: verify local variables are populated after stopping.
+# CI test: set breakpoint, run, verify stopped at breakpoint.
 set -euo pipefail
 
 RUN_DIR="$1"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-gcc -g "$CI_DIR/fixture.c" -o "$RUN_DIR/a.out"
+gcc -g "$SCRIPT_DIR/fixture.c" -o "$RUN_DIR/a.out"
 
 python -m tgdb \
     --headless \
