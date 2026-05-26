@@ -73,6 +73,18 @@ class Config:
         self._memoryformatter_listeners.append(cb)
 
 
+    def remove_memoryformatter_listener(self, cb: Callable[[Any], None]) -> None:
+        """Drop a listener previously registered via ``add_memoryformatter_listener``.
+
+        No-op if *cb* was never registered, or already removed (e.g. by
+        the ``notify`` self-pruning path for dead WeakMethods).
+        """
+        try:
+            self._memoryformatter_listeners.remove(cb)
+        except ValueError:
+            pass
+
+
     def notify_memoryformatter_changed(self) -> None:
         """Fire every registered listener with the current formatter object."""
         obj = self._memoryformatter_obj

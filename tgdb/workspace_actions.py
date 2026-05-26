@@ -110,27 +110,36 @@ class WorkspaceMixin:
 
 
     def _make_memory_pane(self: "TGDBApp") -> MemoryPane:
-        """Always return a fresh MemoryPane; multi-instance pane."""
-        import weakref
+        """Always return a fresh MemoryPane; multi-instance pane.
+
+        ``MemoryPane`` is the only multi-instance pane kind, and every
+        new instance subscribes a formatter listener that closes over
+        the pane.  Without an unmount cleanup hook the pane would
+        stay strongly reachable through ``self._memory_panes`` AND
+        through the formatter-listener list, so deleting the pane
+        from the workspace would leak both.  The pane's
+        ``add_unmount_hook`` lets us drop both references in a
+        single shot when Textual tears the widget down.
+        """
         from .memory_pane import MemoryFormatter
         formatter = self.cfg._memoryformatter_obj or MemoryFormatter()
         pane = MemoryPane(self.hl, formatter=formatter)
         pane.set_read_fn(self.gdb.read_memory_bytes_async)
-        # Subscribe via weak method so pane GC is not blocked.
-        try:
-            ref = weakref.WeakMethod(pane.set_formatter)
 
-            def _on_formatter_change(obj):
-                method = ref()
-                if method is None:
-                    raise ReferenceError
-                method(obj)
+        def _on_formatter_change(obj):
+            pane.set_formatter(obj)
 
-            self.cfg.add_memoryformatter_listener(_on_formatter_change)
-        except TypeError:
-            # set_formatter not bound (extremely unlikely) — skip subscription.
-            pass
+        self.cfg.add_memoryformatter_listener(_on_formatter_change)
         self._memory_panes.append(pane)
+
+        def _cleanup() -> None:
+            self.cfg.remove_memoryformatter_listener(_on_formatter_change)
+            try:
+                self._memory_panes.remove(pane)
+            except ValueError:
+                pass
+
+        pane.add_unmount_hook(_cleanup)
         return pane
 
 

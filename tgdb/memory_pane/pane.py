@@ -166,6 +166,25 @@ class MemoryPane(PaneBase):
         # fresh content (e.g. user types ``:set address=0x1`` then
         # immediately ``:set address=0x2`` and 0x1 arrives last).
         self._fetch_gen: int = 0
+        # Callbacks invoked once when Textual unmounts the pane.
+        # Used by the workspace factory to drop the pane from the
+        # app's tracking list and unsubscribe its formatter listener
+        # — otherwise both leak for the lifetime of the app.
+        self._unmount_hooks: list[Callable[[], None]] = []
+
+
+    def add_unmount_hook(self, fn: Callable[[], None]) -> None:
+        """Register *fn* to be invoked when the pane unmounts."""
+        self._unmount_hooks.append(fn)
+
+
+    def on_unmount(self) -> None:
+        for fn in list(self._unmount_hooks):
+            try:
+                fn()
+            except Exception as exc:
+                _log.debug(f"memory pane unmount hook raised: {exc!r}")
+        self._unmount_hooks = []
 
 
     def title(self) -> str:
