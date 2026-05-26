@@ -109,13 +109,28 @@ class KeyMapper:
                 timed_out = False
 
             if timed_out:
+                # Flush the stale buffer first, then fall through to the
+                # normal trie walk so the *new* key gets processed in the
+                # same call.  Previously we appended ``key_token`` to the
+                # cleared buffer and returned immediately; the new key
+                # would then sit unprocessed until the next keystroke
+                # (or another timeout) — a visible "pressed x, nothing
+                # happened" lag for the user.
                 flushed = list(buf)
                 buf.clear()
-                result = self._resolve_buffer(root, flushed)
-                buf.append(key_token)
-                return result
+                timeout_result = self._resolve_buffer(root, flushed)
+            else:
+                timeout_result = None
+        else:
+            timeout_result = None
 
         buf.append(key_token)
+
+        def _with_timeout_prefix(result: list[str]) -> list[str]:
+            """Prepend any tokens flushed by the timeout branch above."""
+            if timeout_result:
+                return timeout_result + result
+            return result
 
         # Walk trie with buffered sequence
         node = root
@@ -144,20 +159,22 @@ class KeyMapper:
                         buf.append(t)
                     else:
                         result.append(t)
-                return result
+                return _with_timeout_prefix(result)
             node = node.children[token]
 
         if node.value is not None:
             # Exact match — but might be a prefix of a longer map
             if node.children:
-                return []  # wait for more input / timeout
+                # Still buffering; nothing to return THIS call besides
+                # any tokens flushed by the timeout branch above.
+                return _with_timeout_prefix([])
             # Definite leaf: fire the map
             expansion = list(node.value)
             buf.clear()
-            return expansion
+            return _with_timeout_prefix(expansion)
 
         # Internal node — still building prefix
-        return []
+        return _with_timeout_prefix([])
 
 
     def flush(self, mode: str) -> list[str]:
