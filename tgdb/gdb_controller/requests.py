@@ -332,8 +332,10 @@ class GDBRequestMixin:
 
 
     async def request_disassembly_async(self, filename: str, line: int, mode: int = 1) -> list[dict]:
+        # ``-data-disassemble -f`` parses the filename as a c-string
+        # token, so paths with spaces or quotes must be MI-quoted.
         result = await self.mi_command_async(
-            f"-data-disassemble -f {filename} -l {line} -n -1 -- {mode}"
+            f"-data-disassemble -f {quote_mi_string(filename)} -l {line} -n -1 -- {mode}"
         )
         payload = result.get("payload") or {}
         asm = payload.get("asm_insns") or []
@@ -355,8 +357,12 @@ class GDBRequestMixin:
         if not start_addr:
             return []
         end_expr = f"{start_addr}+{span_bytes}"
+        # MI option arguments are c-string tokens; quote so any
+        # exotic content (whitespace, quotes, backslashes) survives
+        # to GDB's expression parser unchanged.
         result = await self.mi_command_async(
-            f"-data-disassemble -s {start_addr} -e {end_expr} -- {mode}"
+            f"-data-disassemble -s {quote_mi_string(start_addr)} "
+            f"-e {quote_mi_string(end_expr)} -- {mode}"
         )
         payload = result.get("payload") or {}
         asm = payload.get("asm_insns") or []
@@ -378,8 +384,11 @@ class GDBRequestMixin:
         """
         if not spec:
             return []
+        # C++ template names ("vector<int >::push_back") contain
+        # spaces and angle brackets; quoting the spec keeps them
+        # intact through MI tokenisation.
         result = await self.mi_command_async(
-            f"-data-disassemble -a {spec} -- {mode}"
+            f"-data-disassemble -a {quote_mi_string(spec)} -- {mode}"
         )
         message = result.get("message", "")
         if message == "error":
