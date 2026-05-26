@@ -152,15 +152,25 @@ class SourceViewRendering:
     def _compile_search_pattern(self) -> "re.Pattern | None":
         """Compile the current search pattern, respecting *ignorecase*.
 
-        Returns ``None`` when no pattern is set or the pattern is invalid.
+        Returns ``None`` when no pattern is set or the pattern is
+        invalid.  The compiled regex is cached on the widget so a
+        full render (one call per visible line) recompiles only
+        when the pattern or ``ignorecase`` actually changes — not
+        once per line.
         """
         if not (self.hlsearch and self._search_pattern):
             return None
+        key = (self._search_pattern, self.ignorecase)
+        cached = getattr(self, "_search_re_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
         try:
             flags = re.IGNORECASE if self.ignorecase else 0
-            return re.compile(self._search_pattern, flags)
+            rx = re.compile(self._search_pattern, flags)
         except re.error:
-            return None
+            rx = None
+        self._search_re_cache = (key, rx)
+        return rx
 
 
     def _build_line(self, line_idx: int, sf: "SourceFile" | None) -> Text:
