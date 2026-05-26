@@ -166,25 +166,27 @@ class MemoryPane(PaneBase):
         # fresh content (e.g. user types ``:set address=0x1`` then
         # immediately ``:set address=0x2`` and 0x1 arrives last).
         self._fetch_gen: int = 0
-        # Callbacks invoked once when Textual unmounts the pane.
-        # Used by the workspace factory to drop the pane from the
-        # app's tracking list and unsubscribe its formatter listener
-        # — otherwise both leak for the lifetime of the app.
-        self._unmount_hooks: list[Callable[[], None]] = []
+        # Callbacks invoked once when the pane is explicitly removed
+        # from the workspace.  Do not bind this to Textual's
+        # ``on_unmount``: layout rebuilds temporarily unmount and
+        # remount still-live widgets, and treating those transients as
+        # disposal would drop formatter/list tracking for a visible pane.
+        self._dispose_hooks: list[Callable[[], None]] = []
 
 
-    def add_unmount_hook(self, fn: Callable[[], None]) -> None:
-        """Register *fn* to be invoked when the pane unmounts."""
-        self._unmount_hooks.append(fn)
+    def add_dispose_hook(self, fn: Callable[[], None]) -> None:
+        """Register *fn* to be invoked when the pane leaves the workspace."""
+        self._dispose_hooks.append(fn)
 
 
-    def on_unmount(self) -> None:
-        for fn in list(self._unmount_hooks):
+    def dispose(self) -> None:
+        """Run one-shot cleanup for an intentionally removed memory pane."""
+        for fn in list(self._dispose_hooks):
             try:
                 fn()
             except Exception as exc:
-                _log.debug(f"memory pane unmount hook raised: {exc!r}")
-        self._unmount_hooks = []
+                _log.debug(f"memory pane dispose hook raised: {exc!r}")
+        self._dispose_hooks = []
 
 
     def title(self) -> str:
@@ -271,4 +273,3 @@ class MemoryPane(PaneBase):
         if gen != self._fetch_gen:
             return
         self._content.set_blocks(raw)
-

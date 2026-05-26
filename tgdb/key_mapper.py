@@ -74,6 +74,10 @@ class KeyMapper:
         return True
 
 
+    def has_pending(self, mode: str) -> bool:
+        """Return True when *mode* still has a partial sequence buffered."""
+        return bool(self._buf.get(mode))
+
 
     # ------------------------------------------------------------------
     # Key feeding

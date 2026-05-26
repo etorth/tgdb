@@ -527,6 +527,14 @@ class DisasmPane(PaneBase):
         if func:
             self._func = func
 
+        # Invalidate any older in-flight fetch before *every* refresh,
+        # including the cached-PC fast path below.  A fast-path update
+        # represents newer state just as much as a fresh MI request; if
+        # we do not bump the generation here, a slower older fetch can
+        # still return afterward and overwrite the newer PC marker.
+        self._refresh_gen += 1
+        gen = self._refresh_gen
+
         # Fast path: PC moved within the cached function — just shift the
         # marker without re-issuing the MI request. This avoids a round-trip
         # per ``nexti`` in tight loops.
@@ -537,9 +545,6 @@ class DisasmPane(PaneBase):
         ):
             self.refresh_title()
             return
-
-        self._refresh_gen += 1
-        gen = self._refresh_gen
 
         if filename and self._disasm_fn is not None:
             try:

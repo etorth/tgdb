@@ -117,13 +117,18 @@ class KeyRoutingMixin:
         # Consult the TGDB-mode key mapper (unless we're already replaying a map)
         if not self._in_map_replay:
             result = self.km.feed("tgdb", key)
+            if self.km.has_pending("tgdb"):
+                # ``feed`` may return tokens flushed from an older timed-out
+                # prefix while buffering the new key as the start of a fresh
+                # map.  Keep the timer armed for that fresh prefix.
+                self._arm_km_flush_timer("tgdb")
+            else:
+                self._cancel_km_flush_timer("tgdb")
             if result == []:
                 # Buffering — key consumed but no action yet.  Arm
                 # an idle-flush timer so the buffer doesn't sit
                 # forever waiting for a follow-up keypress.
-                self._arm_km_flush_timer("tgdb")
                 return True
-            self._cancel_km_flush_timer("tgdb")
             if result != [key]:
                 # The map fired — replay the expansion
                 self._replay_key_sequence(result)
@@ -253,12 +258,14 @@ class KeyRoutingMixin:
         if self._in_map_replay:
             return [key]
         result = self.km.feed("gdb", key)
+        if self.km.has_pending("gdb"):
+            self._arm_km_flush_timer("gdb")
+        else:
+            self._cancel_km_flush_timer("gdb")
         if result == []:
             # Arm idle-flush timer so a partial map sequence doesn't
             # stay buffered indefinitely.
-            self._arm_km_flush_timer("gdb")
             return None  # still buffering
-        self._cancel_km_flush_timer("gdb")
         return result
 
 

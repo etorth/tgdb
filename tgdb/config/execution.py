@@ -126,16 +126,16 @@ class ConfigExecutionMixin:
         # the handler:
         #   - ``evaluate`` — multi-token C expressions (need literal
         #     whitespace preserved as a single string).
-        #   - ``shell`` — pipes, redirects, globs, command substitution
-        #     are part of the user's shell expression and must reach
-        #     ``/bin/sh -c`` verbatim, not as quoted tokens.
+        #   - ``shell`` / ``sh`` — pipes, redirects, globs, command
+        #     substitution are part of the user's shell expression and
+        #     must reach ``/bin/sh -c`` verbatim, not as quoted tokens.
         #
         # Both take a single optional argument that is "the rest of
         # the line"; shlex-splitting first and re-joining with
         # ``shlex.join`` (as the legacy path did) breaks shell
         # semantics because the metacharacters get quoted.
         verbatim_match = re.match(
-            r"^(evaluate|shell)\b\s*(.*)",
+            r"^(evaluate|shell|sh)\b\s*(.*)",
             line,
             re.DOTALL | re.IGNORECASE,
         )

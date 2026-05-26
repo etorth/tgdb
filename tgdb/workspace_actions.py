@@ -114,12 +114,13 @@ class WorkspaceMixin:
 
         ``MemoryPane`` is the only multi-instance pane kind, and every
         new instance subscribes a formatter listener that closes over
-        the pane.  Without an unmount cleanup hook the pane would
+        the pane.  Without an explicit disposal hook the pane would
         stay strongly reachable through ``self._memory_panes`` AND
-        through the formatter-listener list, so deleting the pane
-        from the workspace would leak both.  The pane's
-        ``add_unmount_hook`` lets us drop both references in a
-        single shot when Textual tears the widget down.
+        through the formatter-listener list after the user deletes it.
+        Cleanup is deliberately tied to workspace hide/delete/attach
+        replacement, not Textual unmount, because layout rebuilds can
+        temporarily unmount widgets that are still part of the live
+        workspace tree.
         """
         from .memory_pane import MemoryFormatter
         formatter = self.cfg._memoryformatter_obj or MemoryFormatter()
@@ -139,7 +140,7 @@ class WorkspaceMixin:
             except ValueError:
                 pass
 
-        pane.add_unmount_hook(_cleanup)
+        pane.add_dispose_hook(_cleanup)
         return pane
 
 
@@ -156,7 +157,6 @@ class WorkspaceMixin:
         # Sync stash; the pane's async on_mount awaits the initial fetch.
         self._disasm_pane.prime_initial(self.gdb.current_frame, self.gdb.current_thread_id)
         return self._disasm_pane
-
 
 
     # ------------------------------------------------------------------
@@ -204,6 +204,16 @@ class WorkspaceMixin:
             return None
         _log.debug(f"creating pane: {pane_kind}")
         return descriptor.create()
+
+
+    def _dispose_workspace_item(self: "TGDBApp", target: Widget) -> None:
+        """Run cleanup for panes that are intentionally leaving the workspace."""
+        if isinstance(target, MemoryPane):
+            target.dispose()
+            return
+        if isinstance(target, PaneContainer):
+            for item in target.items:
+                self._dispose_workspace_item(item)
 
 
 
@@ -410,6 +420,7 @@ class WorkspaceMixin:
             return target
         replacement = EmptyPane(self.hl)
         if await self._replace_workspace_item(target, replacement):
+            self._dispose_workspace_item(target)
             return replacement
         return None
 
@@ -421,7 +432,8 @@ class WorkspaceMixin:
             parent = None
         if parent is None:
             return None
-        await parent.take_item(target)
+        removed = await parent.take_item(target)
+        self._dispose_workspace_item(removed)
         return await self._normalize_container_after_delete(parent)
 
 

@@ -244,7 +244,10 @@ class TGDBScreen:
         root = await app._ensure_dynamic_workspace()
         if root is None:
             return
+        old_items = root.items
         await root.set_items([EmptyPane(app.hl)])
+        for item in old_items:
+            app._dispose_workspace_item(item)
 
 
     async def _do_split(self, pane: list[int], mode: SplitMode) -> None:
@@ -362,6 +365,7 @@ class TGDBScreen:
             # pane would refresh data the user can never see.
             return
         await parent.replace_item(widget, pane_widget)
+        app._dispose_workspace_item(widget)
         descriptor = app._pane_descriptors.get(pane_kind)
         if descriptor is not None and descriptor.requester is not None:
             result = descriptor.requester()
