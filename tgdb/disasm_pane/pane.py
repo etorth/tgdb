@@ -356,6 +356,15 @@ class DisasmPane(PaneBase):
         # ``("function", spec)`` to seed from a function name (e.g.
         # ``main``).  ``None`` means nothing to prime.
         self._pending_prime: tuple | None = None
+        # Monotonic refresh generation.  Every call into
+        # ``refresh_disasm`` / ``prime_function`` bumps it before
+        # awaiting the MI request; when the await resumes, the call
+        # only commits its result if the generation is still current.
+        # Without this guard, two refreshes issued in quick succession
+        # (rapid stepping, an event-burst after ``=memory-changed``,
+        # etc.) can resolve out of order and the older result
+        # overwrites the newer one on screen.
+        self._refresh_gen: int = 0
 
 
     def prime_initial(self, frame, thread_id: str) -> None:
@@ -529,6 +538,9 @@ class DisasmPane(PaneBase):
             self.refresh_title()
             return
 
+        self._refresh_gen += 1
+        gen = self._refresh_gen
+
         if filename and self._disasm_fn is not None:
             try:
                 raw = await self._disasm_fn(filename, line)
@@ -542,6 +554,11 @@ class DisasmPane(PaneBase):
                 _log.debug(f"disasm fetch PC={current_addr} failed: {exc!r}")
                 raw = []
         else:
+            return
+
+        # A newer refresh started while we were awaiting — drop our
+        # result so it does not overwrite the newer view on screen.
+        if gen != self._refresh_gen:
             return
 
         lines = _parse_disasm(raw, current_addr)

@@ -159,6 +159,13 @@ class MemoryPane(PaneBase):
         self._current_address: str = ""
         self._explicit_size: int | None = None
         self._read_fn: Callable | None = None
+        # Monotonic fetch generation.  Each ``_fetch`` bumps it
+        # before awaiting the MI read; on resume the result is
+        # discarded if a newer fetch has started, otherwise stale
+        # bytes from an earlier (slower) request can overwrite
+        # fresh content (e.g. user types ``:set address=0x1`` then
+        # immediately ``:set address=0x2`` and 0x1 arrives last).
+        self._fetch_gen: int = 0
 
 
     def title(self) -> str:
@@ -231,11 +238,18 @@ class MemoryPane(PaneBase):
 
 
     async def _fetch(self, addr: str, size: int) -> None:
-        if self._read_fn:
-            try:
-                raw = await self._read_fn(addr, size)
-            except Exception as exc:
-                _log.debug(f"memory read failed addr={addr} size={size}: {exc!r}")
-                raw = []
-            self._content.set_blocks(raw)
+        if not self._read_fn:
+            return
+        self._fetch_gen += 1
+        gen = self._fetch_gen
+        try:
+            raw = await self._read_fn(addr, size)
+        except Exception as exc:
+            _log.debug(f"memory read failed addr={addr} size={size}: {exc!r}")
+            raw = []
+        # Drop the result when a newer fetch is already underway,
+        # so stale bytes never overwrite a fresher view.
+        if gen != self._fetch_gen:
+            return
+        self._content.set_blocks(raw)
 
