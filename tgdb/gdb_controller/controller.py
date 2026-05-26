@@ -380,15 +380,32 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
 
 
     def terminate(self) -> None:
-        if self._proc is None:
-            _log.warning("terminate() called but GDB was never started")
+        """Tear down the GDB process and every resource ``start()`` opened.
+
+        Safe to call:
+
+          - When ``start()`` fully succeeded — terminates the process,
+            cancels io tasks, closes every fd.
+          - When ``start()`` failed mid-way (``_proc`` is still None but
+            the PTY / socketpair fds were already opened above the
+            ``ptyprocess.spawn`` call) — still closes those fds so they
+            don't leak.
+          - Repeatedly — second call is a no-op.
+
+        After ``terminate()`` returns, ``start()`` can be called again
+        to spawn a fresh GDB on the same controller.
+        """
+        had_proc = self._proc is not None
+        if had_proc:
+            _log.info("GDB terminated")
+            if self._proc.isalive():
+                try:
+                    self._proc.terminate(force=True)
+                except Exception:
+                    _log.debug("GDB terminate() raised", exc_info=True)
+        elif self._mi_master_fd < 0 and self._sock_tgdb < 0:
+            # Nothing was ever opened — completely idle controller.
             return
-        _log.info("GDB terminated")
-        if self._proc.isalive():
-            try:
-                self._proc.terminate(force=True)
-            except Exception:
-                _log.debug("GDB terminate() raised", exc_info=True)
 
         # Cancel the socket dispatch loop so it does not try to process
         # frames after the controller is torn down.
@@ -438,6 +455,14 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 except Exception:
                     _log.debug(f"closing {attr} raised", exc_info=True)
                 setattr(self, attr, -1)
+
+        # Reset process + buffers so a subsequent ``start()`` is a clean
+        # session, not a refusal.  Tokens stay incremented across
+        # restarts (still globally unique within the parser).
+        self._proc = None
+        self._console_buf = b""
+        self._sock_buf = b""
+        self._mi_buf = ""
 
 
 
