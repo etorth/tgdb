@@ -122,22 +122,29 @@ class ConfigExecutionMixin:
         if command_match:
             return await self._cmd_command(command_match.group(1))
 
-        # ``evaluate`` needs verbatim tail (multi-token C expressions),
-        # so it bypasses shlex.  ``signal`` used to share this codepath
-        # but signal arguments are a single token (name or number), so
-        # it goes through normal shlex parsing now; ``_cmd_signal``
-        # validates argv length.
-        eval_match = re.match(
-            r"^(evaluate)\b\s*(.*)",
+        # Commands whose tail must NOT be shlex-split before reaching
+        # the handler:
+        #   - ``evaluate`` — multi-token C expressions (need literal
+        #     whitespace preserved as a single string).
+        #   - ``shell`` — pipes, redirects, globs, command substitution
+        #     are part of the user's shell expression and must reach
+        #     ``/bin/sh -c`` verbatim, not as quoted tokens.
+        #
+        # Both take a single optional argument that is "the rest of
+        # the line"; shlex-splitting first and re-joining with
+        # ``shlex.join`` (as the legacy path did) breaks shell
+        # semantics because the metacharacters get quoted.
+        verbatim_match = re.match(
+            r"^(evaluate|shell)\b\s*(.*)",
             line,
             re.DOTALL | re.IGNORECASE,
         )
-        if eval_match:
-            eval_cmd = eval_match.group(1).lower()
-            eval_expr = eval_match.group(2)
-            handler = self._handlers.get(eval_cmd)
+        if verbatim_match:
+            verbatim_cmd = verbatim_match.group(1).lower()
+            verbatim_expr = verbatim_match.group(2)
+            handler = self._handlers.get(verbatim_cmd)
             if handler is not None:
-                result = handler([eval_expr] if eval_expr else [])
+                result = handler([verbatim_expr] if verbatim_expr else [])
                 if inspect.isawaitable(result):
                     return await result
                 return result

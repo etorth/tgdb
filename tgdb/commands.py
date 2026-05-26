@@ -161,14 +161,26 @@ class CommandsMixin:
 
 
     def _cmd_shell(self: "TGDBApp", args: list) -> str | None:
+        """Run a shell command, preserving pipes / redirects / globs.
+
+        The dispatcher routes ``:shell`` through the verbatim-tail
+        path so ``args`` contains at most one element: the entire
+        rest of the command line as the user typed it.  We pass
+        that string straight to ``/bin/sh -c`` (via
+        ``subprocess.call(..., shell=True)``), so ``|``, ``>``,
+        ``*``, ``$()`` etc. behave exactly like in a regular
+        interactive shell.
+
+        With no argument, drop the user into ``$SHELL`` for an
+        interactive subshell.
+        """
         import os
-        import shlex
         import subprocess
 
         try:
             with self.suspend():
                 if args:
-                    subprocess.call(shlex.join(args), shell=True)
+                    subprocess.call(args[0], shell=True)
                 else:
                     subprocess.call([os.environ.get("SHELL", "/bin/sh")])
                 try:
