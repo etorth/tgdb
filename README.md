@@ -271,15 +271,16 @@ tgdb/
 ├── context_menu/        Cascading workspace context-menu package
 ├── status_bar.py        Status bar widget
 ├── file_dialog/         File picker dialog package
-├── config/             Configuration package (cgdbrc parser + helpers)
+├── config/             Configuration package (tgdbrc parser + helpers)
 ├── highlight_groups.py  Highlight group table and colour management
 └── key_mapper.py        Key mapping with trie + timeout (KUI)
 ```
 
 ### How it works
 
-1. **Startup**: `TGDBApp` reads `~/.cgdb/cgdbrc`, spawns GDB via `ptyprocess`
-   with dual PTYs: primary (console), secondary (MI channel).
+1. **Startup**: `TGDBApp` reads `$XDG_CONFIG_HOME/tgdb/tgdbrc` (default
+   `~/.config/tgdb/tgdbrc`), spawns GDB via `ptyprocess` with dual PTYs:
+   primary (console), secondary (MI channel).
 2. **GDB I/O**: Two asyncio readers:
    - Primary PTY: raw console bytes → GDB widget (with ANSI colours)
    - Secondary PTY: MI stream → parser for async records (`*stopped`, `=thread-selected`, etc.)

@@ -49,7 +49,7 @@
 - `tgdb/file_dialog/` is the full-screen source-file picker package. `dialog.py` exposes `FileDialog`, while `messages.py`, `keys.py`, `search.py`, and `view.py` keep its search/navigation internals self-contained.
 - `tgdb/config/`, `tgdb/highlight_groups.py`, and `tgdb/key_mapper.py` together implement cgdb-style config parsing:
   - `ConfigParser` lives in `config/parser.py`, while `types.py`, `shared.py`, `execution.py`, `keys.py`, `options.py`, `commands.py`, and `python_exec.py` keep the config internals self-contained behind the `tgdb.config` package entry point;
-  - `ConfigParser` reads `~/.cgdb/cgdbrc` or `$CGDB_DIR/cgdbrc`;
+  - `ConfigParser` reads `$XDG_CONFIG_HOME/tgdb/tgdbrc` (default `~/.config/tgdb/tgdbrc`);
   - `HighlightGroups` keeps cgdb-compatible group names and color semantics;
   - `KeyMapper` resolves `:map` / `:imap` expansions using a trie with timeout behavior.
 
