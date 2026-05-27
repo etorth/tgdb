@@ -860,9 +860,11 @@ class LocalVariablePaneReconcileMixin:
 
         Benign cases that look the same on the surface but DO NOT
         crash GDB:
-          * std::vector / list / map growing or shrinking — the kept
+          * sequential containers growing or shrinking — the kept
             children's names (``[0],[1],...``) remain valid against
-            the new layout, so GDB's cache stays consistent.
+            the new layout, so GDB's cache stays consistent;
+          * associative containers growing or shrinking — handled by
+            the map-specific guard below.
 
         Distinguishing test (cheap, no MI round-trip):
           * Walk the direct tracked children of ``varobj_name`` and
@@ -876,11 +878,21 @@ class LocalVariablePaneReconcileMixin:
             kept a child whose name does not match the new layout
             (the variant ``[contained value]`` case) → transition.
 
-        For non-array-indexed printers (e.g. associative containers
-        with composite key exps) this can mis-classify a benign
-        update as a transition; the cost is an extra recreate, not a
-        crash, so we err on the safe side.
+        Associative-container printers expose their visible children
+        by key (``[42]``) even though GDB reports ``new_num_children``
+        as the raw key/value varobj count.  The array-index heuristic
+        is invalid for those maps: treating every key as a stale child
+        and deleting the nested map varobj can corrupt GDB's parent
+        varobj cache.  For map->map updates, use the normal
+        clear/reload path instead of invalidating the binding.
         """
+        node = self._varobj_to_node.get(varobj_name)
+        if node is not None and isinstance(node.data, dict):
+            old_displayhint = node.data.get("displayhint", "")
+            new_displayhint = change.get("displayhint", old_displayhint)
+            if old_displayhint == "map" and new_displayhint == "map":
+                return False
+
         try:
             new_num_children = int(change.get("new_num_children", "0"))
         except (TypeError, ValueError):

@@ -26,6 +26,10 @@ class GDBRequestMixin:
         if self._mi_master_fd < 0:
             return None
 
+        proc = getattr(self, "_proc", None)
+        if proc is None or not proc.isalive():
+            return None
+
         if token is None:
             token = self._token
             self._token += 1

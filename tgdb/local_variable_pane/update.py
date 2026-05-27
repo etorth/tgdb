@@ -3,12 +3,28 @@ State-computation helpers for the local-variable pane.
 """
 
 from ..gdb_controller import Frame, LocalVariable
+from ..gdb_controller.errors import GDBRequestTimeout
 from ..gdb_controller.types import normalize_addr
 from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log, _type_needs_name_fallback
 
 
 class LocalVariablePaneUpdateMixin:
     """State reconciliation and varobj lifecycle management."""
+
+    @staticmethod
+    def _should_stop_varobj_refresh_after_error(exc: Exception) -> bool:
+        """Return True when continuing this refresh would only queue stale MI."""
+        if isinstance(exc, GDBRequestTimeout):
+            return True
+
+        message = str(exc).lower()
+        return (
+            "gdb process exited" in message
+            or "gdb controller terminated" in message
+            or "mi channel" in message
+            or "mi command timed out" in message
+        )
+
 
     def _shadowed_keys_from_locals(
         self,
@@ -169,8 +185,7 @@ class LocalVariablePaneUpdateMixin:
         # GDB's varobj cache for that child is in an inconsistent state
         # post-transition.  Roots are tracked in ``_varobj_names``;
         # filter against it to limit the iteration to roots only.
-        root_set = set(self._varobj_names)
-        dynamic_roots = [n for n in self._dynamic_varobjs if n in root_set]
+        dynamic_roots = [n for n in self._varobj_names if n in self._dynamic_varobjs]
 
         if self._var_eval_expr:
             for varobj_name in dynamic_roots:
@@ -186,6 +201,8 @@ class LocalVariablePaneUpdateMixin:
                         _log.debug(f"dynamic root {varobj_name} value refreshed: {new_value!r}")
                     except Exception as exc:
                         _log.warning(f"var_evaluate_expression {varobj_name} failed: {exc}")
+                        if self._should_stop_varobj_refresh_after_error(exc):
+                            return changelist
                         new_value = ""
 
                 length = self._parse_container_length(new_value)
@@ -194,6 +211,8 @@ class LocalVariablePaneUpdateMixin:
                         result = await self._var_update(varobj_name, timeout=10.0)
                     except Exception as exc:
                         _log.warning(f"var_update {varobj_name} failed: {exc}")
+                        if self._should_stop_varobj_refresh_after_error(exc):
+                            return changelist
                     else:
                         changelist.extend(result)
                         safe_dynamic_updated.add(varobj_name)
@@ -215,6 +234,8 @@ class LocalVariablePaneUpdateMixin:
                     self._purge_varobj_subtree(varobj_name)
                 else:
                     _log.warning(f"Skipped varobj {varobj_name} during update: {exc}")
+                    if self._should_stop_varobj_refresh_after_error(exc):
+                        return changelist
                 continue
 
             changelist.extend(result)
