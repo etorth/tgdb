@@ -1,15 +1,22 @@
 """
-GDB controller — two-PTY architecture, mirroring cgdb exactly.
+GDB controller — debugger transport plus MI request/result orchestration.
 
 cgdb reference:
   lib/util/fork_util.cpp  — spawn GDB with --nw -ex "new-ui mi <slave>"
   lib/tgdb/tgdb.cpp       — dual-fd select loop + gdbwire MI parser
+
+On POSIX, tgdb mirrors cgdb's two-PTY architecture:
 
 Primary PTY  : GDB runs as a normal CLI process (--nw, no TUI).
                Raw bytes forwarded via on_console(bytes) for VT100 rendering.
 Secondary PTY: GDB machine-interface channel opened via "new-ui mi <device>".
                Structured output (breakpoints, frames, source) parsed here.
                MI commands sent here; user input goes to primary PTY only.
+
+On native Windows/UCRT64, POSIX PTYs are unavailable.  tgdb falls back to a
+single MI subprocess pipe transport.  The GDB pane is line-oriented console
+emulation: typed lines are submitted with "-interpreter-exec console" and MI
+stream records are rendered as console output.
 """
 
 import asyncio
@@ -17,11 +24,23 @@ import logging
 import os
 import signal
 import socket
-import termios
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import ptyprocess
+try:
+    import termios
+except ImportError:
+    termios = None
+
+try:
+    import ptyprocess
+except ImportError:
+    ptyprocess = None
+
+if TYPE_CHECKING:
+    import ptyprocess as ptyprocess_types
 
 from .requests import GDBRequestMixin
 from .results import GDBResultMixin
@@ -31,6 +50,7 @@ from .types import (  # noqa: F401 — re-exported
     Frame,
     LocalVariable,
     PendingEntry,
+    quote_mi_string,
     ThreadInfo,
     RegisterInfo,
 )
@@ -48,6 +68,16 @@ _log = logging.getLogger("tgdb.gdb_controller")
 # than this without a trailing newline (e.g. a runaway pretty-printer), we
 # truncate it instead of letting memory grow without bound.
 _MI_BUF_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _posix_backend_available() -> bool:
+    return (
+        os.name == "posix"
+        and termios is not None
+        and ptyprocess is not None
+        and hasattr(os, "openpty")
+        and hasattr(os, "ttyname")
+    )
 
 
 def _encode_varint(n: int) -> bytes:
@@ -122,8 +152,15 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self.gdb_path = gdb_path
         self.gdb_args = args or []
         self.init_commands = init_commands or []
+        if _posix_backend_available():
+            self._backend: str = "posix"
+        elif os.name == "nt":
+            self._backend = "mi-pipe"
+        else:
+            self._backend = "unsupported"
+        self._uses_socket_data = self._backend == "posix"
 
-        self._proc: ptyprocess.PtyProcess | None = None
+        self._proc: "ptyprocess_types.PtyProcess | subprocess.Popen[bytes] | None" = None
         self._mi_master_fd: int = -1
         self._mi_slave_fd: int = -1  # kept open to prevent master EIO
         # AF_UNIX socketpair used by GDB-side Python (``tgdb_pysetup.py``)
@@ -139,9 +176,12 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._sock_buf: bytes = b""
         self._console_buf: bytes = b""
         self._mi_buf: str = ""
+        self._win_cli_buf: str = ""
+        self._mi_pipe_prompt_budget: int = 1 if self._backend == "mi-pipe" else 0
         # In-flight eager-started tasks spawned by the fd-readable callbacks.
         # Tasks that complete synchronously (no real suspend) are never added.
         self._io_tasks: set[asyncio.Task] = set()
+        self._pipe_tasks: set[asyncio.Task] = set()
         self._token: int = 1
         self._pending: dict[int, PendingEntry] = {}
         self._request_meta: dict[int, dict[str, object]] = {}
@@ -216,6 +256,15 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # first.
         if self._proc is not None:
             raise RuntimeError("GDBController.start() called twice")
+        if self._backend == "mi-pipe":
+            self._start_mi_pipe(rows, cols)
+            return
+        if self._backend != "posix":
+            raise RuntimeError("tgdb needs either POSIX PTYs or native Windows subprocess pipes")
+        if ptyprocess is None:
+            raise RuntimeError("ptyprocess is not available")
+        if termios is None:
+            raise RuntimeError("termios is not available")
 
         # Create secondary PTY for MI channel.
         # Assign to self immediately so terminate() can clean up if anything below fails.
@@ -289,27 +338,162 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         _log.info(f"GDB spawned, cmd={cmd!r}")
 
 
+    def _start_mi_pipe(self, rows: int, cols: int) -> None:
+        """Start native Windows GDB in MI mode over subprocess pipes."""
+        self._mi_pipe_prompt_budget = 1
+        cmd = [self.gdb_path, "--interpreter=mi2"]
+        cmd.extend(self.gdb_args)
+        try:
+            self._proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+        except Exception:
+            _log.error(f"GDB spawn failed, cmd={cmd!r}")
+            self.terminate()
+            raise
+        _log.info(f"GDB spawned, backend=mi-pipe, cmd={cmd!r}")
+
+
+    def _process_is_alive(self) -> bool:
+        proc = self._proc
+        if proc is None:
+            return False
+        if self._backend == "posix":
+            return proc.isalive()
+        return proc.poll() is None
+
+
     def resize(self, rows: int, cols: int) -> None:
+        if self._backend == "mi-pipe":
+            return
         if self._proc and self._proc.isalive():
             self._proc.setwinsize(rows, cols)
 
 
     def is_alive(self) -> bool:
-        return bool(self._proc and self._proc.isalive())
+        return self._process_is_alive()
 
 
     def send_interrupt(self) -> None:
-        if self._proc and self._proc.isalive():
+        if self._backend == "mi-pipe":
+            self.mi_command("-exec-interrupt --all", report_error=False)
+        elif self._proc and self._proc.isalive():
             self._proc.kill(signal.SIGINT)
 
 
     def send_input(self, data: str | bytes) -> None:
         """Write to GDB's primary PTY (user input / CLI commands)."""
-        if self._proc and self._proc.isalive():
-            if isinstance(data, str):
-                data = data.encode()
-            _log.debug(f"GDB input: {data!r}")
-            self._proc.write(data)
+        if self._backend == "mi-pipe":
+            self._send_mi_pipe_input(data)
+            return
+        if not self._process_is_alive():
+            return
+        if isinstance(data, str):
+            data = data.encode()
+        _log.debug(f"GDB input: {data!r}")
+        self._proc.write(data)
+
+
+    def _send_mi_pipe_input(self, data: str | bytes) -> None:
+        """Buffer line-oriented console input for the Windows MI backend."""
+        if not self._process_is_alive():
+            return
+        if isinstance(data, bytes):
+            text = data.decode("utf-8", errors="replace")
+        else:
+            text = data
+
+        idx = 0
+        while idx < len(text):
+            ch = text[idx]
+            if ch == "\x03":
+                self.send_interrupt()
+            elif ch in ("\r", "\n"):
+                command = self._win_cli_buf.strip()
+                self._win_cli_buf = ""
+                self.on_console(b"\r\n")
+                if command:
+                    self._send_mi_pipe_cli_command(command)
+            elif ch in ("\x08", "\x7f"):
+                if self._win_cli_buf:
+                    self._win_cli_buf = self._win_cli_buf[:-1]
+                    self.on_console(b"\b \b")
+            elif ch == "\x1b":
+                idx = self._skip_escape_sequence(text, idx)
+                continue
+            elif ch.isprintable() or ch == "\t":
+                self._win_cli_buf += ch
+                self.on_console(ch.encode("utf-8", errors="replace"))
+            idx += 1
+
+
+    @staticmethod
+    def _skip_escape_sequence(text: str, idx: int) -> int:
+        """Skip one terminal escape sequence in the MI-pipe input buffer."""
+        idx += 1
+        if idx >= len(text):
+            return idx
+        if text[idx] == "O":
+            return min(idx + 2, len(text))
+        if text[idx] != "[":
+            return idx + 1
+        idx += 1
+        while idx < len(text):
+            if text[idx].isalpha() or text[idx] == "~":
+                return idx + 1
+            idx += 1
+        return idx
+
+
+    def _send_mi_pipe_cli_command(self, command: str) -> None:
+        """Submit one console command through GDB/MI."""
+        _log.debug(f"GDB CLI via MI: {command!r}")
+        if command in ("q", "quit"):
+            self.mi_command("-gdb-exit", report_error=False)
+            return
+        self._mi_pipe_prompt_budget += 1
+        self.mi_command(
+            f"-interpreter-exec console {quote_mi_string(command)}",
+            report_error=True,
+            kind="console-cli",
+        )
+
+
+    def _mi_channel_open(self) -> bool:
+        if not self._process_is_alive():
+            return False
+        if self._backend == "mi-pipe":
+            proc = self._proc
+            return proc is not None and proc.stdin is not None and not proc.stdin.closed
+        return self._mi_master_fd >= 0
+
+
+    def _write_mi_bytes(self, raw: bytes) -> bool:
+        if self._backend == "mi-pipe":
+            proc = self._proc
+            if proc is None or proc.stdin is None or proc.stdin.closed:
+                return False
+            try:
+                proc.stdin.write(raw)
+                proc.stdin.flush()
+                return True
+            except OSError:
+                return False
+
+        try:
+            written = 0
+            while written < len(raw):
+                n = os.write(self._mi_master_fd, raw[written:])
+                if n <= 0:
+                    raise OSError("os.write returned 0 bytes")
+                written += n
+            return True
+        except OSError:
+            return False
 
 
     def _next_mi_token(self) -> int:
@@ -398,11 +582,14 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         had_proc = self._proc is not None
         if had_proc:
             _log.info("GDB terminated")
-            if self._proc.isalive():
-                try:
+            try:
+                if self._backend == "mi-pipe":
+                    if self._proc.poll() is None:
+                        self._proc.terminate()
+                elif self._proc.isalive():
                     self._proc.terminate(force=True)
-                except Exception:
-                    _log.debug("GDB terminate() raised", exc_info=True)
+            except Exception:
+                _log.debug("GDB terminate() raised", exc_info=True)
         elif self._mi_master_fd < 0 and self._sock_tgdb < 0:
             # Nothing was ever opened — completely idle controller.
             return
@@ -413,6 +600,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             if not task.done():
                 task.cancel()
         self._io_tasks.clear()
+        for task in list(self._pipe_tasks):
+            if not task.done():
+                task.cancel()
+        self._pipe_tasks.clear()
 
         # Wake any caller blocked in ``mi_command_async`` so they don't hang
         # on futures that will never resolve.
@@ -463,6 +654,8 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._console_buf = b""
         self._sock_buf = b""
         self._mi_buf = ""
+        self._win_cli_buf = ""
+        self._mi_pipe_prompt_budget = 0
 
 
 
@@ -472,6 +665,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
 
 
     async def run_async(self) -> None:
+        if self._backend == "mi-pipe":
+            await self._run_mi_pipe_async()
+            return
+
         loop = asyncio.get_running_loop()
 
         # Use a Future to signal when GDB's primary PTY closes (EOF/error).
@@ -532,6 +729,78 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self.on_exit()
 
 
+    async def _run_mi_pipe_async(self) -> None:
+        """Read native Windows GDB/MI subprocess pipes."""
+        loop = asyncio.get_running_loop()
+        self._console_done: asyncio.Future = loop.create_future()
+
+        proc = self._proc
+        if proc is None:
+            self._console_done.set_result(None)
+        else:
+            if proc.stdout is not None:
+                task = asyncio.create_task(
+                    self._read_mi_pipe_stdout(proc.stdout),
+                    name="gdb-mi-pipe-stdout",
+                )
+                self._pipe_tasks.add(task)
+                task.add_done_callback(self._pipe_tasks.discard)
+            if proc.stderr is not None:
+                task = asyncio.create_task(
+                    self._read_mi_pipe_stderr(proc.stderr),
+                    name="gdb-mi-pipe-stderr",
+                )
+                self._pipe_tasks.add(task)
+                task.add_done_callback(self._pipe_tasks.discard)
+
+        self.mi_command("-gdb-set pagination off", report_error=False)
+        self.mi_command("-gdb-set mi-async on", report_error=False)
+        self.mi_command("-enable-pretty-printing", report_error=False)
+
+        try:
+            await self._console_done
+        finally:
+            for task in list(self._pipe_tasks):
+                if not task.done():
+                    task.cancel()
+            self._pipe_tasks.clear()
+            for task in list(self._io_tasks):
+                if not task.done():
+                    task.cancel()
+            self._io_tasks.clear()
+            self._fail_pending_futures(RuntimeError("GDB process exited"))
+            _log.info("GDB exited")
+            self.on_exit()
+
+
+    async def _read_mi_pipe_stdout(self, pipe) -> None:
+        try:
+            while True:
+                data = await asyncio.to_thread(pipe.readline)
+                if not data:
+                    break
+                self._feed_mi_bytes(data)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _log.error(f"MI pipe stdout reader failed: {exc!r}", exc_info=True)
+        finally:
+            if not self._console_done.done():
+                self._console_done.set_result(None)
+
+
+    async def _read_mi_pipe_stderr(self, pipe) -> None:
+        try:
+            while True:
+                data = await asyncio.to_thread(pipe.readline)
+                if not data:
+                    break
+                self._console_buf += data
+                self._spawn_console_processing()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _log.debug(f"MI pipe stderr reader failed: {exc!r}")
 
 
     def _on_console_readable(self) -> None:
@@ -596,20 +865,22 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                     pass
                 self._fail_pending_futures(RuntimeError("MI channel closed"))
                 return
-            self._mi_buf += data.decode("utf-8", errors="replace")
-            if len(self._mi_buf) > _MI_BUF_MAX_BYTES:
-                last_nl = self._mi_buf.rfind("\n")
-                dropped = (
-                    len(self._mi_buf) if last_nl < 0 else last_nl
-                )
-                self._mi_buf = "" if last_nl < 0 else self._mi_buf[last_nl + 1:]
-                _log.warning(
-                    f"MI buffer exceeded {_MI_BUF_MAX_BYTES} bytes; "
-                    f"discarded {dropped} bytes to resync"
-                )
-            self._spawn_mi_record_tasks()
+            self._feed_mi_bytes(data)
         except (BlockingIOError, OSError):
             pass
+
+
+    def _feed_mi_bytes(self, data: bytes) -> None:
+        self._mi_buf += data.decode("utf-8", errors="replace")
+        if len(self._mi_buf) > _MI_BUF_MAX_BYTES:
+            last_nl = self._mi_buf.rfind("\n")
+            dropped = len(self._mi_buf) if last_nl < 0 else last_nl
+            self._mi_buf = "" if last_nl < 0 else self._mi_buf[last_nl + 1:]
+            _log.warning(
+                f"MI buffer exceeded {_MI_BUF_MAX_BYTES} bytes; "
+                f"discarded {dropped} bytes to resync"
+            )
+        self._spawn_mi_record_tasks()
 
 
     def _spawn_mi_record_tasks(self) -> None:
@@ -648,3 +919,21 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             await self._handle_result(rec)
         elif t == "notify":
             await self._handle_async(rec)
+        elif self._backend == "mi-pipe":
+            self._handle_mi_pipe_stream(rec)
+
+
+    def _handle_mi_pipe_stream(self, rec: dict) -> None:
+        """Render MI stream/prompt records into the Windows GDB pane."""
+        record_type = rec.get("type")
+        if record_type in ("console", "target", "log", "output"):
+            payload = rec.get("payload", "")
+            if isinstance(payload, str) and payload:
+                self._console_buf += payload.encode("utf-8", errors="replace")
+                self._spawn_console_processing()
+        elif record_type == "done":
+            if self._mi_pipe_prompt_budget <= 0:
+                return
+            self._mi_pipe_prompt_budget -= 1
+            self._console_buf += b"(gdb) "
+            self._spawn_console_processing()

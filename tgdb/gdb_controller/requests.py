@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 from pathlib import Path
 
 from .errors import GDBRequestCancelled, GDBRequestFailed, GDBRequestTimeout
@@ -23,11 +22,7 @@ class GDBRequestMixin:
         kind: str | None = None,
         token: int | None = None,
     ) -> int | None:
-        if self._mi_master_fd < 0:
-            return None
-
-        proc = getattr(self, "_proc", None)
-        if proc is None or not proc.isalive():
+        if not self._mi_channel_open():
             return None
 
         if token is None:
@@ -39,23 +34,7 @@ class GDBRequestMixin:
         }
         raw = f"{token}{cmd}\n".encode()
         _log.debug(f"MI->: {raw.rstrip()!r}")
-        # ``os.write`` may return fewer bytes than requested when the PTY
-        # buffer fills (long expression evaluations, large sourced files,
-        # etc.).  Without a retry loop the rest of the command would be
-        # silently dropped and the awaiting future would never resolve
-        # until its individual timeout fired — looking from the outside
-        # like GDB simply hung on that command.  Loop until the full
-        # buffer is delivered or os.write raises a real error.
-        try:
-            written = 0
-            while written < len(raw):
-                n = os.write(self._mi_master_fd, raw[written:])
-                if n <= 0:
-                    # Should not happen on a valid blocking fd, but
-                    # defend against returning to the loop forever.
-                    raise OSError("os.write returned 0 bytes")
-                written += n
-        except OSError:
+        if not self._write_mi_bytes(raw):
             self._request_meta.pop(token, None)
             return None
         return token
@@ -101,6 +80,8 @@ class GDBRequestMixin:
         raise_on_error: bool = False,
         token: int | None = None,
         expect_socket: bool = False,
+        kind: str | None = None,
+        report_error: bool = False,
     ) -> dict:
         """Send an MI command and await the decoded response.
 
@@ -133,7 +114,12 @@ class GDBRequestMixin:
         """
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
-        token = self._send_mi_command(cmd, report_error=False, token=token)
+        token = self._send_mi_command(
+            cmd,
+            report_error=report_error,
+            token=token,
+            kind=kind,
+        )
         if token is None:
             if raise_on_error:
                 raise RuntimeError("MI channel not open")
@@ -221,6 +207,16 @@ class GDBRequestMixin:
 
 
     async def request_current_location(self, *, report_error: bool = True) -> None:
+        if not self._uses_socket_data:
+            await self.mi_command_async(
+                "-stack-info-frame",
+                timeout=30.0,
+                raise_on_error=report_error,
+                kind="current-location",
+                report_error=report_error,
+            )
+            return
+
         token = self._next_mi_token()
         self.send_cancel_token(self._frame_cancel_token)
         self._frame_cancel_token = token
@@ -233,6 +229,16 @@ class GDBRequestMixin:
 
 
     async def request_current_frame_locals(self, *, report_error: bool = False) -> None:
+        if not self._uses_socket_data:
+            await self.mi_command_async(
+                "-stack-list-variables --all-values",
+                timeout=30.0,
+                raise_on_error=report_error,
+                kind="stack-locals",
+                report_error=report_error,
+            )
+            return
+
         if self._locals_cancel_token in self._pending:
             return
         token = self._next_mi_token()
@@ -247,6 +253,16 @@ class GDBRequestMixin:
 
 
     async def request_current_stack_frames(self, *, report_error: bool = False) -> None:
+        if not self._uses_socket_data:
+            await self.mi_command_async(
+                "-stack-list-frames",
+                timeout=30.0,
+                raise_on_error=report_error,
+                kind="stack-frames",
+                report_error=report_error,
+            )
+            return
+
         token = self._next_mi_token()
         self.send_cancel_token(self._stack_cancel_token)
         self._stack_cancel_token = token
@@ -275,6 +291,23 @@ class GDBRequestMixin:
 
 
     async def request_current_registers(self, *, report_error: bool = False) -> None:
+        if not self._uses_socket_data:
+            await self.mi_command_async(
+                "-data-list-register-names",
+                timeout=30.0,
+                raise_on_error=report_error,
+                kind="register-values",
+                report_error=report_error,
+            )
+            await self.mi_command_async(
+                "-data-list-register-values x",
+                timeout=30.0,
+                raise_on_error=report_error,
+                kind="register-values",
+                report_error=report_error,
+            )
+            return
+
         token = self._next_mi_token()
         self.send_cancel_token(self._registers_cancel_token)
         self._registers_cancel_token = token
@@ -287,6 +320,15 @@ class GDBRequestMixin:
 
 
     async def request_breakpoints(self, *, report_error: bool = False) -> None:
+        if not self._uses_socket_data:
+            await self.mi_command_async(
+                "-break-list",
+                timeout=30.0,
+                raise_on_error=report_error,
+                report_error=report_error,
+            )
+            return
+
         token = self._next_mi_token()
         self.send_cancel_token(self._breakpoints_cancel_token)
         self._breakpoints_cancel_token = token

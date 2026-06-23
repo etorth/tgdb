@@ -93,6 +93,9 @@ class CallbacksMixin:
     def on_open_tty(self, _: OpenTTY) -> None:
         """Ctrl-T: allocate a new PTY for the inferior's stdio.
         Mirrors cgdb: open a PTY pair and tell GDB 'set inferior-tty <slave>'."""
+        if not hasattr(os, "openpty") or not hasattr(os, "ttyname"):
+            self._show_status("TTY error: POSIX PTY support is unavailable")
+            return
         try:
             master_fd, slave_fd = os.openpty()
             slave_path = os.ttyname(slave_fd)

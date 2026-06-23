@@ -40,6 +40,11 @@ pip install textual pygments ptyprocess pyte
 python -m tgdb
 ```
 
+Native Windows/MSYS2 UCRT64 Python is supported through an experimental
+MI-over-pipes backend.  It keeps the debugger panes working, but the GDB pane is
+a line-oriented command/output view rather than a real PTY-backed terminal, so
+readline-style editing, tab completion, and inferior TTY allocation are limited.
+
 ---
 
 ## Usage
