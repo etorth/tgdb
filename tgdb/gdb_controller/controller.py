@@ -929,6 +929,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         if record_type in ("console", "target", "log", "output"):
             payload = rec.get("payload", "")
             if isinstance(payload, str) and payload:
+                payload = payload.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
                 self._console_buf += payload.encode("utf-8", errors="replace")
                 self._spawn_console_processing()
         elif record_type == "done":

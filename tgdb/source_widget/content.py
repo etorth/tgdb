@@ -51,7 +51,7 @@ class SourceFileMixin:
             except OSError:
                 pre_mtime = 0.0
 
-            with open(path, errors="replace") as handle:
+            with open(path, encoding="utf-8-sig", errors="replace") as handle:
                 content = handle.read()
             lines = content.expandtabs(self.tabstop).splitlines()
             if not lines:

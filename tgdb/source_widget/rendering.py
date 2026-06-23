@@ -266,14 +266,14 @@ class SourceViewRendering:
                 src_t.stylize(self.hl.style("Search"), m.start(), m.end())
 
         out.append_text(src_t)
-        # Extend the selection/execution background to the full pane width.
-        if line_bg:
-            full_w = max(1, self.size.width or 80)
-            used = cell_len(out.plain)
-            if used < full_w:
-                out.append(" " * (full_w - used), style=line_bg)
+        # Emit width-stable rows so empty/short source lines still repaint as
+        # distinct terminal rows on native Windows consoles.
+        full_w = max(1, self.size.width or 80)
+        used = cell_len(out.plain)
+        if used < full_w:
+            out.append(" " * (full_w - used), style=line_bg)
         # Clip to pane width — source rows must not soft-wrap (matches cgdb).
-        out.truncate(max(1, self.size.width or 80), overflow="crop")
+        out.truncate(full_w, overflow="crop")
         return out
 
 
