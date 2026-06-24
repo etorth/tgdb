@@ -58,6 +58,7 @@ from .types import (  # noqa: F401 — re-exported
 from .varobj import VarobjMixin
 from .parsing import ParsingMixin
 from .socket_data import SocketDataMixin
+from .value_format import decode_utf8_octal_escapes
 # GDB/MI output parser — uses GDBMIParser extracted from pygdbmi
 # ---------------------------------------------------------------------------
 
@@ -89,6 +90,13 @@ def _encode_varint(n: int) -> bytes:
         n >>= 7
     buf.append(n & 0x7F)
     return bytes(buf)
+
+
+def _mi_pipe_console_payload_to_bytes(payload: str) -> bytes:
+    """Convert one MI stream payload to bytes for the Windows GDB pane."""
+    decoded = decode_utf8_octal_escapes(payload)
+    normalized = decoded.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+    return normalized.encode("utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------
@@ -1107,8 +1115,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         if record_type in ("console", "target", "log", "output"):
             payload = rec.get("payload", "")
             if isinstance(payload, str) and payload:
-                payload = payload.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
-                self._console_buf += payload.encode("utf-8", errors="replace")
+                self._console_buf += _mi_pipe_console_payload_to_bytes(payload)
                 self._spawn_console_processing()
         elif record_type == "done":
             if self._mi_pipe_prompt_budget <= 0:
