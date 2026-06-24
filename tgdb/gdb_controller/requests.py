@@ -230,12 +230,8 @@ class GDBRequestMixin:
 
     async def request_current_frame_locals(self, *, report_error: bool = False) -> None:
         if not self._uses_socket_data:
-            # Native MI fallback cannot use tgdb_pysetup's declaration-line
-            # filtering, so --all-values can ask pretty-printers to format
-            # not-yet-constructed locals.  --simple-values keeps scalar values
-            # while leaving compound objects expandable through varobjs.
             await self.mi_command_async(
-                "-stack-list-variables --simple-values",
+                "-stack-list-variables --all-values",
                 timeout=30.0,
                 raise_on_error=report_error,
                 kind="stack-locals",
