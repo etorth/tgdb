@@ -2,10 +2,13 @@ import gdb
 import json
 import logging
 import os
+import re
+import socket
 import threading
 import zlib
 
 _sock_fd = None
+_sock_obj = None
 _event_handlers_connected = False
 
 # ---------------------------------------------------------------------------
@@ -122,8 +125,42 @@ _log.setLevel(logging.WARNING)
 _log.propagate = False
 
 
+def _write_sock_bytes(buf):
+    """Write *buf* to the active side-channel socket."""
+    if _sock_obj is not None:
+        try:
+            _sock_obj.sendall(buf)
+            return True
+        except OSError:
+            return False
+
+    fd = _sock_fd
+    if fd is None:
+        return False
+
+    try:
+        written = 0
+        while written < len(buf):
+            n = os.write(fd, buf[written:])
+            if n <= 0:
+                return False
+            written += n
+        return True
+    except OSError:
+        return False
+
+
+def _read_sock_bytes(size):
+    """Read up to *size* bytes from the active side-channel socket."""
+    if _sock_obj is not None:
+        return _sock_obj.recv(size)
+    if _sock_fd is None:
+        return b""
+    return os.read(_sock_fd, size)
+
+
 def _send_sock_frame(tag, payload):
-    """Write a variable-length frame to the socket.
+    """Write a variable-length frame to the side-channel socket.
 
     Frame format: ``[tag 1B][ctl 1B][length varint][payload]``.
 
@@ -134,8 +171,7 @@ def _send_sock_frame(tag, payload):
 
     Returns True on success, False if the socket is closed or the write fails.
     """
-    fd = _sock_fd
-    if fd is None:
+    if _sock_fd is None and _sock_obj is None:
         return False
 
     if isinstance(tag, str):
@@ -151,19 +187,10 @@ def _send_sock_frame(tag, payload):
 
     length_bytes = _encode_varint(len(payload))
     buf = tag_byte + bytes([ctl]) + length_bytes + payload
-    try:
-        written = 0
-        while written < len(buf):
-            n = os.write(fd, buf[written:])
-            if n <= 0:
-                return False
-            written += n
-        return True
-    except OSError:
-        return False
+    return _write_sock_bytes(buf)
 
 
-def _start_cancel_reader(fd):
+def _start_cancel_reader():
     """Start a daemon thread that reads cancel tokens from the socket.
 
     tgdb writes varint-encoded unsigned integers to the socket.  This
@@ -181,7 +208,7 @@ def _start_cancel_reader(fd):
         buf = b""
         while True:
             try:
-                data = os.read(fd, 4096)
+                data = _read_sock_bytes(4096)
                 if not data:
                     break
                 buf += data
@@ -217,7 +244,7 @@ def _finish_token(token):
 
 
 def _tgdb_RSVD_register_socket_fd(fd, log_enabled=False):
-    """Wire GDB Python events and data collection to an AF_UNIX socket.
+    """Wire GDB Python events and data collection to an inherited fd.
 
     tgdb creates an ``AF_UNIX`` socketpair before forking GDB and passes
     one end's fd number here.  All communication uses a tag-driven binary
@@ -238,13 +265,32 @@ def _tgdb_RSVD_register_socket_fd(fd, log_enabled=False):
     Handlers are connected to GDB's event registries exactly once per
     Python process so a re-call cannot accumulate duplicates.
     """
-    global _sock_fd, _event_handlers_connected
+    global _sock_fd, _sock_obj
     _sock_fd = fd
+    _sock_obj = None
 
     # Start the cancel-token reader thread.  It reads varint-encoded
     # unsigned integers from the socket (written by tgdb) and adds them
     # to ``_cancel_tokens``.  Started once per process.
-    _start_cancel_reader(fd)
+    _start_cancel_reader()
+    _finish_socket_registration(log_enabled)
+
+
+def _tgdb_RSVD_register_tcp_socket(host, port, token, log_enabled=False):
+    """Wire GDB Python events and data collection to a localhost TCP socket."""
+    global _sock_fd, _sock_obj
+    sock = socket.create_connection((host, int(port)), timeout=5.0)
+    sock.sendall((str(token) + "\n").encode("ascii"))
+    sock.settimeout(None)
+    _sock_fd = None
+    _sock_obj = sock
+    _start_cancel_reader()
+    _finish_socket_registration(log_enabled)
+
+
+def _finish_socket_registration(log_enabled=False):
+    """Install logging and event hooks after the side channel is active."""
+    global _event_handlers_connected
 
     if log_enabled:
         # Remove any previously attached socket handlers (in case of re-init).
@@ -263,16 +309,12 @@ def _tgdb_RSVD_register_socket_fd(fd, log_enabled=False):
     _event_handlers_connected = True
 
     def _emit(tag_byte, payload=b""):
-        active_fd = _sock_fd
-        if active_fd is None:
+        if _sock_fd is None and _sock_obj is None:
             return
-        try:
-            if payload:
-                os.write(active_fd, tag_byte + payload)
-            else:
-                os.write(active_fd, tag_byte)
-        except (BlockingIOError, OSError):
-            pass
+        if payload:
+            _write_sock_bytes(tag_byte + payload)
+        else:
+            _write_sock_bytes(tag_byte)
 
     def _on_register_changed(event):
         try:
@@ -342,6 +384,7 @@ def _send_sock_payload(tag, data, token=0):
 # hanging on huge vectors.  tgdb pushes updates via
 # ``_tgdb_RSVD_set_max_format_elements()``.
 _max_format_elements = 100
+_UTF8_OCTAL_RUN_RE = re.compile(r"(?<!\\\\)(?:\\\\[0-7]{3})+")
 
 
 def _tgdb_RSVD_set_max_format_elements(n):
@@ -353,6 +396,53 @@ def _tgdb_RSVD_set_max_format_elements(n):
         _max_format_elements = n
 
 
+def _format_value_raw(val):
+    """Format a gdb.Value using the currently-active GDB charset settings."""
+    try:
+        return val.format_string(max_elements=_max_format_elements)
+    except (TypeError, AttributeError):
+        return _str_unlimited(val)
+
+
+def _decode_utf8_octal_escapes(value):
+    """Decode valid UTF-8 byte runs that GDB printed as octal escapes."""
+    if "\\" not in value:
+        return value
+
+    def replace(match):
+        text = match.group(0)
+        raw = bytes(
+            int(text[index + 1:index + 4], 8)
+            for index in range(0, len(text), 4)
+        )
+        if not any(byte >= 0x80 for byte in raw):
+            return text
+
+        try:
+            decoded = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return text
+
+        if any(ord(char) < 32 for char in decoded):
+            return text
+
+        return decoded
+
+    return _UTF8_OCTAL_RUN_RE.sub(replace, value)
+
+
+def _use_scoped_utf8_formatting():
+    """Return True when native Windows GDB would otherwise use ANSI charset."""
+    if os.name != "nt":
+        return False
+
+    try:
+        return gdb.parameter("target-charset") == "auto"
+    except Exception as exc:
+        _log.debug(f"target-charset probe failed: {exc}")
+        return False
+
+
 def _format_value(val):
     """Format a gdb.Value with a capped element count.
 
@@ -360,11 +450,26 @@ def _format_value(val):
     (GDB 9.1+) to avoid both contaminating global ``set print elements``
     settings and hanging on huge containers (e.g. vectors with 30000+ items).
     Falls back to ``_str_unlimited(val)`` on older builds.
+
+    On native Windows, GDB's ``target-charset auto`` can resolve to the process
+    ANSI code page.  That makes ``format_string()`` decode UTF-8 program strings
+    as CP1252 before tgdb ever sees them.  Scope the formatter to UTF-8 while
+    leaving the user's global GDB charset settings untouched.
     """
+    formatted = None
+    if not _use_scoped_utf8_formatting():
+        formatted = _format_value_raw(val)
+        return _decode_utf8_octal_escapes(formatted)
+
     try:
-        return val.format_string(max_elements=_max_format_elements)
-    except (TypeError, AttributeError):
-        return _str_unlimited(val)
+        with gdb.with_parameter("host-charset", "UTF-8"):
+            with gdb.with_parameter("target-charset", "UTF-8"):
+                formatted = _format_value_raw(val)
+    except Exception as exc:
+        _log.debug(f"UTF-8 scoped formatting failed: {exc}")
+        formatted = _format_value_raw(val)
+
+    return _decode_utf8_octal_escapes(formatted)
 
 
 def _is_builtin_local_name(name):

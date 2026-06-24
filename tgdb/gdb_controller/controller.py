@@ -22,6 +22,7 @@ stream records are rendered as console output.
 import asyncio
 import logging
 import os
+import secrets
 import signal
 import socket
 import subprocess
@@ -173,6 +174,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         # tgdb can write cancel tokens back to GDB.
         self._sock_tgdb: int = -1
         self._sock_gdb: int = -1
+        self._tcp_listener: socket.socket | None = None
+        self._tcp_data_socket: socket.socket | None = None
+        self._tcp_host: str = "127.0.0.1"
+        self._tcp_port: int = 0
+        self._tcp_auth_token: str = ""
         self._sock_buf: bytes = b""
         self._console_buf: bytes = b""
         self._mi_buf: str = ""
@@ -343,6 +349,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._mi_pipe_prompt_budget = 1
         cmd = [self.gdb_path, "--interpreter=mi2"]
         cmd.extend(self.gdb_args)
+        self._open_tcp_side_channel()
         try:
             self._proc = subprocess.Popen(
                 cmd,
@@ -356,6 +363,44 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self.terminate()
             raise
         _log.info(f"GDB spawned, backend=mi-pipe, cmd={cmd!r}")
+
+
+    def _open_tcp_side_channel(self) -> None:
+        """Prepare a localhost TCP listener for GDB-side Python helpers."""
+        self._close_tcp_side_channel()
+        try:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind((self._tcp_host, 0))
+            listener.listen(1)
+            listener.settimeout(None)
+        except OSError as exc:
+            _log.warning(f"failed to open Windows tgdb TCP side channel: {exc!r}")
+            return
+
+        self._tcp_listener = listener
+        self._tcp_port = listener.getsockname()[1]
+        self._tcp_auth_token = secrets.token_hex(32)
+        _log.debug(
+            f"Windows tgdb TCP side channel listening on "
+            f"{self._tcp_host}:{self._tcp_port}"
+        )
+
+
+    def _close_tcp_side_channel(self) -> None:
+        """Close Windows TCP side-channel sockets if they are open."""
+        self._uses_socket_data = self._backend == "posix"
+        for attr in ("_tcp_data_socket", "_tcp_listener"):
+            sock = getattr(self, attr, None)
+            if sock is None:
+                continue
+            try:
+                sock.close()
+            except OSError:
+                pass
+            setattr(self, attr, None)
+        self._tcp_port = 0
+        self._tcp_auth_token = ""
 
 
     def _process_is_alive(self) -> bool:
@@ -516,7 +561,15 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         is silently dropped.  The GDB-side convenience function may complete
         before the token arrives — that is expected.
         """
-        if self._sock_tgdb < 0 or token == 0:
+        if token == 0:
+            return
+        if self._tcp_data_socket is not None:
+            try:
+                self._tcp_data_socket.sendall(_encode_varint(token))
+            except OSError:
+                pass
+            return
+        if self._sock_tgdb < 0:
             return
         try:
             os.write(self._sock_tgdb, _encode_varint(token))
@@ -590,9 +643,16 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                     self._proc.terminate(force=True)
             except Exception:
                 _log.debug("GDB terminate() raised", exc_info=True)
-        elif self._mi_master_fd < 0 and self._sock_tgdb < 0:
+        elif (
+            self._mi_master_fd < 0
+            and self._sock_tgdb < 0
+            and self._tcp_listener is None
+            and self._tcp_data_socket is None
+        ):
             # Nothing was ever opened — completely idle controller.
             return
+
+        self._close_tcp_side_channel()
 
         # Cancel the socket dispatch loop so it does not try to process
         # frames after the controller is torn down.
@@ -753,9 +813,37 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
                 self._pipe_tasks.add(task)
                 task.add_done_callback(self._pipe_tasks.discard)
 
+        if self._tcp_listener is not None:
+            task = asyncio.create_task(
+                self._accept_tcp_side_channel(),
+                name="gdb-tcp-side-channel",
+            )
+            self._pipe_tasks.add(task)
+            task.add_done_callback(self._pipe_tasks.discard)
+
         self.mi_command("-gdb-set pagination off", report_error=False)
         self.mi_command("-gdb-set mi-async on", report_error=False)
         self.mi_command("-enable-pretty-printing", report_error=False)
+        if self._tcp_listener is not None:
+            self.load_tgdb_pysetup(report_error=False)
+            log_enabled = _log.isEnabledFor(logging.DEBUG)
+            register_cmd = (
+                "python "
+                f"_tgdb_RSVD_register_tcp_socket({self._tcp_host!r}, "
+                f"{self._tcp_port}, {self._tcp_auth_token!r}, "
+                f"log_enabled={log_enabled})"
+            )
+            self.mi_command(
+                f"-interpreter-exec console {quote_mi_string(register_cmd)}",
+                report_error=False,
+                kind="tgdb-pysetup",
+            )
+            restore_cmd = "python globals().get('_tgdb_RSVD_restore_user_defs', lambda: None)()"
+            self.mi_command(
+                f"-interpreter-exec console {quote_mi_string(restore_cmd)}",
+                report_error=False,
+                kind="tgdb-pysetup",
+            )
 
         try:
             await self._console_done
@@ -771,6 +859,96 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self._fail_pending_futures(RuntimeError("GDB process exited"))
             _log.info("GDB exited")
             self.on_exit()
+
+
+    async def _accept_tcp_side_channel(self) -> None:
+        """Accept and read the localhost TCP side channel used on Windows."""
+        listener = self._tcp_listener
+        expected_token = self._tcp_auth_token
+        if listener is None or not expected_token:
+            return
+
+        while True:
+            try:
+                conn, addr = await asyncio.to_thread(listener.accept)
+            except asyncio.CancelledError:
+                raise
+            except OSError as exc:
+                _log.debug(f"Windows tgdb TCP accept stopped: {exc!r}")
+                return
+
+            token = await asyncio.to_thread(self._read_tcp_auth_token, conn)
+            if token != expected_token:
+                _log.warning(f"rejected unauthenticated tgdb TCP connection from {addr!r}")
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+                continue
+
+            try:
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+            except OSError:
+                pass
+            conn.settimeout(None)
+            self._tcp_data_socket = conn
+            self._uses_socket_data = True
+            try:
+                listener.close()
+            except OSError:
+                pass
+            if self._tcp_listener is listener:
+                self._tcp_listener = None
+            _log.info(f"Windows tgdb TCP side channel connected from {addr!r}")
+            await self._read_tcp_side_channel(conn)
+            return
+
+
+    @staticmethod
+    def _read_tcp_auth_token(conn: socket.socket) -> str:
+        """Read the one-line TCP auth token sent by GDB-side Python."""
+        conn.settimeout(5.0)
+        data = bytearray()
+        try:
+            while len(data) < 256:
+                chunk = conn.recv(1)
+                if not chunk:
+                    break
+                if chunk == b"\n":
+                    break
+                data.extend(chunk)
+        except OSError:
+            return ""
+        try:
+            return data.decode("ascii")
+        except UnicodeDecodeError:
+            return ""
+
+
+    async def _read_tcp_side_channel(self, conn: socket.socket) -> None:
+        """Read framed side-channel data from the accepted Windows TCP socket."""
+        try:
+            while True:
+                try:
+                    data = await asyncio.to_thread(conn.recv, 65536)
+                except asyncio.CancelledError:
+                    raise
+                except OSError as exc:
+                    _log.debug(f"Windows tgdb TCP read stopped: {exc!r}")
+                    return
+                if not data:
+                    _log.debug("Windows tgdb TCP side channel closed")
+                    return
+                self._feed_sock_bytes(data)
+        finally:
+            if self._tcp_data_socket is conn:
+                self._tcp_data_socket = None
+                self._uses_socket_data = False
+            try:
+                conn.close()
+            except OSError:
+                pass
 
 
     async def _read_mi_pipe_stdout(self, pipe) -> None:

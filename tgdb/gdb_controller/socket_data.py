@@ -1,7 +1,8 @@
 """Unified socket reader for ``GDBController``.
 
 Provides ``SocketDataMixin``, which reads binary frames from the
-``AF_UNIX`` socketpair shared between tgdb and GDB.  The socket
+side-channel socket shared between tgdb and GDB. POSIX uses an ``AF_UNIX``
+socketpair; native Windows uses a localhost TCP socket. The socket
 carries both lightweight events (register-changed, objfile,
 inferior-call, gdb-exiting) and bulk data payloads (locals,
 stack, threads, registers, frame info, breakpoints) in one stream.
@@ -51,6 +52,7 @@ from .types import (
     RegisterInfo,
     normalize_addr,
 )
+from .value_format import decode_utf8_octal_escapes
 
 _log = logging.getLogger("tgdb.gdb_controller")
 
@@ -108,9 +110,10 @@ def _decode_varint(buf, offset=0):
 class SocketDataMixin:
     """Mixin providing unified socket frame parsing and dispatch.
 
-    Expects the host class to set ``self._sock_tgdb`` (local fd) and
-    ``self._sock_buf`` (bytes buffer) before the asyncio reader is
-    registered.  The host also provides the standard controller callbacks
+    Expects the host class to set ``self._sock_buf`` (bytes buffer) and either
+    call ``_on_sock_readable`` for fd-backed POSIX sockets or
+    ``_feed_sock_bytes`` for socket objects read elsewhere. The host also
+    provides the standard controller callbacks
     (``on_locals``, ``on_stack``, ``on_threads``, ``on_registers``,
     ``on_register_changed``, ``on_objfiles_changed``,
     ``on_inferior_call_pre``, ``on_inferior_call_post``, ``on_gdb_exiting``)
@@ -119,13 +122,14 @@ class SocketDataMixin:
 
     def _on_sock_readable(self) -> None:
         """Drain the socket and spawn tasks for complete frames."""
+        chunks: list[bytes] = []
         try:
             while True:
                 chunk = os.read(self._sock_tgdb, 65536)
                 if not chunk:
                     self._unregister_sock()
                     return
-                self._sock_buf += chunk
+                chunks.append(chunk)
                 if len(chunk) < 65536:
                     break
         except BlockingIOError:
@@ -135,6 +139,13 @@ class SocketDataMixin:
             self._unregister_sock()
             return
 
+        if chunks:
+            self._feed_sock_bytes(b"".join(chunks))
+
+
+    def _feed_sock_bytes(self, data: bytes) -> None:
+        """Append side-channel data and process any complete frames."""
+        self._sock_buf += data
         if len(self._sock_buf) > _SOCK_BUF_MAX_BYTES:
             _log.warning(
                 f"socket buffer exceeded {_SOCK_BUF_MAX_BYTES} bytes; resetting"
@@ -365,21 +376,30 @@ class SocketDataMixin:
         if not isinstance(data, list):
             return
 
-        variables = [
-            LocalVariable(
-                name=d.get("name", ""),
-                value=d.get("value", ""),
-                type=d.get("type", ""),
-                is_arg=bool(d.get("is_arg", False)),
-                addr=normalize_addr(d.get("addr", "")),
-                is_shadowed=bool(d.get("is_shadowed", False)),
-                is_reference=bool(d.get("is_reference", False)),
-                line=int(d.get("line", 0)),
-                depth=int(d.get("depth", 0)),
+        variables = []
+        for item in data:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+
+            value = item.get("value", "")
+            if isinstance(value, str):
+                value = decode_utf8_octal_escapes(value)
+            else:
+                value = ""
+
+            variables.append(
+                LocalVariable(
+                    name=item.get("name", ""),
+                    value=value,
+                    type=item.get("type", ""),
+                    is_arg=bool(item.get("is_arg", False)),
+                    addr=normalize_addr(item.get("addr", "")),
+                    is_shadowed=bool(item.get("is_shadowed", False)),
+                    is_reference=bool(item.get("is_reference", False)),
+                    line=int(item.get("line", 0)),
+                    depth=int(item.get("depth", 0)),
+                )
             )
-            for d in data
-            if d.get("name")
-        ]
         _log.debug(f"socket locals: {len(variables)} variables")
         self.locals = variables
         self.on_locals(list(variables))

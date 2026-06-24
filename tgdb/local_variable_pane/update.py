@@ -119,18 +119,20 @@ class LocalVariablePaneUpdateMixin:
         self,
         variables: list[LocalVariable],
     ) -> dict[str, str]:
-        """Map dynamic-root varobj name -> fresh value from ``get_locals_b64()``.
+        """Map non-string dynamic roots to fresh values from the locals snapshot.
 
         GDB's ``-var-evaluate-expression`` returns a stale (or garbage)
-        ``to_string()`` for dynamic varobjs whose pretty-printer's
-        contained alternative changed under fixed storage — e.g.
-        ``std::variant`` flipping between ``string`` and ``vector<int>``,
-        ``std::optional`` toggling, ``std::any`` rebinding.  The
-        ``get_locals_b64()`` helper does a fresh CLI-style evaluation per
-        stop and returns the correct printer output, so we use it to
-        override the label refresh for the matching dynamic root varobjs.
-        Children and non-root dynamic varobjs are not in the locals
-        snapshot and continue to use ``-var-evaluate-expression``.
+        ``to_string()`` for dynamic varobjs whose pretty-printer's contained
+        alternative changed under fixed storage — e.g. ``std::variant`` flipping
+        between ``string`` and ``vector<int>``, ``std::optional`` toggling,
+        ``std::any`` rebinding.  The socket-backed locals helper does a fresh
+        GDB-Python value formatting pass at each stop, so use it to override
+        those dynamic root labels.
+
+        Do not override string displayhints: normal string varobjs already
+        refresh their root value correctly through ``-var-update``, and the
+        socket snapshot is only needed for dynamic printers with stale
+        contained-state summaries.
         """
         overrides: dict[str, str] = {}
         if not self._dynamic_varobjs or not variables:
@@ -139,7 +141,15 @@ class LocalVariablePaneUpdateMixin:
         for variable in variables:
             addr = variable.addr or variable.type
             varobj_name = self._tracked.get((variable.name, addr), "")
-            if varobj_name and varobj_name in self._dynamic_varobjs:
+            if not varobj_name or varobj_name not in self._dynamic_varobjs:
+                continue
+
+            node = self._varobj_to_node.get(varobj_name)
+            data = node.data if node is not None else None
+            if isinstance(data, dict) and data.get("displayhint") == "string":
+                continue
+
+            if variable.value:
                 overrides[varobj_name] = variable.value
 
         return overrides

@@ -16,6 +16,7 @@ from .types import (
     RegisterInfo,
     ThreadInfo,
 )
+from .value_format import decode_utf8_octal_escapes
 
 _log = logging.getLogger("tgdb.gdb_parsing")
 
@@ -166,7 +167,7 @@ class ParsingMixin:
             value = item.get("value")
             var_type = item.get("type")
             if isinstance(value, str):
-                value_str = value
+                value_str = decode_utf8_octal_escapes(value)
             else:
                 value_str = ""
             if isinstance(var_type, str):

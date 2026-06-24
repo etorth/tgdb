@@ -8,6 +8,7 @@ get_decl_lines.  Mixed into ``GDBController``.
 import logging
 
 from .types import quote_mi_string
+from .value_format import decode_utf8_octal_escapes
 
 _log = logging.getLogger("tgdb.gdb_varobj")
 
@@ -22,6 +23,14 @@ class VarobjMixin:
 
     # -- varobj commands ---------------------------------------------------
 
+    @staticmethod
+    def _normalize_varobj_value(info: dict) -> dict:
+        value = info.get("value")
+        if isinstance(value, str):
+            info["value"] = decode_utf8_octal_escapes(value)
+        return info
+
+
     async def _eval_expr_raw(self, expr: str, *, timeout: float | None = 5.0) -> str:
         """Evaluate a GDB expression and return its raw value string.
 
@@ -34,7 +43,10 @@ class VarobjMixin:
             raise_on_error=True,
         )
         payload = result.get("payload") or {}
-        return payload.get("value", "")
+        value = payload.get("value", "")
+        if isinstance(value, str):
+            return decode_utf8_octal_escapes(value)
+        return ""
 
 
     async def var_create(self, expr: str, *, frame: str = "*") -> dict:
@@ -47,6 +59,8 @@ class VarobjMixin:
             raise_on_error=True,
         )
         payload = result.get("payload") or {}
+        if isinstance(payload, dict):
+            payload = self._normalize_varobj_value(payload)
         _log.debug(f"var_create expr={expr!r} -> name={payload.get('name')!r}")
         return payload
 
@@ -83,11 +97,11 @@ class VarobjMixin:
                 if isinstance(item, dict):
                     child = item.get("child", item)
                     if isinstance(child, dict):
-                        children.append(child)
+                        children.append(self._normalize_varobj_value(child))
         elif isinstance(children_raw, dict):
             child = children_raw.get("child", children_raw)
             if isinstance(child, dict):
-                children.append(child)
+                children.append(self._normalize_varobj_value(child))
         _log.debug(
             f"var_list_children {varobj_name} from={from_idx} "
             f"limit={limit} -> {len(children)} children has_more={has_more}"
@@ -133,6 +147,10 @@ class VarobjMixin:
         )
         payload = result.get("payload") or {}
         value = payload.get("value", "")
+        if isinstance(value, str):
+            value = decode_utf8_octal_escapes(value)
+        else:
+            value = ""
         _log.debug(f"var_evaluate_expression {varobj_name} -> {value!r}")
         return value
 
@@ -154,5 +172,8 @@ class VarobjMixin:
         changelist = payload.get("changelist", [])
         if not isinstance(changelist, list):
             changelist = []
+        for change in changelist:
+            if isinstance(change, dict):
+                self._normalize_varobj_value(change)
         _log.debug(f"var_update {varobj_name} -> {len(changelist)} changes")
         return changelist
