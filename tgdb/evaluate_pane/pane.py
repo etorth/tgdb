@@ -79,6 +79,11 @@ class EvaluatePane(VarobjTreePane):
         self._unbound_watch_nodes: dict[int, TreeNode] = {}
 
 
+    def _watch_varobjs(self) -> list[str]:
+        """Root varobj names of the watches that have one, in display order."""
+        return [varobj_name for _wid, _expr, varobj_name in self._watches if varobj_name]
+
+
     def _find_watch_index(self, watch_id: int) -> int:
         """Return the current 0-based index of *watch_id*, or -1 if removed."""
         for i, (wid, _expr, _vname) in enumerate(self._watches):
@@ -115,9 +120,6 @@ class EvaluatePane(VarobjTreePane):
             if node is not None:
                 node.remove()
             self._purge_varobj_subtree(removed_varobj)
-            self._pinned_varobjs.discard(removed_varobj)
-            if removed_varobj in self._varobj_names:
-                self._varobj_names.remove(removed_varobj)
             if self._var_delete:
                 await self._delete_varobj_safe(removed_varobj)
 
@@ -126,7 +128,8 @@ class EvaluatePane(VarobjTreePane):
 
     async def refresh_all(self, current_frame: object | None = None) -> None:
         """Re-evaluate every watch expression varobj after the inferior stops."""
-        if not self._varobj_names or not self._var_update:
+        root_varobjs = self._watch_varobjs()
+        if not root_varobjs or not self._var_update:
             return
 
         # Update only this pane's own roots.  ``-var-update *`` would also
@@ -134,7 +137,7 @@ class EvaluatePane(VarobjTreePane):
         # so the locals pane would miss it) and would touch dynamic
         # varobjs the locals pane deliberately skips as garbage.
         changelist: list[dict] = []
-        for varobj_name in list(self._varobj_names):
+        for varobj_name in root_varobjs:
             try:
                 changelist.extend(await self._var_update(varobj_name))
             except Exception as exc:
@@ -185,14 +188,8 @@ class EvaluatePane(VarobjTreePane):
         # Update the tuple in place (id, expr are stable).
         self._watches[idx] = (watch_id, expr, varobj_name)
 
-        if varobj_name:
-            if varobj_name not in self._varobj_names:
-                self._varobj_names.append(varobj_name)
-            if info.get("dynamic", "0") == "1":
-                self._dynamic_varobjs.add(varobj_name)
-            type_str = info.get("type", "")
-            if type_str:
-                self._varobj_type[varobj_name] = type_str
+        if varobj_name and info.get("dynamic", "0") == "1":
+            self._dynamic_varobjs.add(varobj_name)
 
         value = info.get("value", "")
         numchild = self._safe_int(info.get("numchild", "0"))

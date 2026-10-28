@@ -77,9 +77,39 @@ class Session:
         return {var.name: var for var in self.dbg.local_variables()}
 
 
+    def locals_values(self, name: str) -> list[str]:
+        """Values of every Locals row named *name*, top to bottom."""
+        return [value for row_name, value in self.dbg.locals() if row_name == name]
+
+
     # White-box: placeholder bookkeeping is a locals-pane internal.
     def locals_placeholders(self) -> list[str]:
-        return [name for name, _addr in self.app._locals_pane._uninitialized_nodes]
+        bindings = self.app._locals_pane._bindings.values()
+        return [binding.key[0] for binding in bindings if binding.is_placeholder]
+
+
+    # White-box: tree nodes of the Locals pane.
+    def _locals_root(self, name: str, index: int):
+        pane = self.app._locals_pane
+        nodes = [node for node in pane._tree_widget.root.children if node.data.get("exp") == name]
+        assert len(nodes) > index, f"no Locals row #{index} named {name!r}: {self.dbg.locals()}"
+        return pane, nodes[index]
+
+
+    async def expand_local(self, name: str, index: int = 0) -> list[tuple[str, str]]:
+        """Expand the *index*-th Locals row named *name*; return its child rows."""
+        pane, node = self._locals_root(name, index)
+        await pane.do_expand_full(node)
+        await self.dbg.wait_idle()
+        return self.local_children(name, index)
+
+
+    def local_children(self, name: str, index: int = 0) -> list[tuple[str, str]] | None:
+        """Child rows of an expanded Locals row; ``None`` when it is collapsed."""
+        pane, node = self._locals_root(name, index)
+        if not node.is_expanded:
+            return None
+        return pane.rows(node)
 
 
     # White-box: rows the disasm pane marks as the PC.

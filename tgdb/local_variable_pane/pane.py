@@ -17,13 +17,12 @@ stops.
 
 import logging
 
-from textual.widgets.tree import TreeNode
-
 from ..config import Config
 from ..gdb_controller import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
 from ..varobj_tree import VarobjTreePane
 from .reconcile import LocalVariablePaneReconcileMixin
+from .shared import Binding, BindingKey
 from .support import LocalVariablePaneSupportMixin
 from .update import LocalVariablePaneUpdateMixin
 
@@ -130,8 +129,9 @@ class LocalVariablePane(
         """
         super().__init__(hl, cfg, **kwargs)
         self._variables: list[LocalVariable] = []
-        self._tracked: dict[tuple[str, str], str] = {}
-        self._uninitialized_nodes: dict[tuple[str, str], TreeNode] = {}
+        # One Binding per top-level row; see shared.Binding and the
+        # transition helpers in support.py.
+        self._bindings: dict[BindingKey, Binding] = {}
         self._frame_key: tuple | None = None
         self._saved_expansions: dict[tuple, set[tuple[tuple[str, int], ...]]] = {}
         # Transient set populated by _apply_changelist when a dynamic
@@ -141,7 +141,7 @@ class LocalVariablePane(
         # invalidated bindings in the same reconciliation pass.  Kept
         # on the pane (not as a method-local) so the sync _apply_changelist
         # mixin method can communicate with the async _update_variables.
-        self._shape_readd_keys: set[tuple[str, str]] = set()
+        self._shape_readd_keys: set[BindingKey] = set()
         # Counter of in-flight _update_variables reconciliations.  The
         # raw collect-locals MI command resolves before var-create /
         # var-update kick off, but those calls invoke pretty-printers

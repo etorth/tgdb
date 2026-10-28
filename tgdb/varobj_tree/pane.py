@@ -48,7 +48,10 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
     """Shared base for LocalVariablePane and EvaluatePane.
 
     Provides:
-    - All varobj tracking state (_varobj_to_node, _varobj_names, etc.)
+    - The varobj registry shared by roots and children: ``_varobj_to_node``
+      (varobj name -> tree node) and ``_dynamic_varobjs``.  Which varobjs
+      are *roots* is owned by each pane (locals: ``Binding`` records;
+      evaluate: the watch list).
     - set_var_callbacks() dependency injection
     - compose() / on_mount() yielding a Tree widget
     - _parse_container_length, _child_fetch_limit, _child_display_count
@@ -77,10 +80,7 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
         # discard the populated TreeNodes built by reconciliation.
         self._tree_widget: _VarobjTree = _VarobjTree("")
         self._varobj_to_node: dict[str, TreeNode] = {}
-        self._varobj_names: list[str] = []
         self._dynamic_varobjs: set[str] = set()
-        self._varobj_type: dict[str, str] = {}
-        self._pinned_varobjs: set[str] = set()
         self._rebuild_gen: int = 0
         self._var_create: Callable[..., Coroutine] | None = None
         self._var_list_children: Callable[..., Coroutine] | None = None
@@ -109,15 +109,18 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
         self._var_eval_expr = var_eval_expr
 
 
-    def rows(self) -> list[tuple[str, str]]:
-        """Top-level ``(expression, value)`` pairs exactly as displayed.
+    def rows(self, parent: TreeNode | None = None) -> list[tuple[str, str]]:
+        """``(expression, value)`` pairs of *parent*'s children, as displayed.
 
-        *value* is ``""`` for a row that shows no value.  Read from the
-        labels, so it reflects what the user sees, including placeholder
-        text such as ``<not yet initialized>``.
+        *parent* defaults to the tree root (the top-level rows).  *value*
+        is ``""`` for a row that shows no value.  Read from the labels, so
+        it reflects what the user sees, including placeholder text such as
+        ``<not yet initialized>``.
         """
+        if parent is None:
+            parent = self._tree_widget.root
         result: list[tuple[str, str]] = []
-        for node in self._tree_widget.root.children:
+        for node in parent.children:
             label = node.label
             if hasattr(label, "plain"):
                 text = label.plain

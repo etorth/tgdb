@@ -15,7 +15,7 @@ class LocalVariablePaneReconcileMixin:
         """Delete a varobj that was created during a now-superseded reconciliation.
 
         ``-var-create`` returns a fresh GDB varobj that has not yet been
-        registered in ``_tracked`` / ``_varobj_to_node``.  When the gen-counter
+        registered in ``_bindings`` / ``_varobj_to_node``.  When the gen-counter
         check immediately after creation finds a newer rebuild has started,
         the freshly-created varobj has no Python-side reference and would
         leak inside GDB until the inferior exits.  Send ``-var-delete`` so
@@ -37,21 +37,9 @@ class LocalVariablePaneReconcileMixin:
 
 
     async def _remove_gone_bindings(self, gen: int, to_remove: list[BindingKey]) -> bool:
-        for binding_name, binding_addr in to_remove:
-            key = (binding_name, binding_addr)
-            varobj_name = self._tracked.pop(key, "")
-            node = None
-            if varobj_name:
-                node = self._varobj_to_node.get(varobj_name)
-
-            if varobj_name:
-                # ``_purge_varobj_subtree`` also clears ``_varobj_names``.
-                self._purge_varobj_subtree(varobj_name)
-                self._pinned_varobjs.discard(varobj_name)
-
-            if node is not None:
-                node.remove()
-
+        for key in to_remove:
+            binding = self._drop_binding(key)
+            varobj_name = binding.varobj if binding is not None else ""
             if varobj_name and self._var_delete:
                 try:
                     await self._var_delete(varobj_name)
@@ -161,23 +149,23 @@ class LocalVariablePaneReconcileMixin:
             _log.debug(f"var_create {variable.name}: uninitialized memory in response ({value[:80]!r}), placeholder added")
             return True
 
-        varobj_name = self._remember_root_varobj(key, info, is_pinned=use_addr)
+        self._add_tracked_row(tree, key, variable.name, info, pinned=bool(use_addr))
+        return await self._restore_binding_expansion(gen, tree, restore, binding_name)
+
+
+    def _add_tracked_row(self, tree: Tree, key: BindingKey, exp: str, info: dict, *, pinned: bool) -> None:
+        """Append a root row for the freshly created varobj *info* and track it."""
         numchild = self._safe_int(info.get("numchild", "0"))
         has_children = (numchild > 0 or info.get("dynamic", "0") == "1") and not _suppress_children(info)
-        displayhint = info.get("displayhint", "")
-
         node = self._add_value_node(
             tree.root,
-            variable.name,
-            value,
+            exp,
+            info.get("value", ""),
             has_children,
-            varobj_name=varobj_name,
-            displayhint=displayhint,
+            varobj_name=info.get("name", ""),
+            displayhint=info.get("displayhint", ""),
         )
-        if varobj_name:
-            self._varobj_to_node[varobj_name] = node
-
-        return await self._restore_binding_expansion(gen, tree, restore, binding_name)
+        self._track_binding(key, node, info, pinned=pinned)
 
 
     async def _add_binding_by_name_fallback(
@@ -254,25 +242,10 @@ class LocalVariablePaneReconcileMixin:
             self._add_placeholder_node(tree, key, variable.name, label)
             return True
 
-        # Name-based varobjs are NOT pinned (is_pinned=False) — they were
-        # created by name, not by address cast.  They still have fixed binding
-        # to the resolved stack slot.
-        varobj_name = self._remember_root_varobj(key, info, is_pinned=False)
-        numchild = self._safe_int(info.get("numchild", "0"))
-        has_children = (numchild > 0 or info.get("dynamic", "0") == "1") and not _suppress_children(info)
-        displayhint = info.get("displayhint", "")
-
-        node = self._add_value_node(
-            tree.root,
-            variable.name,
-            value,
-            has_children,
-            varobj_name=varobj_name,
-            displayhint=displayhint,
-        )
-        if varobj_name:
-            self._varobj_to_node[varobj_name] = node
-
+        # Name-based varobjs are NOT pinned — they were created by name, not
+        # by address cast.  They still have fixed binding to the resolved
+        # stack slot.
+        self._add_tracked_row(tree, key, variable.name, info, pinned=False)
         _log.debug(
             f"var_create by name for {variable.name} (type {variable.type!r} unparseable): "
             f"varobj={varobj_name}"
@@ -347,10 +320,11 @@ class LocalVariablePaneReconcileMixin:
             if prev is None or variable.depth < prev:
                 min_depth_by_name[variable.name] = variable.depth
 
-        for key in list(self._uninitialized_nodes.keys()):
+        for placeholder in self._placeholder_bindings():
             if self._rebuild_gen != gen:
                 return promoted
 
+            key = placeholder.key
             placeholder_name, placeholder_addr = key
             variable = var_by_key.get(key)
             if variable is None:
@@ -406,24 +380,9 @@ class LocalVariablePaneReconcileMixin:
                 )
                 continue
 
-            varobj_name = self._remember_root_varobj(key, info, is_pinned=False)
-            numchild = self._safe_int(info.get("numchild", "0"))
-            has_children = (numchild > 0 or info.get("dynamic", "0") == "1") and not _suppress_children(info)
-            displayhint = info.get("displayhint", "")
-
-            node = self._add_value_node(
-                tree.root,
-                variable.name,
-                value,
-                has_children,
-                varobj_name=varobj_name,
-                displayhint=displayhint,
-            )
-            if varobj_name:
-                self._varobj_to_node[varobj_name] = node
-
+            self._add_tracked_row(tree, key, variable.name, info, pinned=False)
             promoted.add(key)
-            _log.debug(f"Promoted placeholder {variable.name} at {placeholder_addr} to varobj={varobj_name}")
+            _log.debug(f"Promoted placeholder {variable.name} at {placeholder_addr} to varobj={new_varobj_name}")
 
             await self._restore_binding_expansion(gen, tree, restore, variable.name)
 
@@ -469,7 +428,7 @@ class LocalVariablePaneReconcileMixin:
                 new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(variables, addrs)
 
             new_frame_key = self._build_frame_key(frame, new_binding_keys)
-            current_keys = set(self._tracked.keys())
+            current_keys = self._tracked_keys()
 
             self._remove_out_of_scope_placeholders(new_binding_keys)
 
@@ -600,19 +559,9 @@ class LocalVariablePaneReconcileMixin:
             key = (var.name, var.addr or var.type)
             key_to_line[key] = var.line
 
-        # Build node → line mapping.
-        # Tracked varobj nodes: reverse _tracked and _varobj_to_node.
         node_to_line: dict[int, int] = {}  # id(node) → line
-        for key, varobj_name in self._tracked.items():
-            if not varobj_name:
-                continue
-            node = self._varobj_to_node.get(varobj_name)
-            if node is not None:
-                node_to_line[id(node)] = key_to_line.get(key, 0)
-
-        # Placeholder nodes: _uninitialized_nodes maps key → node.
-        for key, node in self._uninitialized_nodes.items():
-            node_to_line[id(node)] = key_to_line.get(key, 0)
+        for key, binding in self._bindings.items():
+            node_to_line[id(binding.node)] = key_to_line.get(key, 0)
 
         root = tree.root
         if not root._children:
@@ -623,54 +572,41 @@ class LocalVariablePaneReconcileMixin:
 
 
     async def _reanchor_var(self, gen: int, name: str, addr: str, outer_var: LocalVariable, tree: Tree) -> None:
-        """Replace a floating varobj with an address-pinned one."""
+        """Replace a shadowed row's name-bound varobj with an address-pinned one.
+
+        The row keeps its node.  When re-pinning is impossible the row
+        becomes a placeholder (still removed when the binding leaves scope,
+        and not duplicated by the next reconciliation's add pass).
+        """
         key = (name, addr)
-        old_varobj = self._tracked.get(key, "")
-        node = None
-        if old_varobj:
-            node = self._varobj_to_node.get(old_varobj)
-
-        type_str = ""
-        if old_varobj:
-            type_str = self._varobj_type.get(old_varobj, "")
-
-        if old_varobj:
-            # ``_purge_varobj_subtree`` also clears ``_varobj_names``.
-            self._purge_varobj_subtree(old_varobj)
-            self._pinned_varobjs.discard(old_varobj)
-            if self._var_delete:
-                try:
-                    await self._var_delete(old_varobj)
-                except Exception:
-                    pass
-
-        self._tracked.pop(key, None)
-        if self._rebuild_gen != gen:
-            # Old varobj is gone (deleted on the GDB side, dropped from all
-            # tracking dicts) but the TreeNode is still mounted with stale
-            # contents.  Remove it so the next reconciliation pass starts
-            # from a clean slate instead of finding a duplicate when it
-            # re-creates the binding.
-            if node is not None:
-                node.remove()
+        binding = self._bindings.get(key)
+        if binding is None or binding.is_placeholder:
             return
 
-        # The collapse branches below keep the node but drop its varobj and
-        # its ``_tracked`` entry; register it as a placeholder so it is still
-        # removed when the binding leaves scope and is not duplicated by the
-        # next reconciliation's add pass.
+        node = binding.node
+        old_varobj = binding.varobj
+        type_str = binding.type
+        self._demote_to_placeholder(binding)
+        if self._var_delete:
+            try:
+                await self._var_delete(old_varobj)
+            except Exception:
+                pass
+
+        if self._rebuild_gen != gen:
+            # The node still shows the deleted varobj's contents.  Remove the
+            # row so the next reconciliation pass re-creates it cleanly.
+            self._drop_binding(key)
+            return
+
         fallback_value = outer_var.value or "?"
         if not type_str:
-            if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
-                self._uninitialized_nodes[key] = node
+            self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
             return
 
         # Unparseable types (e.g. anonymous namespace) cannot be reanchored
-        # via address cast — remove the old node and add a placeholder.
+        # via address cast — replace the row with a placeholder.
         if _type_needs_name_fallback(type_str):
-            if node is not None:
-                node.remove()
             label = self._build_value_label(name, fallback_value, False)
             self._add_placeholder_node(tree, key, name, label)
             _log.debug(f"Reanchor {name} at {addr}: type {type_str!r} unparseable, demoted to placeholder")
@@ -678,96 +614,67 @@ class LocalVariablePaneReconcileMixin:
 
         # Synthetic addr markers (e.g. "register@0") are not dereferenceable.
         if addr.startswith("register@") or addr in ("register", "unknown", ""):
-            if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
-                self._uninitialized_nodes[key] = node
+            self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
             return
 
         addr_expr = f"*({type_str}*){addr}"
         try:
             info = await self._var_create(addr_expr)
         except Exception:
-            if node is not None:
-                self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
-                self._uninitialized_nodes[key] = node
+            self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
             return
 
         if self._rebuild_gen != gen:
-            # Both the just-created replacement varobj and the still-mounted
-            # old TreeNode would be orphaned otherwise.
             await self._abort_pending_create(info)
-            if node is not None:
-                node.remove()
+            self._drop_binding(key)
             return
 
-        new_varobj = self._remember_reanchored_varobj(key, info, type_str)
+        self._track_binding(key, node, info, pinned=True, fallback_type=type_str)
+        new_varobj = info.get("name", "")
         value = info.get("value", outer_var.value or "")
         displayhint = info.get("displayhint", "")
         numchild = self._safe_int(info.get("numchild", "0"))
         has_children = (numchild > 0 or info.get("dynamic", "0") == "1") and not _suppress_children(info)
 
-        if node is not None:
-            node_data = node.data
-            if isinstance(node_data, dict):
-                node_data["varobj"] = new_varobj
-                node_data["has_children"] = has_children
-                node_data["displayhint"] = displayhint
-                node_data["marker_active"] = False
+        node_data = node.data
+        if isinstance(node_data, dict):
+            node_data["varobj"] = new_varobj
+            node_data["has_children"] = has_children
+            node_data["displayhint"] = displayhint
+            node_data["marker_active"] = False
 
-            node.allow_expand = has_children
-            if new_varobj:
-                self._varobj_to_node[new_varobj] = node
+        node.allow_expand = has_children
 
-            exp = name
-            if isinstance(node_data, dict):
-                exp = node_data.get("exp", name)
+        exp = name
+        if isinstance(node_data, dict):
+            exp = node_data.get("exp", name)
 
-            label = self._build_value_label(exp, value, has_children, collapse_compound=True)
-            node.set_label(label)
+        label = self._build_value_label(exp, value, has_children, collapse_compound=True)
+        node.set_label(label)
 
-            if (
-                isinstance(node_data, dict)
-                and node_data.get("load_status") == "loaded"
-                and has_children
-                and new_varobj
-            ):
-                node_data["load_status"] = "idle"
-                node.remove_children()
-                node.add_leaf("⏳ loading...")
-                await self._load_children(node, new_varobj)
-            elif not has_children:
-                self._collapse_to_leaf_node(node, exp, value)
-
-            return
-
-        node = self._add_value_node(
-            tree.root,
-            name,
-            value,
-            has_children,
-            varobj_name=new_varobj,
-            displayhint=displayhint,
-            collapse_compound=True,
-        )
-        if new_varobj:
-            self._varobj_to_node[new_varobj] = node
+        if (
+            isinstance(node_data, dict)
+            and node_data.get("load_status") == "loaded"
+            and has_children
+            and new_varobj
+        ):
+            node_data["load_status"] = "idle"
+            node.remove_children()
+            node.add_leaf("⏳ loading...")
+            await self._load_children(node, new_varobj)
+        elif not has_children:
+            self._collapse_to_leaf_node(node, exp, value)
 
 
     def _sync_shadow_labels(self, shadowed_keys: set[BindingKey]) -> None:
-        for name_addr, varobj_name in self._tracked.items():
-            if not varobj_name:
-                continue
-
-            node = self._varobj_to_node.get(varobj_name)
-            if node is None:
-                continue
-
+        for binding in self._tracked_bindings():
+            node = binding.node
             data = node.data
             if not isinstance(data, dict):
                 continue
 
             current_marker_active = data.get("marker_active", True)
-            new_marker_active = name_addr not in shadowed_keys
+            new_marker_active = binding.key not in shadowed_keys
             if new_marker_active == current_marker_active:
                 continue
 
@@ -780,31 +687,24 @@ class LocalVariablePaneReconcileMixin:
         Called from ``_apply_changelist`` when the changelist reports
         ``type_changed=true`` or when a dynamic printer's child shape
         transition makes the GDB-side varobj cache inconsistent.
-        Removes the BindingKey from ``_tracked``, purges varobj/child
-        mappings, removes the now-stale TreeNode, and issues an async
-        ``-var-delete`` so the old GDB-side varobj does not leak.
+        Removes the row (or, for a child varobj, its node), purges the
+        varobj registry, and issues an async ``-var-delete`` so the old
+        GDB-side varobj does not leak.
 
-        Returns the dropped BindingKey (or ``None`` if no matching key
-        was found) so the caller can schedule an immediate re-add in
-        the same reconciliation pass.
+        Returns the dropped row's BindingKey (``None`` for a child varobj)
+        so the caller can schedule an immediate re-add in the same
+        reconciliation pass.
         """
-        # Find the BindingKey that points at this varobj so we can drop
-        # it from ``_tracked`` — otherwise the next reconciliation
-        # treats the binding as still-present and skips re-creation.
         dropped_key: BindingKey | None = None
-        for binding_key, tracked_name in list(self._tracked.items()):
-            if tracked_name == varobj_name:
-                self._tracked.pop(binding_key, None)
-                dropped_key = binding_key
-                break
-
-        node = self._varobj_to_node.get(varobj_name)
-        # ``_purge_varobj_subtree`` clears ``_varobj_to_node``,
-        # ``_dynamic_varobjs``, ``_varobj_type``, and ``_varobj_names``.
-        self._purge_varobj_subtree(varobj_name)
-        self._pinned_varobjs.discard(varobj_name)
-        if node is not None:
-            node.remove()
+        binding = self._binding_for_varobj(varobj_name)
+        if binding is not None:
+            self._drop_binding(binding.key)
+            dropped_key = binding.key
+        else:
+            node = self._varobj_to_node.get(varobj_name)
+            self._purge_varobj_subtree(varobj_name)
+            if node is not None:
+                node.remove()
 
         if self._var_delete is not None:
             await self._delete_varobj_safe(varobj_name)
@@ -959,7 +859,7 @@ class LocalVariablePaneReconcileMixin:
                 # ``in_scope="false"`` once and never refreshes it again, so
                 # the node would freeze.  Re-create it in the current frame.
                 # Bindings that really left scope are in ``skip_varobjs``.
-                if varobj_name in self._varobj_names:
+                if self._binding_for_varobj(varobj_name) is not None:
                     dropped_key = await self._invalidate_typechanged_binding(varobj_name)
                     if dropped_key is not None:
                         self._shape_readd_keys.add(dropped_key)
@@ -969,9 +869,9 @@ class LocalVariablePaneReconcileMixin:
                 # GDB rebound the varobj to a different type (e.g. a
                 # union's active member changed, or a polymorphic pointer
                 # acquired a new dynamic type).  The cached metadata —
-                # ``has_children``, ``numchild``, ``_varobj_type`` — is
+                # ``has_children``, ``numchild``, ``Binding.type`` — is
                 # now stale, and any subsequent reanchor logic that reads
-                # ``_varobj_type`` would take the wrong branch.  Drop
+                # ``Binding.type`` would take the wrong branch.  Drop
                 # this binding from local tracking so the next
                 # reconciliation pass re-creates it from scratch with
                 # current type info, and delete the GDB-side varobj
@@ -996,7 +896,8 @@ class LocalVariablePaneReconcileMixin:
             exp = data.get("exp", "")
             has_children = data.get("has_children", False)
             new_value = change.get("value", "")
-            is_pinned = varobj_name in self._pinned_varobjs
+            binding = self._binding_for_varobj(varobj_name)
+            is_pinned = binding is not None and binding.pinned
 
             label = self._build_value_label(
                 exp,

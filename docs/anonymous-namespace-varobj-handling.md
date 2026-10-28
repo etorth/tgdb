@@ -116,7 +116,7 @@ and its type is unparseable (anonymous namespace):
 
 - The varobj is **left untouched** — its fixed binding is permanently valid
   regardless of current shadowing state.
-- `_build_reanchor_bindings` skips entries whose `_varobj_type` contains
+- `_build_reanchor_bindings` skips bindings whose `Binding.type` contains
   `(anonymous namespace)`.
 - This avoids deleting a perfectly valid fixed varobj and recreating it as a
   placeholder unnecessarily.

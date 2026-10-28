@@ -140,7 +140,7 @@ class LocalVariablePaneUpdateMixin:
 
         for variable in variables:
             addr = variable.addr or variable.type
-            varobj_name = self._tracked.get((variable.name, addr), "")
+            varobj_name = self._varobj_of((variable.name, addr))
             if not varobj_name or varobj_name not in self._dynamic_varobjs:
                 continue
 
@@ -160,7 +160,8 @@ class LocalVariablePaneUpdateMixin:
         dynamic_root_overrides: dict[str, str] | None = None,
     ) -> list[dict]:
         """Update all tracked varobjs and return a merged changelist."""
-        if not self._varobj_names:
+        root_varobjs = self._root_varobjs()
+        if not root_varobjs:
             return []
 
         if not self._var_update:
@@ -172,14 +173,14 @@ class LocalVariablePaneUpdateMixin:
             # Update only this pane's own roots (children follow their
             # root).  ``-var-update *`` would also consume the change
             # reports of other panes' varobjs (e.g. evaluate watches).
-            for varobj_name in list(self._varobj_names):
+            for varobj_name in root_varobjs:
                 try:
                     result = await self._var_update(varobj_name)
                 except Exception as exc:
                     err = str(exc).lower()
                     if "not found" in err or "usage" in err:
                         _log.debug(f"Purging stale varobj {varobj_name}: {exc}")
-                        self._purge_varobj_subtree(varobj_name)
+                        self._purge_stale_varobj(varobj_name)
                     else:
                         _log.warning(f"var_update {varobj_name} failed: {exc}")
                         if self._should_stop_varobj_refresh_after_error(exc):
@@ -204,9 +205,8 @@ class LocalVariablePaneUpdateMixin:
         # rebind) crashes GDB at gdb/varobj.c:1298 with
         # ``install_new_value: Assertion '!var->value->lazy()'`` because
         # GDB's varobj cache for that child is in an inconsistent state
-        # post-transition.  Roots are tracked in ``_varobj_names``;
-        # filter against it to limit the iteration to roots only.
-        dynamic_roots = [n for n in self._varobj_names if n in self._dynamic_varobjs]
+        # post-transition.  Limit the iteration to the bindings' roots.
+        dynamic_roots = [n for n in root_varobjs if n in self._dynamic_varobjs]
 
         if self._var_eval_expr:
             for varobj_name in dynamic_roots:
@@ -252,7 +252,7 @@ class LocalVariablePaneUpdateMixin:
                 err = str(exc).lower()
                 if "not found" in err or "usage" in err:
                     _log.debug(f"Purging stale varobj {varobj_name}: {exc}")
-                    self._purge_varobj_subtree(varobj_name)
+                    self._purge_stale_varobj(varobj_name)
                 else:
                     _log.warning(f"Skipped varobj {varobj_name} during update: {exc}")
                     if self._should_stop_varobj_refresh_after_error(exc):
@@ -299,7 +299,8 @@ class LocalVariablePaneUpdateMixin:
         """Build binding entries and determine which ones are shadowed."""
         tracked_outer: dict[str, list[str]] = {}
 
-        for tracked_name, tracked_addr in self._tracked:
+        for binding in self._tracked_bindings():
+            tracked_name, tracked_addr = binding.key
             if addrs.get(tracked_name) == tracked_addr:
                 continue
 
@@ -387,9 +388,8 @@ class LocalVariablePaneUpdateMixin:
                 continue
             # Permanent placeholders (unparseable types whose
             # depth > min_depth so they cannot be promoted to a real
-            # varobj) live in ``_uninitialized_nodes`` only — they do
-            # NOT appear in ``current_keys`` (which is
-            # ``_tracked.keys()``).  Without this skip, every refresh
+            # varobj) have no varobj, so they are NOT in
+            # ``current_keys`` (the tracked keys).  Without this skip, every refresh
             # would rediscover them as "new", call
             # ``_remove_placeholder_node`` (destroying the node), then
             # immediately re-add a fresh placeholder.  The user sees a
@@ -404,7 +404,8 @@ class LocalVariablePaneUpdateMixin:
             # ``-var-create`` — must be retried, otherwise they stay
             # frozen on their first value for as long as they are in
             # scope.
-            if key in self._uninitialized_nodes:
+            existing = self._bindings.get(key)
+            if existing is not None and existing.is_placeholder:
                 if _type_needs_name_fallback(variable.type or "") or key in shadowed_keys:
                     continue
 
@@ -445,8 +446,8 @@ class LocalVariablePaneUpdateMixin:
             if binding_addr.startswith("0x"):
                 continue
 
-            varobj_name = self._tracked.get(key, "")
-            if not varobj_name or varobj_name in self._pinned_varobjs:
+            binding = self._bindings.get(key)
+            if binding is None or binding.is_placeholder or binding.pinned:
                 continue
 
             rebind.append((binding_name, binding_addr, variable))
@@ -470,18 +471,14 @@ class LocalVariablePaneUpdateMixin:
             if key not in shadowed_keys:
                 continue
 
-            varobj_name = self._tracked.get(key, "")
-            if not varobj_name:
-                continue
-
-            if varobj_name in self._pinned_varobjs:
+            binding = self._bindings.get(key)
+            if binding is None or binding.is_placeholder or binding.pinned:
                 continue
 
             # Fixed varobjs for unparseable types (anonymous namespace) are
             # permanently bound to their original stack slot.  They remain
             # valid even when shadowed — skip reanchoring.
-            varobj_type = self._varobj_type.get(varobj_name, "")
-            if _type_needs_name_fallback(varobj_type):
+            if _type_needs_name_fallback(binding.type):
                 continue
 
             # References are created by name for the same reason: their
@@ -501,13 +498,13 @@ class LocalVariablePaneUpdateMixin:
     def _build_stale_varobjs(self, to_remove: list[BindingKey], to_reanchor: list[BindingEntry]) -> set[str]:
         stale_varobjs: set[str] = set()
 
-        for binding_name, binding_addr in to_remove:
-            varobj_name = self._tracked.get((binding_name, binding_addr), "")
+        for key in to_remove:
+            varobj_name = self._varobj_of(key)
             if varobj_name:
                 stale_varobjs.add(varobj_name)
 
         for binding_name, binding_addr, _ in to_reanchor:
-            varobj_name = self._tracked.get((binding_name, binding_addr), "")
+            varobj_name = self._varobj_of((binding_name, binding_addr))
             if varobj_name:
                 stale_varobjs.add(varobj_name)
 
@@ -520,7 +517,7 @@ class LocalVariablePaneUpdateMixin:
         stale_varobjs: set[str],
         dynamic_root_overrides: dict[str, str] | None = None,
     ) -> list[dict]:
-        if not self._varobj_names:
+        if not self._root_varobjs():
             return []
 
         try:
@@ -563,7 +560,7 @@ class LocalVariablePaneUpdateMixin:
 
         for binding_name, binding_addr, variable in to_reanchor:
             key = (binding_name, binding_addr)
-            varobj_name = self._tracked.get(key, "")
+            varobj_name = self._varobj_of(key)
             if varobj_name and varobj_name in out_of_scope_varobjs:
                 to_remove.append(key)
                 continue

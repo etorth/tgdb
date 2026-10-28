@@ -140,14 +140,6 @@ class VarobjTreeSupportMixin:
         for name in stale_names:
             self._varobj_to_node.pop(name, None)
             self._dynamic_varobjs.discard(name)
-            self._varobj_type.pop(name, None)
-            # ``_varobj_names`` only tracks roots; child names are absent so
-            # the remove() is a no-op for descendants.  Cleaning it here
-            # ensures error paths (e.g. ``_purge_varobj_subtree`` on a stale
-            # ``-var-update`` failure) do not leave a dead name in the
-            # update-iteration list, which would otherwise grow monotonically.
-            if name in self._varobj_names:
-                self._varobj_names.remove(name)
 
 
     def _remove_descendant_varobjs(self, varobj_name: str) -> None:
@@ -155,7 +147,7 @@ class VarobjTreeSupportMixin:
 
 
     def _purge_varobj_subtree(self, varobj_name: str) -> None:
-        """Remove *varobj_name* and its children from tracking dicts."""
+        """Remove *varobj_name* and its children from the varobj registry."""
         self._remove_varobj_names(varobj_name, include_root=True)
 
 
