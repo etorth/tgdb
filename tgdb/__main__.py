@@ -24,14 +24,21 @@ def _wait_for_debugger() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tgdb",
+        usage="tgdb [options] [gdb options] [program [core|pid]]\n       tgdb [options] [gdb options] --args program [arguments...]",
         description="tgdb — a Python front-end for GDB (cgdb reimplementation)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        # No abbreviations: an unknown long option must reach GDB intact
+        # instead of being matched as a prefix of a tgdb option.
+        allow_abbrev=False,
         epilog="""
+Arguments that are not tgdb options (the program, a core file or PID, and
+any GDB option such as -p PID or -nx) are passed to GDB in order.
+
 Examples:
   tgdb myprogram
   tgdb -d /usr/bin/gdb myprogram
   tgdb --args myprogram arg1 arg2
-  tgdb --args -p 12345
+  tgdb -p 12345
   tgdb myprogram core
 """,
     )
@@ -58,7 +65,7 @@ Examples:
     parser.add_argument(
         "--args",
         action="store_true",
-        help="Pass remaining arguments verbatim to GDB (e.g. --args -p PID)",
+        help="The next argument is the program; the rest are its arguments (like gdb --args)",
     )
     parser.add_argument(
         "--log",
@@ -102,31 +109,21 @@ Examples:
         metavar="DIR",
         help="Change to DIR before starting GDB",
     )
-    parser.add_argument(
-        "program",
-        nargs="?",
-        help="Program to debug",
-    )
-    parser.add_argument(
-        "core_or_pid",
-        nargs="?",
-        help="Core file or PID to attach",
-    )
-
-    # Support --args: everything after --args is passed verbatim to GDB.
-    if "--args" in sys.argv:
-        idx = sys.argv.index("--args")
-        pre_args = sys.argv[1:idx]
-        post_args = sys.argv[idx + 1 :]
-        args = parser.parse_args(pre_args)
-        gdb_args = post_args
-    else:
-        args = parser.parse_args()
-        gdb_args = []
-        if args.program:
-            gdb_args.append(args.program)
-        if args.core_or_pid:
-            gdb_args.append(args.core_or_pid)
+    # The program, core/PID and GDB options are not declared: everything
+    # parse_known_args() does not recognise goes to GDB in its original
+    # order (cgdb-style).  ``--args`` keeps GDB's meaning: the next
+    # argument is the program and the rest are the program's arguments,
+    # so nothing after it is parsed as a tgdb option.
+    argv = sys.argv[1:]
+    program_args: list[str] = []
+    if "--args" in argv:
+        idx = argv.index("--args")
+        argv, program_args = argv[:idx], argv[idx + 1 :]
+        if not program_args:
+            parser.error("--args requires a program")
+    args, gdb_args = parser.parse_known_args(argv)
+    if program_args:
+        gdb_args.extend(["--args", *program_args])
 
     if args.cd:
         os.chdir(args.cd)

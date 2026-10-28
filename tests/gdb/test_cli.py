@@ -41,13 +41,13 @@ def test_batch_script_sees_ui_updates(build, tmp_path):
         "quit\n"
     ))
     result = tgdb("--width", "90", "--height", "33", "--batch", script, "-r", "NONE",
-                  "--args", *GDB_ISOLATION_ARGS, str(build("basic.c")))
+                  *GDB_ISOLATION_ARGS, str(build("basic.c")))
     assert result.returncode == 0, result.stderr
 
 
 def test_failing_batch_script_exits_1_with_reason(build, tmp_path):
     script = write(tmp_path / "bad.t", "python << EOF\nassert False, 'boom-marker'\nEOF\n")
-    result = tgdb("--batch", script, "-r", "NONE", "--args", *GDB_ISOLATION_ARGS, str(build("basic.c")))
+    result = tgdb("--batch", script, "-r", "NONE", *GDB_ISOLATION_ARGS, str(build("basic.c")))
     assert result.returncode == 1
     assert "boom-marker" in result.stderr
 
@@ -56,5 +56,20 @@ def test_bad_rc_file_exits_1(build, tmp_path):
     """Regression: the gdb-exit callback overwrote the rc failure's exit code."""
     rc = write(tmp_path / "rc", "set bogus\n")
     script = write(tmp_path / "never.t", "quit\n")
-    result = tgdb("--batch", script, "-r", rc, "--args", *GDB_ISOLATION_ARGS, str(build("basic.c")))
+    result = tgdb("--batch", script, "-r", rc, *GDB_ISOLATION_ARGS, str(build("basic.c")))
     assert result.returncode == 1
+
+
+def test_args_passes_program_arguments(build, tmp_path):
+    """``--args prog a b`` gives the program its arguments, like gdb/cgdb."""
+    script = write(tmp_path / "args.t", (
+        "python << EOF\n"
+        "await tgdb.debugger.execute('break main')\n"
+        "await tgdb.debugger.execute('run')\n"
+        "assert await tgdb.debugger.evaluate('argc') == '3'\n"
+        "assert '\"two words\"' in await tgdb.debugger.evaluate('argv[2]')\n"
+        "EOF\n"
+    ))
+    result = tgdb("--batch", script, "-r", "NONE", *GDB_ISOLATION_ARGS,
+                  "--args", str(build("args.c")), "one", "two words")
+    assert result.returncode == 0, result.stderr

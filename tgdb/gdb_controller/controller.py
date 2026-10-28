@@ -339,15 +339,18 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             #   --nw                     : no TUI
             #   -ex "source pysetup.py"  : load helpers + disable pagination
             #   -ex "new-ui mi X"        : open MI channel on secondary PTY
-            #   <user args>              : may include -p <pid>
             #   -ex "python _tgdb_RSVD_restore_user_defs()" : restore height
+            #   <user args>              : may include -p <pid> or --args
+            # Our options go first: after ``--args prog`` every word is an
+            # argument of the program.  GDB still runs all -ex commands
+            # after loading the program / attaching, in order.
             cmd = [
                 self.gdb_path, "--nw",
                 "-ex", f"source {setup_path_str}",
                 "-ex", f"new-ui mi {mi_slave_name}",
+                "-ex", "python _tgdb_RSVD_restore_user_defs()",
             ]
             cmd.extend(self.gdb_args)
-            cmd.extend(["-ex", "python _tgdb_RSVD_restore_user_defs()"])
             self._proc = ptyprocess.PtyProcess.spawn(
                 cmd,
                 dimensions=(rows, cols),

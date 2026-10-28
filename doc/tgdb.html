@@ -249,9 +249,13 @@ The options are:
 <dd><p>Read the initialization commands from <var>file</var> instead of
 <samp>$XDG_CONFIG_HOME/tgdb/tgdbrc</samp>.  <code>-r NONE</code> skips the
 initialization file.  If a command in it fails, TGDB exits with status 1.</p></dd>
-<dt><code>--args <var>arguments</var>&hellip;</code></dt>
-<dd><p>Pass all remaining arguments to GDB unchanged, for example
-<code>tgdb --args -p 1234</code>.</p></dd>
+<dt><code>--args <var>program</var> <var>arguments</var>&hellip;</code></dt>
+<dd><p>As with <code>gdb --args</code>: debug <var>program</var> and pass it
+<var>arguments</var>, for example <code>tgdb --args ./server --port 8080</code>.
+Nothing after <code>--args</code> is read as a TGDB option.</p></dd>
+<dt>GDB options</dt>
+<dd><p>Any argument that is not a TGDB option (such as <code>-p 1234</code> or
+<code>-nx</code>) is passed to GDB in the order given.</p></dd>
 <dt><code>--cd <var>dir</var></code></dt>
 <dd><p>Change to <var>dir</var> before starting GDB.</p></dd>
 <dt><code>--input <var>file</var></code></dt>
