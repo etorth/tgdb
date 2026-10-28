@@ -38,10 +38,12 @@ container tree starting from the root PaneContainer:
 import asyncio
 import enum
 import logging
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .app import TGDBApp
+    from .gdb_controller.types import LocalVariable
 
 
 _log = logging.getLogger("tgdb.api")
@@ -382,7 +384,246 @@ class TGDBScreen:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton (the ``tgdb.screen`` object)
+# TGDBDebugger
+# ---------------------------------------------------------------------------
+
+# CSI / OSC escape sequences and readline's prompt markers, stripped before
+# looking for the GDB prompt in console output.
+_TERMINAL_ESCAPES_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|[\x01\x02\r]")
+
+
+class TGDBDebugger:
+    """
+    ``tgdb.debugger`` — drive GDB and read debugger state from scripts.
+
+    Intended for ``:python`` blocks, ``--input`` / ``--batch`` scripts, and
+    tests.  The coroutines wait on the App's message loop, so await them
+    from a script (which runs in its own task), never from inside a Textual
+    message handler.
+
+    Usage example::
+
+        import tgdb
+        dbg = tgdb.debugger
+        await dbg.execute("break main")
+        await dbg.execute("run")            # returns once stopped + panes updated
+        print(dbg.source_position())        # ('/path/main.c', 12)
+        print(await dbg.evaluate("argc"))   # '1'
+        print(dbg.locals())                 # [('argc', '1'), ('argv', '0x7ffe...')]
+        await dbg.command("evaluate argc * 2")
+        print(dbg.watches())                # [('argc * 2', '2')]
+
+    Public methods:
+
+    - ``await execute(command)`` — type a GDB command into the console as
+      the user would, then wait until GDB shows its prompt again and the
+      panes have caught up.
+    - ``await wait_idle()`` — wait until the inferior is stopped, no MI
+      request is in flight, and queued UI updates have been applied.
+    - ``await command(line)`` — run a tgdb ``:`` command; returns its
+      message (usually an error) or ``None``.
+    - ``await evaluate(expr)`` — value of *expr* in the selected frame,
+      formatted like the Locals / Evaluations panes; raises
+      ``RuntimeError`` when GDB cannot evaluate it.
+    - ``source_position()`` — ``(path, executing_line)`` of the source pane.
+    - ``local_variables()`` — locals of the selected frame as collected
+      from GDB (``LocalVariable`` records with address and shadowing).
+    - ``locals()`` / ``watches()`` — top-level ``(expression, value)`` rows
+      shown in the Locals / Evaluations pane (``[]`` when not open).
+
+    Timeouts raise ``TimeoutError``; ``execute`` includes the tail of the
+    GDB console in the message.
+    """
+
+    def __init__(self) -> None:
+        self._app: "TGDBApp" | None = None
+
+
+    def _set_app(self, app: "TGDBApp") -> None:
+        self._app = app
+
+
+    def _require_app(self) -> "TGDBApp":
+        if self._app is None:
+            raise RuntimeError("tgdb.debugger is not attached to a running tgdb")
+        return self._app
+
+
+
+    # ------------------------------------------------------------------
+    # Driving GDB (async coroutines; call with ``await``)
+    # ------------------------------------------------------------------
+
+
+    async def execute(self, command: str, timeout: float = 30.0) -> None:
+        """Type *command* into the GDB console and wait for it to finish.
+
+        "Finished" means GDB printed its prompt again (for ``run``,
+        ``next``, ``continue`` … that is after the inferior stopped) and
+        :meth:`wait_idle` returned.  A command that leaves the inferior
+        running or waits for an answer (``y or n``) times out.
+        """
+        app = self._require_app()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        prompt = _TERMINAL_ESCAPES_RE.sub("", await self._prompt(timeout))
+        output = bytearray()
+        prompt_seen = asyncio.Event()
+
+        def on_console(data: bytes) -> None:
+            output.extend(data)
+            text = _TERMINAL_ESCAPES_RE.sub("", output.decode("utf-8", errors="replace"))
+            if f"\n{prompt}" in text:
+                prompt_seen.set()
+
+        gdb = app.gdb
+        gdb.add_console_listener(on_console)
+        try:
+            _log.info(f"api: execute({command!r})")
+            gdb.send_input((command + "\r").encode())
+            try:
+                await asyncio.wait_for(prompt_seen.wait(), timeout)
+            except TimeoutError:
+                tail = output.decode("utf-8", errors="replace")[-2000:]
+                raise TimeoutError(
+                    f"GDB did not finish {command!r} within {timeout}s; console output:\n{tail}"
+                ) from None
+        finally:
+            gdb.remove_console_listener(on_console)
+        await self.wait_idle(max(1.0, deadline - loop.time()))
+
+
+    async def wait_idle(self, timeout: float = 30.0) -> None:
+        """Wait until GDB and the panes are quiet.
+
+        Repeats an MI round trip (so every earlier MI record has been
+        parsed) and a UI round trip (so every update queued from those
+        records has run) until two rounds in a row find no running
+        inferior, no in-flight MI request, and no locals reconciliation.
+        """
+        app = self._require_app()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        quiet_rounds = 0
+        while quiet_rounds < 2:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(f"tgdb did not become idle within {timeout}s")
+            await self._mi_round_trip(remaining)
+            await self._ui_round_trip(max(0.1, deadline - loop.time()))
+            if self._busy(app):
+                quiet_rounds = 0
+            else:
+                quiet_rounds += 1
+            await asyncio.sleep(0.05)
+
+
+    async def command(self, line: str) -> str | None:
+        """Run a tgdb ``:`` command (e.g. ``"evaluate x"``, ``"set ts=4"``)."""
+        app = self._require_app()
+        _log.info(f"api: command({line!r})")
+        return await app.cp.execute_async(line)
+
+
+    async def evaluate(self, expr: str) -> str:
+        """Value of *expr* in the selected frame, formatted as the panes show it."""
+        gdb = self._require_app().gdb
+        info = await gdb.var_create(expr)
+        name = info.get("name", "")
+        try:
+            return str(info.get("value", ""))
+        finally:
+            if name:
+                await gdb.var_delete(name)
+
+
+
+    # ------------------------------------------------------------------
+    # Reading state (synchronous)
+    # ------------------------------------------------------------------
+
+
+    def source_position(self) -> tuple[str, int] | None:
+        """``(path, executing_line)`` of the file shown in the source pane.
+
+        *executing_line* is 0 when the executing line is not in that file
+        (e.g. before ``run``).  ``None`` when no file is shown.
+        """
+        src = self._require_app()._get_source_view()
+        if src is None or src.source_file is None:
+            return None
+        return (src.source_file.path, src.exe_line)
+
+
+    def local_variables(self) -> list["LocalVariable"]:
+        """Locals of the selected frame as last collected from GDB."""
+        return list(self._require_app()._current_locals)
+
+
+    def locals(self) -> list[tuple[str, str]]:
+        """``(name, value)`` rows of the Locals pane; ``[]`` if never opened."""
+        pane = self._require_app()._locals_pane
+        if pane is None:
+            return []
+        return pane.rows()
+
+
+    def watches(self) -> list[tuple[str, str]]:
+        """``(expression, value)`` rows of the Evaluations pane; ``[]`` if never opened."""
+        pane = self._require_app()._evaluate_pane
+        if pane is None:
+            return []
+        return pane.rows()
+
+
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+
+    async def _prompt(self, timeout: float) -> str:
+        """The current GDB prompt string (``set prompt`` aware)."""
+        result = await self._require_app().gdb.mi_command_async("-gdb-show prompt", timeout=timeout)
+        payload = result.get("payload") or {}
+        value = payload.get("value") if isinstance(payload, dict) else None
+        if isinstance(value, str) and value.strip():
+            return value
+        return "(gdb) "
+
+
+    async def _mi_round_trip(self, timeout: float) -> None:
+        gdb = self._require_app().gdb
+        result = await gdb.mi_command_async("-gdb-show prompt", timeout=timeout)
+        if not result:
+            # Transport not ready yet (startup) or timed out; let the
+            # caller's deadline decide.
+            await asyncio.sleep(0.1)
+
+
+    async def _ui_round_trip(self, timeout: float) -> None:
+        app = self._require_app()
+        done = asyncio.get_running_loop().create_future()
+
+        def mark_done() -> None:
+            if not done.done():
+                done.set_result(None)
+
+        app.call_later(mark_done)
+        await asyncio.wait_for(done, timeout)
+
+
+    @staticmethod
+    def _busy(app: "TGDBApp") -> bool:
+        if app.gdb is None or app.gdb.is_busy():
+            return True
+        pane = app._locals_pane
+        return pane is not None and pane._reconcile_active > 0
+
+
+# ---------------------------------------------------------------------------
+# Module-level singletons (the ``tgdb.screen`` / ``tgdb.debugger`` objects)
 # ---------------------------------------------------------------------------
 
 screen = TGDBScreen()
+debugger = TGDBDebugger()

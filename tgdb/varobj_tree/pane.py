@@ -109,6 +109,33 @@ class VarobjTreePane(VarobjTreeMixin, VarobjTreeSupportMixin, PaneBase):
         self._var_eval_expr = var_eval_expr
 
 
+    def rows(self) -> list[tuple[str, str]]:
+        """Top-level ``(expression, value)`` pairs exactly as displayed.
+
+        *value* is ``""`` for a row that shows no value.  Read from the
+        labels, so it reflects what the user sees, including placeholder
+        text such as ``<not yet initialized>``.
+        """
+        result: list[tuple[str, str]] = []
+        for node in self._tree_widget.root.children:
+            label = node.label
+            if hasattr(label, "plain"):
+                text = label.plain
+            else:
+                text = str(label)
+            exp = ""
+            if isinstance(node.data, dict):
+                exp = node.data.get("exp", "")
+            if exp:
+                _before, found, value = text.partition(f"{exp} = ")
+                if not found:
+                    value = ""
+            else:
+                exp, _sep, value = text.removeprefix(f"{self._MARKER_LEAF} ").partition(" = ")
+            result.append((exp, value))
+        return result
+
+
     def compose(self):
         yield from super().compose()
         yield self._tree_widget

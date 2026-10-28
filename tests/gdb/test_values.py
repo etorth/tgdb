@@ -1,6 +1,5 @@
 """Value formatting through the GDB-side collector, and the disasm pane."""
 
-from tgdb.disasm_pane import DisasmPane
 from tgdb.gdb_controller.types import normalize_addr
 
 from .harness import run_session
@@ -29,13 +28,10 @@ def test_disasm_marks_pc(build):
 
     async def body(s):
         await s.run_to("values.c", "MARK_PRINT")
-        await s.add_pane("disasm")
-        panes = list(s.app.query(DisasmPane))
-        assert len(panes) == 1
-        content = panes[0]._content
-        marked = [line.addr for line in content._lines if line.is_current]
+        await s.append_pane("disasm")
+        marked = s.disasm_pc_rows()
         assert len(marked) == 1
-        pc = normalize_addr(await s.gdb_eval("$pc"))
+        pc = normalize_addr(await s.gdb_value("$pc"))
         assert int(marked[0], 16) == int(pc, 16)
 
     run_session(build("values.c"), body)

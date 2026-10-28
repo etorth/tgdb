@@ -49,7 +49,7 @@ def test_unconstructed_object_refreshes_once_constructed(build):
         assert s.locals_value("s") is not None, "s should be listed while unconstructed"
 
         await s.cli(f"until {s.line_of('unconstructed.cpp', 'MARK_CONSTRUCTED')}")
-        assert s.locals_value("s") == await s.gdb_eval("s") == '"xx"'
+        assert s.locals_value("s") == await s.gdb_value("s") == '"xx"'
         assert "s" not in s.locals_placeholders()
 
     run_session(build("unconstructed.cpp"), body)

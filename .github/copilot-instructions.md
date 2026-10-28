@@ -12,7 +12,7 @@
   python -m pytest tests/unit   # fast, no GDB
   python -m pytest -m gdb       # GDB integration tests only
   ```
-- `tests/gdb/` runs the real `TGDBApp` headless in-process (Textual `run_test`) against real GDB. Write new integration tests with `tests/gdb/harness.py`: `Session.cli()` waits for the stop / frame change a command causes, and `Session.gdb_value()` reads the ground truth back from GDB. Keep tgdb-internal attribute access inside `harness.py`.
+- `tests/gdb/` runs the real `TGDBApp` headless in-process (Textual `run_test`) against real GDB. Write new integration tests with `tests/gdb/harness.py`, which wraps the public scripting API (`tgdb.screen`, `tgdb.debugger` in `tgdb/tgdb_api.py`): `debugger.execute()` returns once GDB shows its prompt again and the panes are idle, and `debugger.evaluate()` reads the ground truth back from GDB. Prefer extending `tgdb.debugger` over reaching into tgdb internals; keep any unavoidable white-box access inside `harness.py`, marked as such.
 - Add a regression test with every bug fix: a unit test under `tests/unit/` for pure logic, or a GDB test with a fixture program under `tests/gdb/fixtures/` (mark lines with unique `// MARK_...` comments and use `Session.line_of()`).
 - Sanity-check the CLI entry point:
   ```bash

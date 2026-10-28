@@ -148,6 +148,11 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
     - ``on_exit()``
     - ``on_error(msg: str)``
 
+    ``add_console_listener(fn)`` / ``remove_console_listener(fn)`` let extra
+    observers (e.g. the ``tgdb.debugger`` scripting API) see console output
+    without replacing ``on_console``.  ``is_busy()`` reports whether the
+    inferior is running or any MI request is still in flight.
+
     Callers should treat everything else as controller internals. Once started,
     the controller owns MI parsing, request bookkeeping, and publication of
     debugger state through the callback surface above.
@@ -222,6 +227,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
 
         # Callbacks
         self.on_console: Callable[[bytes], None] = lambda d: None
+        self._console_listeners: list[Callable[[bytes], None]] = []
         self.on_stopped: Callable[[Frame], None] = lambda f: None
         self.on_running: Callable[[], None] = lambda: None
         self.on_breakpoints: Callable[[list[Breakpoint]], None] = lambda b: None
@@ -443,6 +449,31 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             self._proc.kill(signal.SIGINT)
 
 
+    def add_console_listener(self, listener: Callable[[bytes], None]) -> None:
+        """Also deliver every console output chunk to *listener*."""
+        self._console_listeners.append(listener)
+
+
+    def remove_console_listener(self, listener: Callable[[bytes], None]) -> None:
+        if listener in self._console_listeners:
+            self._console_listeners.remove(listener)
+
+
+    def _emit_console(self, data: bytes) -> None:
+        """Publish console bytes to ``on_console`` and any extra listeners."""
+        self.on_console(data)
+        for listener in list(self._console_listeners):
+            try:
+                listener(data)
+            except Exception:
+                _log.debug("console listener raised", exc_info=True)
+
+
+    def is_busy(self) -> bool:
+        """True while the inferior runs or any MI request awaits its reply."""
+        return self._inferior_running or bool(self._pending)
+
+
     def send_input(self, data: str | bytes) -> None:
         """Write to GDB's primary PTY (user input / CLI commands)."""
         if self._backend == "mi-pipe":
@@ -473,19 +504,19 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
             elif ch in ("\r", "\n"):
                 command = self._win_cli_buf.strip()
                 self._win_cli_buf = ""
-                self.on_console(b"\r\n")
+                self._emit_console(b"\r\n")
                 if command:
                     self._send_mi_pipe_cli_command(command)
             elif ch in ("\x08", "\x7f"):
                 if self._win_cli_buf:
                     self._win_cli_buf = self._win_cli_buf[:-1]
-                    self.on_console(b"\b \b")
+                    self._emit_console(b"\b \b")
             elif ch == "\x1b":
                 idx = self._skip_escape_sequence(text, idx)
                 continue
             elif ch.isprintable() or ch == "\t":
                 self._win_cli_buf += ch
-                self.on_console(ch.encode("utf-8", errors="replace"))
+                self._emit_console(ch.encode("utf-8", errors="replace"))
             idx += 1
 
 
@@ -1054,7 +1085,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         Currently sync, but structured as async so future console
         processing can ``await`` if needed.
         """
-        self.on_console(data)
+        self._emit_console(data)
 
 
     def _on_mi_readable(self) -> None:

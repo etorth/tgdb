@@ -253,6 +253,37 @@ Attributes: `bold`, `underline`, `reverse`/`inverse`, `standout`, `blink`, `dim`
 :iunmap <C-x>
 ```
 
+### Python scripting API
+
+`:python` blocks, `:pyfile`, and `--input` / `--batch` scripts can `import tgdb`
+(already imported for you) and use two objects:
+
+- `tgdb.screen` — pane layout: `split()`, `close()`, `close_all_panes()`,
+  `get_pane(address).attach(tgdb.Pane.LOCALS)`, `size()`.
+- `tgdb.debugger` — drive GDB and read its state:
+
+| Call | Does |
+|------|------|
+| `await execute("next")` | Type a command into the GDB console; returns once GDB shows its prompt again and the panes have refreshed |
+| `await wait_idle()` | Wait until the inferior is stopped and pending updates are applied |
+| `await command("evaluate x")` | Run a tgdb `:` command; returns its message or `None` |
+| `await evaluate("x + 1")` | Value in the selected frame, formatted like the panes (raises `RuntimeError` on error) |
+| `source_position()` | `(path, executing_line)` shown in the source pane |
+| `locals()` / `watches()` | `(name, value)` rows of the Locals / Evaluations pane |
+| `local_variables()` | Locals as collected from GDB, with address and shadowing info |
+
+```
+python << EOF
+await tgdb.debugger.execute("break parse_args")
+await tgdb.debugger.execute("run")
+for name, value in tgdb.debugger.locals():
+    print(name, "=", value)
+EOF
+```
+
+Commands that leave the inferior running or wait for an answer raise
+`TimeoutError` (default 30 s) with the recent console output.
+
 ### Example `~/.config/tgdb/tgdbrc`
 
 ```
@@ -326,7 +357,6 @@ not broadcast over the MI channel.
 
 | Event | GDB Python hook | Purpose |
 |-------|-----------------|---------|
-| `P` | `gdb.events.before_prompt` | CLI prompt about to display — refresh selected frame (catch `up`/`down`/`frame N` typed directly) |
 | `R<n>` | `gdb.events.register_changed` | User set a register (e.g. `set $rax=0x1234`) — refresh register pane immediately |
 | `O`/`F`/`C` | `gdb.events.new_objfile` / `free_objfile` / `clear_objfiles` | Shared libraries loaded/unloaded; invalidate any cached objfile state (currently unused; file list is lazily fetched by file dialog) |
 | `Ipre` / `Ipost` | `gdb.events.inferior_call` | Expression trigger inferior execution (e.g. `print foo()`) — `post` refreshes locals/registers/memory since inferior ran |
@@ -347,6 +377,6 @@ per asyncio cycle, keeping MI load low.
 - Readline integration: basic history via up/down arrows (no libreadline)
 - The `--tty` / `Ctrl-T` separate TTY feature is not yet implemented
 - **Event-driven frame/state updates**: Embeds Python in GDB to hook `gdb.events.*`
-  (before_prompt, register_changed, inferior_call, gdb_exiting, etc.) via a
-  side-channel socket, ensuring frame changes from CLI commands (up/down/frame N)
-  update the source pane immediately, without relying on MI async records alone
+  (register_changed, inferior_call, objfile and gdb_exiting events) via a
+  side-channel socket; frame changes from CLI commands (up/down/frame N) arrive
+  as MI `=thread-selected` notifications and update the source pane immediately

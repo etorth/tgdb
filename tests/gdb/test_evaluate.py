@@ -12,13 +12,13 @@ def test_locals_and_watches_both_update(build):
         await s.layout("source", "gdb", "locals", "evaluate")
         await s.run_to("watch_locals.c", "MARK_START")
         for expr in WATCHES:
-            await s.evaluate_pane.add_expression(expr)
-        await s.settle()
+            assert await s.dbg.command(f"evaluate {expr}") is None
+        await s.dbg.wait_idle()
 
         for _ in range(8):
             await s.cli("next")
             want = {expr: await s.gdb_value(expr) for expr in WATCHES}
-            assert dict(s.watch_rows()) == want
+            assert dict(s.dbg.watches()) == want
             assert s.locals_value("a") == want["a"]
             assert s.locals_value("b") == want["b"]
 
@@ -31,14 +31,13 @@ def test_failing_watch_label_and_removal(build):
     async def body(s):
         await s.layout("source", "gdb", "evaluate")
         await s.run_to("watch_locals.c", "MARK_START")
-        pane = s.evaluate_pane
-        await pane.add_expression("a")
-        await pane.add_expression("nosuch[i]")
-        await s.settle()
-        assert "nosuch[i] = <error>" in s.watch_labels()
+        await s.dbg.command("evaluate a")
+        await s.dbg.command("evaluate nosuch[i]")
+        await s.dbg.wait_idle()
+        assert ("nosuch[i]", "<error>") in s.dbg.watches()
 
-        assert await pane.remove_expression(1) == "nosuch[i]"
-        await s.settle()
-        assert [name for name, _ in s.watch_rows()] == ["a"]
+        await s.dbg.command("unevaluate 2")
+        await s.dbg.wait_idle()
+        assert [expr for expr, _value in s.dbg.watches()] == ["a"]
 
     run_session(build("watch_locals.c"), body)

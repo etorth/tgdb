@@ -157,6 +157,7 @@ class TGDBApp(
         import tgdb as _tgdb_pkg
 
         _tgdb_pkg.screen._set_app(self)
+        _tgdb_pkg.debugger._set_app(self)
         from .memory_pane import MemoryFormatter as _MF
         self.cp.set_py_globals({
             "app": self,
