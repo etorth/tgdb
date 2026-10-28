@@ -96,6 +96,7 @@ ul.no-bullet {list-style: none}
   <ul class="no-bullet">
     <li><a name="toc-Command-History" href="#Command-History">4.1 Command History</a></li>
     <li><a name="toc-User-Defined-Commands" href="#User-Defined-Commands">4.2 User-Defined Commands</a></li>
+    <li><a name="toc-Python-Scripting" href="#Python-Scripting">4.3 Python Scripting</a></li>
   </ul></li>
   <li><a name="toc-TGDB-highlighting-groups" href="#Highlighting-Groups">5 TGDB highlighting groups</a>
   <ul class="no-bullet">
@@ -233,9 +234,45 @@ The essentials are:
 
 </li><li> type <kbd>quit</kbd> or <kbd>C-d</kbd> in the GDB window to exit.
 
-</li><li> type <kbd>:quit</kbd> in the source window to exit.  This even works if GDB is 
+</li><li> type <kbd>:quit</kbd> in the source window to exit.  This even works if GDB is
 currently hanging, or operating a long command.
 </li></ul>
+
+<p>The command line is
+<code>tgdb [<var>options</var>] [<var>program</var> [<var>core</var>|<var>pid</var>]]</code>.
+The options are:
+</p>
+<dl compact="compact">
+<dt><code>-d <var>debugger</var></code>, <code>--debugger <var>debugger</var></code></dt>
+<dd><p>Run <var>debugger</var> instead of <samp>gdb</samp>.</p></dd>
+<dt><code>-r <var>file</var></code>, <code>--rcfile <var>file</var></code></dt>
+<dd><p>Read the initialization commands from <var>file</var> instead of
+<samp>$XDG_CONFIG_HOME/tgdb/tgdbrc</samp>.  <code>-r NONE</code> skips the
+initialization file.  If a command in it fails, TGDB exits with status 1.</p></dd>
+<dt><code>--args <var>arguments</var>&hellip;</code></dt>
+<dd><p>Pass all remaining arguments to GDB unchanged, for example
+<code>tgdb --args -p 1234</code>.</p></dd>
+<dt><code>--cd <var>dir</var></code></dt>
+<dd><p>Change to <var>dir</var> before starting GDB.</p></dd>
+<dt><code>--input <var>file</var></code></dt>
+<dd><p>After startup, run the commands in <var>file</var> (the same syntax as the
+initialization file, including <kbd>:python</kbd> heredocs).  Execution stops
+at the first failing command; TGDB then stays open for interactive use.
+The screen keeps updating while the script runs, so a script can drive GDB
+with <code>tgdb.debugger</code> (see <a href="#Python-Scripting">Python Scripting</a>).</p></dd>
+<dt><code>--batch <var>file</var></code></dt>
+<dd><p>Like <code>--input</code>, but exit when the script ends: with status 0 if
+every command succeeded, otherwise with status 1 and the error printed on
+standard error.</p></dd>
+<dt><code>--headless</code></dt>
+<dd><p>Run without drawing to a terminal; useful with <code>--batch</code> for
+automated checks.</p></dd>
+<dt><code>--width <var>w</var></code>, <code>--height <var>h</var></code></dt>
+<dd><p>Lay the interface out in a <var>w</var>-column by <var>h</var>-row area
+instead of the full terminal.</p></dd>
+<dt><code>--log <var>file</var></code></dt>
+<dd><p>Write a debug log to <var>file</var>.</p></dd>
+</dl>
 
 <hr>
 <a name="Understanding-TGDB"></a>
@@ -1632,6 +1669,123 @@ sequence in the output, e.g. write <code>&lt;lt&gt;args&gt;</code> to get the te
 :ShowTag foo                 <span class="roman">executes: python print("&lt;args&gt;")</span>
 </pre></div>
 
+<a name="Python-Scripting"></a>
+<h2 class="chapter">4.3 Python Scripting</h2>
+<a name="index-python"></a>
+<a name="index-scripting"></a>
+
+<p>TGDB runs Python code in its own process (separate from GDB&rsquo;s embedded
+Python).  All code shares one persistent namespace, so variables, functions
+and imports defined by one block are visible to later ones.  Top-level
+<code>await</code> is allowed, and <code>print()</code> output appears in the
+command-line bar.
+</p>
+<dl compact="compact">
+<dt><kbd>:python <var>code</var></kbd></dt>
+<dt><kbd>:py <var>code</var></kbd></dt>
+<dd><p>Run one line of Python.</p></dd>
+<dt><kbd>:python &lt;&lt; <var>MARKER</var></kbd></dt>
+<dd><p>Run the following lines, up to a line that is exactly <var>MARKER</var>
+(starting in column 0).  This works in the initialization file and in
+<code>--input</code> / <code>--batch</code> scripts:</p>
+<div class="example">
+<pre class="example">python &lt;&lt; EOF
+for name, value in tgdb.debugger.locals():
+    print(name, "=", value)
+EOF
+</pre></div></dd>
+<dt><kbd>:pyfile <var>path</var></kbd></dt>
+<dt><kbd>:pyf <var>path</var></kbd></dt>
+<dd><p>Run the Python file <var>path</var> in the same namespace.</p></dd>
+</dl>
+
+<p>The namespace provides <code>tgdb</code>, the scripting API described below.
+It also provides <code>app</code>, the running application object; it is
+available for experiments, but its internals may change between versions.
+</p>
+
+<h4 class="subsubsection">Pane layout: <code>tgdb.screen</code></h4>
+
+<p>Panes are addressed by a list of indices into the workspace&rsquo;s nested
+split containers: <code>[]</code> is the root container, <code>[0]</code> its
+first cell, <code>[1, 0]</code> the first cell of the container in the root&rsquo;s
+second cell, and so on.  Pane types are
+<code>tgdb.Pane.SOURCE</code>, <code>GDB</code>, <code>LOCALS</code>,
+<code>REGISTERS</code>, <code>STACK</code>, <code>THREADS</code>,
+<code>EVALUATE</code>, <code>MEMORY</code> and <code>DISASM</code>.
+</p>
+<dl compact="compact">
+<dt><code>tgdb.screen.size()</code>, <code>width()</code>, <code>height()</code></dt>
+<dd><p>Terminal size in cells.</p></dd>
+<dt><code>await tgdb.screen.split(pane=<var>address</var>, mode=tgdb.SplitMode.HORIZONTAL)</code></dt>
+<dd><p>Add an empty cell next to the cell at <var>address</var>
+(<code>HORIZONTAL</code>: side by side, <code>VERTICAL</code>: stacked).
+With <code>pane=[]</code> the cell is appended to the root container.</p></dd>
+<dt><code>await tgdb.screen.get_pane(<var>address</var>).attach(<var>pane_type</var>)</code></dt>
+<dd><p>Show a pane of <var>pane_type</var> in the cell at <var>address</var>.
+<code>detach()</code> empties the cell again.</p></dd>
+<dt><code>await tgdb.screen.close(<var>address</var>)</code></dt>
+<dt><code>await tgdb.screen.close_all_panes()</code></dt>
+<dd><p>Delete one cell, or reset the workspace to a single empty cell.</p></dd>
+</dl>
+<div class="example">
+<pre class="example">python &lt;&lt; EOF
+await tgdb.screen.close_all_panes()
+await tgdb.screen.split(pane=[], mode=tgdb.SplitMode.VERTICAL)
+await tgdb.screen.split(pane=[], mode=tgdb.SplitMode.VERTICAL)
+await tgdb.screen.get_pane([0]).attach(tgdb.Pane.SOURCE)
+await tgdb.screen.get_pane([1]).attach(tgdb.Pane.LOCALS)
+await tgdb.screen.get_pane([2]).attach(tgdb.Pane.GDB)
+EOF
+</pre></div>
+
+<h4 class="subsubsection">Driving GDB: <code>tgdb.debugger</code></h4>
+
+<p>These calls let a script run GDB commands and read what TGDB shows.  The
+<code>await</code>ed ones wait for the user interface to catch up, so call
+them from <kbd>:python</kbd> blocks, <kbd>:pyfile</kbd> files, or
+<code>--input</code> / <code>--batch</code> scripts.
+</p>
+<dl compact="compact">
+<dt><code>await tgdb.debugger.execute(<var>command</var>, timeout=30)</code></dt>
+<dd><p>Type <var>command</var> into the GDB window, as the user would, and return
+once GDB shows its prompt again and the panes have been refreshed.  For
+<code>run</code>, <code>next</code>, <code>continue</code> and similar commands
+this means the program has stopped.  A command that leaves the program
+running, or waits for an answer such as <samp>(y or n)</samp>, raises
+<code>TimeoutError</code>; the message includes the recent GDB output.</p></dd>
+<dt><code>await tgdb.debugger.wait_idle(timeout=30)</code></dt>
+<dd><p>Wait until the program is stopped, GDB has answered every pending
+request, and the panes are up to date.</p></dd>
+<dt><code>await tgdb.debugger.command(<var>line</var>)</code></dt>
+<dd><p>Run a TGDB <kbd>:</kbd> command, for example <code>"evaluate x"</code> or
+<code>"set tabstop=4"</code>.  Returns the command&rsquo;s message (usually an
+error) or <code>None</code>.</p></dd>
+<dt><code>await tgdb.debugger.evaluate(<var>expression</var>)</code></dt>
+<dd><p>The value of <var>expression</var> in the selected frame, formatted the way
+the Locals and Evaluations panes show values.  Raises
+<code>RuntimeError</code> if GDB cannot evaluate it.</p></dd>
+<dt><code>tgdb.debugger.source_position()</code></dt>
+<dd><p><code>(path, line)</code> of the file shown in the source window and the
+executing line in it (<code>0</code> when the executing line is in another file
+or the program is not running); <code>None</code> when no file is shown.</p></dd>
+<dt><code>tgdb.debugger.locals()</code></dt>
+<dt><code>tgdb.debugger.watches()</code></dt>
+<dd><p>The top-level <code>(name, value)</code> rows of the Locals or Evaluations
+pane, exactly as displayed (<code>[]</code> if the pane was never opened).</p></dd>
+<dt><code>tgdb.debugger.local_variables()</code></dt>
+<dd><p>The selected frame&rsquo;s locals as collected from GDB, including their
+addresses and whether an inner variable shadows them.</p></dd>
+</dl>
+<div class="example">
+<pre class="example">python &lt;&lt; EOF
+await tgdb.debugger.execute("break parse_args")
+await tgdb.debugger.execute("run")
+path, line = tgdb.debugger.source_position()
+print(f"stopped at {path}:{line}, argc = {await tgdb.debugger.evaluate('argc')}")
+EOF
+</pre></div>
+
 <hr>
 <a name="Highlighting-Groups"></a>
 <div class="header">
@@ -2096,69 +2250,47 @@ Next: <a href="#Copying-This-Manual" accesskey="n" rel="next">Copying This Manua
 <h2 class="chapter">8 Building TGDB from source</h2>
 <a name="index-building-TGDB"></a>
 
-<p>Building TGDB from source requires several packages. First, TGDB is hosted
-at GitHub. You can determine how to get TGDB from source by looking here:
-https://tgdb.github.io/
-</p>
-<p>Once you have the source to TGDB, now you can begin to build it.  You will of 
-course need many packages to build TGDB. Below is a list of all of them 
-that are required to build TGDB.
+<p>TGDB is a Python program; nothing needs to be compiled.  Its source is hosted
+on GitHub, see <a href="https://tgdb-proj.github.io/">https://tgdb-proj.github.io/</a>.
+It needs:
 </p>
 <dl compact="compact">
-<dt><code>GNU Make</code></dt>
-<dd><p>I have successfully used version 3.79.1, however, older versions probably 
-will work.
-</p>
-</dd>
-<dt><code>GNU GCC</code></dt>
-<dd><p>The GNU C compiler. I&rsquo;ve compiled TGDB with versions as old as 2.9.5, and as
-new as 4.0.2.
-</p>
-</dd>
-<dt><code>GNU Readline</code></dt>
-<dd><p>The GNU readline library version 5.1. TGDB will not work with versions before 
-5.1.  Readline was modified specifically to work with TGDB.
-</p>
-</dd>
-<dt><code>GNU Ncurses</code></dt>
-<dd><p>I have successfully used libncurses.so.5 successfully.  However, older versions
-probably will work.
-</p></dd>
+<dt><code>Python</code></dt>
+<dd><p>Version 3.11 or newer.</p></dd>
+<dt><code>GDB</code></dt>
+<dd><p>Built with Python support: TGDB loads helper code into GDB&rsquo;s embedded
+Python.</p></dd>
+<dt>Python packages</dt>
+<dd><p><code>textual</code>, <code>pygments</code>, <code>pyte</code>,
+<code>ptyprocess</code> and <code>pyperclip</code>; <code>pip</code> installs them
+automatically.</p></dd>
 </dl>
+<div class="example">
+<pre class="example">$ git clone https://github.com/etorth/tgdb.git
+$ cd tgdb
+$ pip install -e .
+$ tgdb /path/to/program        <span class="roman">or: python -m tgdb /path/to/program</span>
+</pre></div>
 
-<p>Below is a list of optional packages you will need, if modifying certain files
-in TGDB.
+<p>Native Windows (MSYS2 UCRT64 Python) is supported through an experimental
+backend that talks to GDB over pipes.  The panes work, but the GDB window is a
+line-oriented command/output view rather than a real terminal, so
+readline-style editing and tab completion are limited.
 </p>
-<dl compact="compact">
-<dt><code>GNU Flex</code></dt>
-<dd><p>If you modify any files with an extension of <code>.l</code>, you will have to have 
-flex installed.  I have used flex 2.5.4 to build TGDB.
-</p>
-</dd>
-<dt><code>GNU Texinfo</code></dt>
-<dd><p>If you modify <samp>doc/tgdb.texinfo</samp>, then you will be required to have this 
-package installed.  I have used version 4.7 to build the documentation for 
-TGDB.
-</p></dd>
-</dl>
 
-<p>TGDB uses autoconf/automake to build its configure scripts and makefiles.  So, 
-if you change any of the autoconf/automake files, you will need this software 
-installed.
+<h4 class="subsubsection">Running the tests</h4>
+
+<div class="example">
+<pre class="example">$ pip install -e '.[test]'
+$ python -m pytest
+</pre></div>
+
+<p>The unit tests in <samp>tests/unit</samp> run on any platform.  The
+integration tests in <samp>tests/gdb</samp> drive the real interface,
+headless, against real GDB, using the <code>tgdb.debugger</code> API; they
+need <samp>gdb</samp>, <samp>gcc</samp> and <samp>g++</samp> on a POSIX system
+and are skipped elsewhere.
 </p>
-<dl compact="compact">
-<dt><code>GNU Automake</code></dt>
-<dd><p>This has the program aclocal, and must be version Version 1.9.5.
-</p>
-</dd>
-<dt><code>GNU Autoconf</code></dt>
-<dd><p>This has the program autoconf, and must be version 2.59.
-</p>
-</dd>
-<dt><code>GNU m4</code></dt>
-<dd><p>This has the program m4, and must be version 1.4.3.
-</p></dd>
-</dl>
 
 <hr>
 <a name="Copying-This-Manual"></a>
