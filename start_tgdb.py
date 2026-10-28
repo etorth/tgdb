@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Launch tgdb from this source checkout without changing directories."""
 
 import sys

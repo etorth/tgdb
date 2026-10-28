@@ -74,6 +74,26 @@ class _GDBContent(ScrollMixin, Widget):
     # ------------------------------------------------------------------
 
 
+    @property
+    def max_scrollback(self) -> int:
+        return self._max_scrollback
+
+
+    @max_scrollback.setter
+    def max_scrollback(self, value: int) -> None:
+        # ``:set scrollbackbuffersize`` arrives after construction (the rc
+        # file is applied post-mount), so re-bound the existing deques
+        # instead of only recording the number.
+        value = max(0, int(value))
+        self._max_scrollback = value
+        scrollback = self.__dict__.get("_scrollback")
+        if scrollback is None or scrollback.maxlen == value:
+            return
+        self._scrollback = deque(scrollback, maxlen=value)
+        self._scrollback_raw = deque(self._scrollback_raw, maxlen=value)
+        self._scroll_offset = min(self._scroll_offset, len(self._scrollback))
+
+
     def _push_to_scrollback(self, text: Text, raw=None) -> None:
         """Append one line to both scrollback deques (text for display, raw for restoration)."""
         self._scrollback.append(text)
@@ -226,7 +246,7 @@ class _GDBContent(ScrollMixin, Widget):
 
         cy = self._screen.cursor.y
         row = _row_to_text(
-            self._screen.buffer[cy], self._pyte_cols, use_color=False
+            self._screen.buffer.get(cy), self._pyte_cols, use_color=False
         ).plain
         before_cursor = row[: self._screen.cursor.x]
         return before_cursor.endswith("(gdb) ")

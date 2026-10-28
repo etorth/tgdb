@@ -61,7 +61,8 @@ class SourceNavigationMixin:
 
                 line_text = self.source_file.lines[self.sel_line - 1]
                 line_cells = _cell_len(line_text)
-                visible_width = max(1, (self.size.width or 80) - 6)
+                # Gutter is "<line number><separator><space/arrow>".
+                visible_width = max(1, (self.size.width or 80) - (self._nr_width() + 2))
                 col = max(0, line_cells - visible_width)
             else:
                 col = 0

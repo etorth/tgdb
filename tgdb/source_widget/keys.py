@@ -152,7 +152,8 @@ class SourceKeyMixin:
             self._g_count = 0
             self._count_buf = ""
 
-        if char.isdigit() and (char != "0" or self._count_buf):
+        # ASCII digits only: ``"²".isdigit()`` is True but ``int("²")`` raises.
+        if char.isascii() and char.isdigit() and (char != "0" or self._count_buf):
             self._count_buf += char
             return True
         has_prefix = bool(self._count_buf)

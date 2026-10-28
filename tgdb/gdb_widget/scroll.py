@@ -270,8 +270,14 @@ class ScrollMixin:
             # measures by cells and pads with spaces so the overlay stays
             # flush-right at column ``w``.
             left_width = max(0, w - len(stat))
+            head = _truncate_to_cells(first, left_width)
+            # Short rows (horizontally scrolled, injected, or from a
+            # narrower terminal) must be padded or the overlay drifts left.
+            head_cells = cell_len(head.plain)
+            if head_cells < left_width:
+                head.append(" " * (left_width - head_cells))
             rendered_lines[0] = Text.assemble(
-                _truncate_to_cells(first, left_width),
+                head,
                 (stat, self.hl.style("ScrollModeStatus")),
             )
 
@@ -331,7 +337,9 @@ class ScrollMixin:
 
 
     def _handle_scroll_key(self, key: str, char: str) -> None:
-        if char.isdigit() and char != "0":
+        # ASCII digits only (``int("²")`` raises); a "0" extends a pending
+        # count ("10j") and only means beginning-of-row on its own.
+        if char.isascii() and char.isdigit() and (char != "0" or self._num_buf):
             self._num_buf += char
             return
         count = int(self._num_buf) if self._num_buf else 1

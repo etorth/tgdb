@@ -1,16 +1,22 @@
 highlight Comment ctermfg=Blue ctermbg=Black
 highlight Arrow ctermfg=Green
+highlight Search ctermfg=Red ctermbg=NONE
 
 python << EOF
-from rich.color import Color
+from rich.style import Style
 
-comment_style = app.hl.get_style("Comment")
-arrow_style = app.hl.get_style("Arrow")
+# cgdb colour names map to Rich colours (Blue -> bright_blue, Black -> black).
+comment = app.hl.get("Comment")
+assert comment.fg == "bright_blue", f"Comment fg: expected bright_blue, got {comment.fg}"
+assert comment.bg == "black", f"Comment bg: expected black, got {comment.bg}"
 
-assert comment_style is not None, "Comment highlight not set"
-assert comment_style.color == Color.parse("blue"), f"Comment fg: expected blue, got {comment_style.color}"
-assert comment_style.bgcolor == Color.parse("black"), f"Comment bg: expected black, got {comment_style.bgcolor}"
-assert arrow_style is not None, "Arrow highlight not set"
-assert arrow_style.color == Color.parse("green"), f"Arrow fg: expected green, got {arrow_style.color}"
+# "Arrow" is the cgdb alias for ExecutingLineArrow.
+arrow = app.hl.get("Arrow")
+assert arrow.fg == "bright_green", f"Arrow fg: expected bright_green, got {arrow.fg}"
+
+# ctermbg=NONE (uppercase) must clear the colour, not store "none".
+search = app.hl.get("Search")
+assert search.bg is None, f"Search bg: expected None, got {search.bg}"
+Style.parse(app.hl.style("Search"))
 EOF
 quit

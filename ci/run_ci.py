@@ -41,7 +41,10 @@ def main() -> int:
         test_dir = ci_dir / test_name
         run_py = test_dir / "run.py"
         if not run_py.is_file():
-            print(f"  SKIP  {test_name} (no run.py)")
+            # Only reachable for names given on the command line (discovery
+            # filters on run.py); a typo must not turn into a green run.
+            print(f"  FAIL  {test_name} (no run.py)")
+            failed_tests.append(test_name)
             continue
 
         run_dir = run_base / test_name

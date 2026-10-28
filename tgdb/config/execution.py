@@ -47,9 +47,9 @@ class ConfigExecutionMixin:
         string from the first failing command.
         """
         try:
-            with open(path) as handle:
+            with open(path, encoding="utf-8-sig") as handle:
                 raw_lines = handle.readlines()
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return f"source: cannot open '{path}': {exc}"
 
         _log.info(f"running script: {path} ({len(raw_lines)} lines)")
@@ -110,8 +110,10 @@ class ConfigExecutionMixin:
         else:
             _log.info(f"execute: {line!r}")
 
+        # ``\b`` so user commands such as ``:Pyrun`` (IGNORECASE) are not
+        # misparsed as ``:py run``.
         py_match = re.match(
-            r"^(python|pyfile|pyf|py)\s*(.*)",
+            r"^(python|pyfile|pyf|py)\b\s*(.*)",
             line,
             re.DOTALL | re.IGNORECASE,
         )

@@ -197,7 +197,9 @@ class FileDialog(FileDialogKeyMixin, FileDialogSearchMixin, FileDialogViewMixin,
             filtered.append(path)
 
         def sort_key(path: str) -> tuple[int, str]:
-            if path.startswith("/"):
+            # ``isabs`` also catches Windows drive paths ("C:/src/a.c"),
+            # which would otherwise sort among the plain relative paths.
+            if path.startswith("/") or os.path.isabs(path):
                 group = 2
             elif path.startswith("."):
                 group = 1

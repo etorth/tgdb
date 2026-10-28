@@ -169,13 +169,24 @@ class LocalVariablePaneUpdateMixin:
         changelist: list[dict] = []
 
         if not self._dynamic_varobjs:
-            try:
-                result = await self._var_update("*")
-            except Exception as exc:
-                _log.warning(f"var_update(*) failed: {exc}")
-                return changelist
+            # Update only this pane's own roots (children follow their
+            # root).  ``-var-update *`` would also consume the change
+            # reports of other panes' varobjs (e.g. evaluate watches).
+            for varobj_name in list(self._varobj_names):
+                try:
+                    result = await self._var_update(varobj_name)
+                except Exception as exc:
+                    err = str(exc).lower()
+                    if "not found" in err or "usage" in err:
+                        _log.debug(f"Purging stale varobj {varobj_name}: {exc}")
+                        self._purge_varobj_subtree(varobj_name)
+                    else:
+                        _log.warning(f"var_update {varobj_name} failed: {exc}")
+                        if self._should_stop_varobj_refresh_after_error(exc):
+                            return changelist
+                    continue
 
-            changelist.extend(result)
+                changelist.extend(result)
             return changelist
 
         safe_dynamic_updated: set[str] = set()
@@ -362,7 +373,12 @@ class LocalVariablePaneUpdateMixin:
         return to_remove
 
 
-    def _build_added_bindings(self, current_keys: set[BindingKey], new_bindings: list[BindingEntry]) -> list[BindingEntry]:
+    def _build_added_bindings(
+        self,
+        current_keys: set[BindingKey],
+        new_bindings: list[BindingEntry],
+        shadowed_keys: set[BindingKey],
+    ) -> list[BindingEntry]:
         to_add: list[BindingEntry] = []
 
         for binding_name, binding_addr, variable in new_bindings:
@@ -379,12 +395,63 @@ class LocalVariablePaneUpdateMixin:
             # immediately re-add a fresh placeholder.  The user sees a
             # flicker on every stop and loses tree-cursor focus on
             # those nodes.
+            #
+            # Only skip placeholders that cannot be fixed by a plain
+            # retry: unparseable types (``_promote_placeholders`` owns
+            # their retry) and shadowed bindings (name-based creation
+            # would bind to the inner same-named variable).  Other
+            # placeholders — ``<not yet initialized>`` memory, failed
+            # ``-var-create`` — must be retried, otherwise they stay
+            # frozen on their first value for as long as they are in
+            # scope.
             if key in self._uninitialized_nodes:
-                continue
+                if _type_needs_name_fallback(variable.type or "") or key in shadowed_keys:
+                    continue
 
             to_add.append((binding_name, binding_addr, variable))
 
         return to_add
+
+
+    def _build_frame_bound_rebindings(
+        self,
+        current_keys: set[BindingKey],
+        new_bindings: list[BindingEntry],
+        new_frame_key: FrameKey,
+    ) -> list[BindingEntry]:
+        """Return kept bindings whose varobj is still bound to the previous frame.
+
+        Varobjs created by name (``-var-create - * name``) are bound to the
+        frame selected at creation time.  Bindings without a real stack
+        address (``register@N``, ``unknown``) produce the same BindingKey in
+        every frame, so after ``up`` / ``down`` / ``step`` / ``finish`` into a
+        different frame the kept varobj would keep showing the old frame's
+        variable.  Address-pinned varobjs are frame-independent and are not
+        returned.
+        """
+        rebind: list[BindingEntry] = []
+        old_frame_key = self._frame_key
+        if old_frame_key is None or new_frame_key is None:
+            return rebind
+
+        if old_frame_key[:3] == new_frame_key[:3]:
+            return rebind
+
+        for binding_name, binding_addr, variable in new_bindings:
+            key = (binding_name, binding_addr)
+            if key not in current_keys:
+                continue
+
+            if binding_addr.startswith("0x"):
+                continue
+
+            varobj_name = self._tracked.get(key, "")
+            if not varobj_name or varobj_name in self._pinned_varobjs:
+                continue
+
+            rebind.append((binding_name, binding_addr, variable))
+
+        return rebind
 
 
     def _build_reanchor_bindings(
@@ -415,6 +482,15 @@ class LocalVariablePaneUpdateMixin:
             # valid even when shadowed — skip reanchoring.
             varobj_type = self._varobj_type.get(varobj_name, "")
             if _type_needs_name_fallback(varobj_type):
+                continue
+
+            # References are created by name for the same reason: their
+            # ``addr`` is the referent's address and their ``T &`` type is
+            # not usable in ``*(type*)addr``, so a reanchor would either
+            # fail (and collapse the node) or reinterpret the referent's
+            # bytes as a reference.  The fixed varobj stays bound to the
+            # original symbol when shadowed.
+            if variable.is_reference:
                 continue
 
             to_reanchor.append((binding_name, binding_addr, variable))

@@ -474,8 +474,18 @@ class LocalVariablePaneReconcileMixin:
             self._remove_out_of_scope_placeholders(new_binding_keys)
 
             to_remove = self._build_removed_bindings(current_keys, new_binding_keys)
-            to_add = self._build_added_bindings(current_keys, new_bindings)
+            to_add = self._build_added_bindings(current_keys, new_bindings, shadowed_keys)
             to_reanchor = self._build_reanchor_bindings(current_keys, new_bindings, shadowed_keys)
+
+            # Name-created varobjs whose key is not frame-unique (e.g.
+            # ``register@0``) are still bound to the previous frame after a
+            # frame switch: delete and re-create them in the new frame.
+            rebind = self._build_frame_bound_rebindings(current_keys, new_bindings, new_frame_key)
+            if rebind:
+                rebind_keys = {(name, addr) for name, addr, _var in rebind}
+                to_remove.extend(rebind_keys)
+                to_add.extend(rebind)
+                to_reanchor = [b for b in to_reanchor if (b[0], b[1]) not in rebind_keys]
 
             kept = current_keys & new_binding_keys
             _log.info(
@@ -645,10 +655,15 @@ class LocalVariablePaneReconcileMixin:
                 node.remove()
             return
 
+        # The collapse branches below keep the node but drop its varobj and
+        # its ``_tracked`` entry; register it as a placeholder so it is still
+        # removed when the binding leaves scope and is not duplicated by the
+        # next reconciliation's add pass.
         fallback_value = outer_var.value or "?"
         if not type_str:
             if node is not None:
                 self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
+                self._uninitialized_nodes[key] = node
             return
 
         # Unparseable types (e.g. anonymous namespace) cannot be reanchored
@@ -665,6 +680,7 @@ class LocalVariablePaneReconcileMixin:
         if addr.startswith("register@") or addr in ("register", "unknown", ""):
             if node is not None:
                 self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
+                self._uninitialized_nodes[key] = node
             return
 
         addr_expr = f"*({type_str}*){addr}"
@@ -673,6 +689,7 @@ class LocalVariablePaneReconcileMixin:
         except Exception:
             if node is not None:
                 self._collapse_to_leaf_node(node, name, fallback_value, compact_value=True)
+                self._uninitialized_nodes[key] = node
             return
 
         if self._rebuild_gen != gen:
@@ -935,6 +952,17 @@ class LocalVariablePaneReconcileMixin:
                 continue
 
             if change.get("in_scope", "true") != "true":
+                # A root created by name is bound to its creation frame and
+                # block.  When its key survives a ``finish`` (e.g. a
+                # ``Ctx& ctx`` parameter passed down the call chain keeps
+                # the same (name, referent-addr) key) GDB reports
+                # ``in_scope="false"`` once and never refreshes it again, so
+                # the node would freeze.  Re-create it in the current frame.
+                # Bindings that really left scope are in ``skip_varobjs``.
+                if varobj_name in self._varobj_names:
+                    dropped_key = await self._invalidate_typechanged_binding(varobj_name)
+                    if dropped_key is not None:
+                        self._shape_readd_keys.add(dropped_key)
                 continue
 
             if change.get("type_changed", "false") == "true":
@@ -947,8 +975,11 @@ class LocalVariablePaneReconcileMixin:
                 # this binding from local tracking so the next
                 # reconciliation pass re-creates it from scratch with
                 # current type info, and delete the GDB-side varobj
-                # so the orphaned varobj does not leak.
-                await self._invalidate_typechanged_binding(varobj_name)
+                # so the orphaned varobj does not leak.  Re-add it in this
+                # pass so it does not vanish until the next stop.
+                dropped_key = await self._invalidate_typechanged_binding(varobj_name)
+                if dropped_key is not None:
+                    self._shape_readd_keys.add(dropped_key)
                 continue
 
             node = self._varobj_to_node.get(varobj_name)

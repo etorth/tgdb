@@ -49,10 +49,13 @@ class PythonExecMixin:
 
         # re-indent the user's code by exactly 8 spaces (2 levels: one for 'def', one for 'try')
         indented_user_code = textwrap.indent(user_code, "        ")
+        # The trailing ``pass`` keeps comment-only bodies (e.g. a fully
+        # commented-out heredoc in tgdbrc) from being a SyntaxError.
         wrapper = f"""\
 async def {_TGDB_RESERVED_PREFIX}_run_script():
     try:
 {indented_user_code}
+        pass
     finally:
         {_TGDB_RESERVED_PREFIX}_locs = locals()
         globals().update({{k: v for k, v in {_TGDB_RESERVED_PREFIX}_locs.items() if not k.startswith('{_TGDB_RESERVED_PREFIX}')}})
@@ -100,7 +103,18 @@ async def {_TGDB_RESERVED_PREFIX}_run_script():
         if print_fn is not None:
             writer: Any = _Writer(print_fn)
 
-            def _custom_print(*args, sep: str = " ", end: str = "\n", file=None, flush: bool = False) -> None:
+            def _custom_print(*args, sep: str | None = " ", end: str | None = "\n", file=None, flush: bool = False) -> None:
+                if file is not None and file is not writer:
+                    # Explicit destinations (open files, io.StringIO, ...)
+                    # must receive the text; ``file=sys.stdout`` /
+                    # ``sys.stderr`` resolve to ``writer`` while redirected
+                    # and keep the single-chunk print_fn path below.
+                    builtins.print(*args, sep=sep, end=end, file=file, flush=flush)
+                    return
+                if sep is None:
+                    sep = " "
+                if end is None:
+                    end = "\n"
                 print_fn(sep.join(str(a) for a in args) + end)
 
             raw_builtins = ns.get("__builtins__", builtins)

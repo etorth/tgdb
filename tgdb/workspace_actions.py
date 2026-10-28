@@ -522,9 +522,13 @@ class WorkspaceMixin:
 
     async def _handle_delete_context_action(self: "TGDBApp", target: Widget) -> None:
         """Remove *target* from the workspace tree."""
-        if await self._delete_workspace_item(target) is None:
+        # _delete_workspace_item returns the first *focusable* leaf, which
+        # is None whenever no GDB/disasm pane remains (e.g. deleting GDB
+        # from the default layout) even though the delete succeeded.
+        if not isinstance(target.parent, PaneContainer):
             self._show_status("Unable to delete cell")
             return
+        await self._delete_workspace_item(target)
         self._show_status("Deleted cell")
 
 

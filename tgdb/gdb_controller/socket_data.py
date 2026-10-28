@@ -127,6 +127,10 @@ class SocketDataMixin:
             while True:
                 chunk = os.read(self._sock_tgdb, 65536)
                 if not chunk:
+                    # Dispatch frames drained before EOF (e.g. the final
+                    # ``X`` gdb_exiting event) instead of dropping them.
+                    if chunks:
+                        self._feed_sock_bytes(b"".join(chunks))
                     self._unregister_sock()
                     return
                 chunks.append(chunk)

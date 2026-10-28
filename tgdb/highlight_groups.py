@@ -92,9 +92,12 @@ def resolve_color(name: str) -> str:
     back to ``""`` (i.e. "no colour applied") with a warning if the
     parse fails.
     """
-    if name in ("-1", "none", ""):
-        return ""
     lower = name.lower()
+    # Case-insensitive: vim/cgdb configs commonly write ``ctermbg=NONE``.
+    # Letting ``"none"`` through would store a group colour that Rich
+    # rejects once combined (``"bold none"`` / ``"on none"``).
+    if lower in ("-1", "none", ""):
+        return ""
     # Accept exactly one optional leading ``-`` followed by digits.
     # ``lstrip("-").isdigit()`` previously accepted ``"--5"`` and then
     # ``int(lower)`` would raise.

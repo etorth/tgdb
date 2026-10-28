@@ -14,7 +14,7 @@ await tgdb.screen.close_all_panes()
 
 from tgdb.workspace import PaneContainer
 container = app.query_one("#split-container", PaneContainer)
-assert len(container.items) == 0, f"expected empty after close_all, got {len(container.items)}"
+assert len(container.items) == 1, f"expected one empty cell after close_all, got {len(container.items)}"
 
 await tgdb.screen.split(pane=[], mode=tgdb.SplitMode.HORIZONTAL)
 container = app.query_one("#split-container", PaneContainer)

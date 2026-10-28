@@ -39,7 +39,8 @@ class FileDialogKeyMixin:
                 return
             self._num_buf = ""
 
-        if char.isdigit() and (char != "0" or self._num_buf):
+        # ASCII digits only: ``"²".isdigit()`` is True but ``int("²")`` raises.
+        if char.isascii() and char.isdigit() and (char != "0" or self._num_buf):
             self._num_buf += char
             event.stop()
             return
@@ -72,7 +73,7 @@ class FileDialogKeyMixin:
         elif key == "ctrl+d":
             self._move(self._list_height() // 2)
         elif key == "ctrl+u":
-            self._move(-self._list_height() // 2)
+            self._move(-(self._list_height() // 2))
         elif char == "G":
             if had_count:
                 target_index = count - 1

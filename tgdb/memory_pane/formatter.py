@@ -35,17 +35,24 @@ def blocks_to_bytes(blocks: list[dict]) -> tuple[int, list[int]]:
     The first block's ``begin`` field provides the base address; subsequent
     blocks' bytes are appended in order. Malformed entries contribute zero
     bytes / zero base.
+
+    GDB omits unreadable sub-ranges, so blocks may be discontiguous.
+    Concatenation stops at the first gap; appending past it would show
+    the later bytes at the wrong addresses.
     """
     base_addr = 0
     out: list[int] = []
     first = True
     for block in blocks or []:
+        try:
+            begin = int(block.get("begin", "0x0"), 16)
+        except (ValueError, TypeError):
+            begin = None
         if first:
-            try:
-                base_addr = int(block.get("begin", "0x0"), 16)
-            except (ValueError, TypeError):
-                base_addr = 0
+            base_addr = begin or 0
             first = False
+        elif begin is not None and begin != base_addr + len(out):
+            break
         contents = block.get("contents", "") or ""
         for i in range(0, len(contents), 2):
             chunk = contents[i:i + 2]
@@ -257,8 +264,13 @@ class MemoryFormatter:
             text.append_text(row)
             emitted += 1
         for _ in range(max(0, body_height - emitted)):
-            text.append("\n")
+            # Skip the separator before the very first row; otherwise an
+            # empty dump renders a leading blank line and overflows the
+            # body by one row (same fix as the stack/thread panes).
+            if emitted:
+                text.append("\n")
             text.append(" " * max(1, width), style=base)
+            emitted += 1
         return text
 
 

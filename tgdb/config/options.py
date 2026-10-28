@@ -275,9 +275,16 @@ class ConfigOptionMixin:
         if not history:
             return "history: no history entries"
         if cmd == "!!":
+            # The interactive ``!!`` itself is recorded in history before it
+            # runs, so skip history-rerun entries; otherwise ``!!`` would
+            # re-execute itself until RecursionError.
             for index in range(len(history) - 1, -1, -1):
-                if not history[index].lstrip().startswith("#"):
-                    return await self.execute_async(history[index])
+                entry = history[index]
+                if entry.lstrip().startswith("#"):
+                    continue
+                if self._is_history_rerun(entry):
+                    continue
+                return await self.execute_async(entry)
             return "history: no commands to rerun"
         n_str = cmd[1:]
         try:
@@ -286,7 +293,16 @@ class ConfigOptionMixin:
             return f"history: invalid index {n_str!r}"
         if n < 1 or n > len(history):
             return f"history: index {n} out of range (1–{len(history)})"
+        if self._is_history_rerun(history[n - 1]):
+            return f"history: entry {n} is itself a history command"
         return await self.execute_async(history[n - 1])
+
+
+    @staticmethod
+    def _is_history_rerun(entry: str) -> bool:
+        """Return True for ``!!`` / ``!N`` history entries."""
+        text = entry.strip().lstrip(":").strip()
+        return text == "!!" or (text.startswith("!") and text[1:].isdigit())
 
 
     async def _cmd_unmap(self, mode: str, args: list[str]) -> str | None:

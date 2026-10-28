@@ -125,8 +125,20 @@ _log.setLevel(logging.WARNING)
 _log.propagate = False
 
 
+# Serializes whole-frame writes.  The cancel-reader thread can emit ``D``
+# log frames while the GDB main thread is mid-way through a large data
+# frame; without this lock the two byte streams could interleave and
+# corrupt the frame boundaries seen by tgdb.
+_sock_write_lock = threading.RLock()
+
+
 def _write_sock_bytes(buf):
     """Write *buf* to the active side-channel socket."""
+    with _sock_write_lock:
+        return _write_sock_bytes_locked(buf)
+
+
+def _write_sock_bytes_locked(buf):
     if _sock_obj is not None:
         try:
             _sock_obj.sendall(buf)
@@ -269,6 +281,14 @@ def _tgdb_RSVD_register_socket_fd(fd, log_enabled=False):
     _sock_fd = fd
     _sock_obj = None
 
+    # tgdb made this fd inheritable so GDB could receive it.  GDB keeps
+    # fds it inherited at startup open across fork_inferior(), so without
+    # FD_CLOEXEC the side channel would also leak into every inferior.
+    try:
+        os.set_inheritable(fd, False)
+    except OSError as exc:
+        _log.debug(f"set_inheritable({fd}, False) failed: {exc}")
+
     # Start the cancel-token reader thread.  It reads varint-encoded
     # unsigned integers from the socket (written by tgdb) and adds them
     # to ``_cancel_tokens``.  Started once per process.
@@ -384,7 +404,7 @@ def _send_sock_payload(tag, data, token=0):
 # hanging on huge vectors.  tgdb pushes updates via
 # ``_tgdb_RSVD_set_max_format_elements()``.
 _max_format_elements = 100
-_UTF8_OCTAL_RUN_RE = re.compile(r"(?<!\\\\)(?:\\\\[0-7]{3})+")
+_UTF8_OCTAL_RUN_RE = re.compile(r"(?<!\\)(?:\\[0-7]{3})+")
 
 
 def _tgdb_RSVD_set_max_format_elements(n):

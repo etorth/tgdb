@@ -171,8 +171,19 @@ class AppCoreMixin:
         # rc-file settings (e.g. "set pagination off") are applied first.
 
         await self._load_rc_async()
+        if self._shutting_down:
+            # rc file failed and requested exit(1); don't keep driving
+            # the (terminated) GDB or run --batch, which would exit(0).
+            return
         await self._request_initial_location()
-        await self._run_startup_script()
+        # Run the --input / --batch script in its own task.  Textual awaits
+        # on_mount on the App's message loop, so awaiting the script here
+        # would hold back every call_later UI update (stops, frame
+        # changes, locals) until the script finished.
+        self._startup_task = asyncio.create_task(
+            self._run_startup_script(), name="startup-script",
+        )
+        self._startup_task.add_done_callback(_on_task_done)
 
 
     def _save_history_to_disk(self) -> None:
@@ -228,6 +239,10 @@ class AppCoreMixin:
             error = await self.cp.run_script_async(path)
             if error:
                 self._show_status(error)
+                # Set before terminate(): the resulting on_exit callback
+                # would otherwise run _ui_gdb_exit -> exit(0) and
+                # overwrite this exit code.
+                self._shutting_down = True
                 self.gdb.terminate()
                 self.exit(1)
                 return
@@ -249,9 +264,14 @@ class AppCoreMixin:
 
         is_batch = self._script_batch is not None
         error = await self.cp.run_script_async(script_path)
+        if error:
+            _log.error(f"startup script {script_path} failed: {error}")
+            self.startup_script_error = error
 
         if is_batch:
             self._save_history_to_disk()
+            # See _load_rc_async: keep _ui_gdb_exit from overriding the code.
+            self._shutting_down = True
             self.gdb.terminate()
             self.exit(1 if error else 0)
         elif error:

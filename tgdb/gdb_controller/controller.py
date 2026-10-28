@@ -20,6 +20,7 @@ stream records are rendered as console output.
 """
 
 import asyncio
+import codecs
 import logging
 import os
 import secrets
@@ -190,6 +191,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._sock_buf: bytes = b""
         self._console_buf: bytes = b""
         self._mi_buf: str = ""
+        self._mi_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._win_cli_buf: str = ""
         self._mi_pipe_prompt_budget: int = 1 if self._backend == "mi-pipe" else 0
         # In-flight eager-started tasks spawned by the fd-readable callbacks.
@@ -355,7 +357,10 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
     def _start_mi_pipe(self, rows: int, cols: int) -> None:
         """Start native Windows GDB in MI mode over subprocess pipes."""
         self._mi_pipe_prompt_budget = 1
-        cmd = [self.gdb_path, "--interpreter=mi2"]
+        # Use the newest MI version, like ``new-ui mi`` on POSIX.  MI2 emits
+        # multi-location breakpoints as sibling tuples instead of the
+        # ``locations=[...]`` list that ``_bkpt_to_entries`` parses.
+        cmd = [self.gdb_path, "--interpreter=mi"]
         cmd.extend(self.gdb_args)
         self._open_tcp_side_channel()
         try:
@@ -722,6 +727,7 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         self._console_buf = b""
         self._sock_buf = b""
         self._mi_buf = ""
+        self._mi_decoder.reset()
         self._win_cli_buf = ""
         self._mi_pipe_prompt_budget = 0
 
@@ -856,6 +862,18 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
         try:
             await self._console_done
         finally:
+            # Cancelling the reader tasks does not stop their worker threads.
+            # Close the TCP sockets (unblocks ``accept()`` / ``recv()``, e.g.
+            # when GDB never connected) and stop a still-running GDB
+            # (unblocks ``readline()``); otherwise interpreter shutdown
+            # waits forever joining those executor threads.
+            self._close_tcp_side_channel()
+            if proc is not None:
+                try:
+                    if proc.poll() is None:
+                        proc.terminate()
+                except OSError:
+                    _log.debug("GDB terminate() raised", exc_info=True)
             for task in list(self._pipe_tasks):
                 if not task.done():
                     task.cancel()
@@ -1057,11 +1075,15 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
 
 
     def _feed_mi_bytes(self, data: bytes) -> None:
-        self._mi_buf += data.decode("utf-8", errors="replace")
+        # Incremental decode so a multi-byte UTF-8 character split across
+        # two reads is not turned into replacement characters.
+        self._mi_buf += self._mi_decoder.decode(data)
         if len(self._mi_buf) > _MI_BUF_MAX_BYTES:
-            last_nl = self._mi_buf.rfind("\n")
-            dropped = len(self._mi_buf) if last_nl < 0 else last_nl
-            self._mi_buf = "" if last_nl < 0 else self._mi_buf[last_nl + 1:]
+            # Drop only the runaway (first) line; complete records after it
+            # still need to be dispatched or their futures never resolve.
+            first_nl = self._mi_buf.find("\n")
+            dropped = len(self._mi_buf) if first_nl < 0 else first_nl
+            self._mi_buf = "" if first_nl < 0 else self._mi_buf[first_nl + 1:]
             _log.warning(
                 f"MI buffer exceeded {_MI_BUF_MAX_BYTES} bytes; "
                 f"discarded {dropped} bytes to resync"

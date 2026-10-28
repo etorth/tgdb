@@ -153,6 +153,9 @@ Examples:
         target_height = args.height,
     )
     return_code = app.run(mouse=True, headless=args.headless)
+    if args.batch and app.startup_script_error:
+        # The status bar is gone once the app exits; surface the reason.
+        print(f"tgdb: {args.batch}: {app.startup_script_error}", file=sys.stderr)
 
     if log_enabled:
         from .log import shutdown as log_shutdown

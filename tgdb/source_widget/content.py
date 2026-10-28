@@ -37,6 +37,9 @@ class SourceFileMixin:
             previous = self.source_file
             if previous:
                 self._file_positions[previous.path] = self.sel_line
+                # Local marks are per-file (cgdb keeps them on the file's
+                # list node), so remember them across file switches.
+                self._file_marks[previous.path] = previous.marks_local
 
             # Capture mtime BEFORE reading the file contents.  ``SourceFile``
             # also captures it inside __init__, but that runs *after* the
@@ -53,7 +56,13 @@ class SourceFileMixin:
 
             with open(path, encoding="utf-8-sig", errors="replace") as handle:
                 content = handle.read()
-            lines = content.expandtabs(self.tabstop).splitlines()
+            # Split on "\n" only (universal-newline mode already folded
+            # "\r\n" / "\r").  ``str.splitlines()`` also breaks on form
+            # feed, "\x1c"-"\x1e", "\x85", "\u2028" and "\u2029", which
+            # would shift every following line number away from GDB's.
+            lines = content.expandtabs(self.tabstop).split("\n")
+            if lines and lines[-1] == "":
+                lines.pop()
             if not lines:
                 lines = [""]
             source_file = SourceFile(path, lines)
@@ -63,7 +72,7 @@ class SourceFileMixin:
                 source_file.bp_flags = list(previous.bp_flags[: len(lines)])
                 while len(source_file.bp_flags) < len(lines):
                     source_file.bp_flags.append(BP_NONE)
-                source_file.marks_local = dict(previous.marks_local)
+            source_file.marks_local = dict(self._file_marks.get(path, {}))
             self.source_file = source_file
             self._show_logo = False
             self._col_offset = 0
@@ -287,6 +296,7 @@ class _SourceContent(
         self._col_offset: int = 0  # horizontal scroll (cgdb sel_col)
         self._show_logo: bool = False  # force logo display (:logo command)
         self._file_positions: dict[str, int] = {}
+        self._file_marks: dict[str, dict[str, int]] = {}
         self._pending_search: tuple[str, bool] | None = None
         self.can_focus = False
 

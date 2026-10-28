@@ -361,9 +361,14 @@ class CommandLineKeyMixin:
             )
         if not any(cleaned_lines):
             return
-        self._input_buf += cleaned_lines[0]
+        # Insert at the cursor (like typing) and keep ``_cursor_pos`` valid:
+        # a multi-line paste replaces the current line with a shorter one.
+        tail = self._input_buf[self._cursor_pos :]
+        self._input_buf = self._input_buf[: self._cursor_pos] + cleaned_lines[0]
         for extra in cleaned_lines[1:]:
             self._ml_buf.append(self._input_buf)
             self._input_buf = extra
+        self._cursor_pos = len(self._input_buf)
+        self._input_buf += tail
         self._set_height(2 + len(self._ml_buf))
         self.refresh()

@@ -81,7 +81,11 @@ class GDBResultMixin:
 
     def _handle_error_result(self, meta: dict, results: dict) -> None:
         kind = meta.get("kind")
-        report = bool(meta.get("report_error", True))
+        # Missing meta means the request was already abandoned (timed out,
+        # cancelled, or cleared on shutdown); a late ``^error`` for it must
+        # not surface as a user-visible error.  Every command tgdb sends
+        # records its own ``report_error`` in ``_request_meta``.
+        report = bool(meta.get("report_error", False))
         if kind == "current-location":
             self.request_source_file(report_error=report)
         elif kind == "stack-locals":

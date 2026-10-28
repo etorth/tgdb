@@ -62,6 +62,10 @@ class TGDBApp(
 ):
     """tgdb — Python front-end for GDB, compatible with cgdb."""
 
+    # Textual's command palette binds Ctrl+P ahead of the focused widget,
+    # which would steal readline's previous-history key in the GDB pane.
+    ENABLE_COMMAND_PALETTE = False
+
     CSS = """
     Screen {
         layers: base dialog;
@@ -171,6 +175,8 @@ class TGDBApp(
         self.gdb = GDBController(gdb_path=gdb_path, args=gdb_args or [])
         self._gdb_task: asyncio.Task | None = None
         self._cmd_task: asyncio.Task | None = None  # running CommandLineBar command
+        self._startup_task: asyncio.Task | None = None  # running --input / --batch script
+        self.startup_script_error: str | None = None  # first --input / --batch error
         self._pending_replay_tokens: list[str] = []  # map tokens queued after async <CR>
 
         self._mode: str = "GDB_PROMPT"

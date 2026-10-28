@@ -219,7 +219,7 @@ class CallbacksMixin:
         self._close_shared_search(set_mode="GDB_SCROLL", clear_other="src")
 
 
-    async def on_command_submit(self, msg: CommandSubmit) -> None:
+    def on_command_submit(self, msg: CommandSubmit) -> None:
         _log.info(f"command: {msg.command!r}")
         # Close any lingering completion popup.
         self._close_completion_popup()
@@ -227,13 +227,17 @@ class CallbacksMixin:
         if self._cmd_task is not None and not self._cmd_task.done():
             self._show_status("Command still running (Ctrl+C to cancel)")
             return
-        # Textual creates a task per async message handler; store its
-        # handle so Ctrl+C (keys.py) can cancel it.  This replaces the
-        # previous fire-and-forget create_task: the work runs in the
-        # message-handler's own task, the handle is captured for
-        # cancellation, and _run_cmd_task is awaited inline.
-        self._cmd_task = asyncio.current_task()
-        await self._run_cmd_task(msg.command, history_text=msg.history_text)
+        # Run the command in its own task.  Textual awaits message
+        # handlers inline on the App's message-loop task, so awaiting
+        # the command here would block every App message (including
+        # the Ctrl+C key that keys.py uses to cancel it) until the
+        # command finished, and ``asyncio.current_task()`` would be the
+        # App's own message loop rather than a cancellable command.
+        self._cmd_task = asyncio.create_task(
+            self._run_cmd_task(msg.command, history_text=msg.history_text),
+            name="cmd-task",
+        )
+        self._cmd_task.add_done_callback(_on_task_done)
 
 
     async def _run_cmd_task(self, cmd: str, *, history_text: str = "") -> None:
@@ -723,7 +727,12 @@ class CallbacksMixin:
         query later by stepping or setting a breakpoint.
         """
         await asyncio.sleep(0.5)
-        await self.gdb.request_current_location(report_error=False)
+        try:
+            await self.gdb.request_current_location(report_error=False)
+        except Exception as exc:
+            # GDBRequestTimeout / GDBRequestCancelled propagate regardless
+            # of report_error; letting them escape on_mount crashes the app.
+            _log.info(f"initial location request failed: {exc!r}")
 
 
     def _ui_gdb_exit(self) -> None:

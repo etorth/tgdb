@@ -10,6 +10,7 @@ through the public methods documented on the class below.
 import logging
 
 from textual.widgets import Tree
+from textual.widgets.tree import TreeNode
 
 from ..config import Config
 from ..highlight_groups import HighlightGroups
@@ -71,6 +72,11 @@ class EvaluatePane(VarobjTreePane):
         # insertion order; the id never changes once assigned.
         self._watches: list[tuple[int, str, str]] = []  # (id, expr, varobj_name)
         self._next_watch_id: int = 0
+        # Tree nodes of watches that have no varobj (``-var-create``
+        # failed, or returned no name), keyed by watch id.  Those nodes
+        # are not reachable through ``_varobj_to_node`` so
+        # ``remove_expression`` needs this map to drop them.
+        self._unbound_watch_nodes: dict[int, TreeNode] = {}
 
 
     def _find_watch_index(self, watch_id: int) -> int:
@@ -98,7 +104,11 @@ class EvaluatePane(VarobjTreePane):
         if not (0 <= index < len(self._watches)):
             return None
 
-        _wid, removed_expr, removed_varobj = self._watches.pop(index)
+        wid, removed_expr, removed_varobj = self._watches.pop(index)
+
+        unbound_node = self._unbound_watch_nodes.pop(wid, None)
+        if unbound_node is not None:
+            unbound_node.remove()
 
         if removed_varobj:
             node = self._varobj_to_node.pop(removed_varobj, None)
@@ -119,11 +129,16 @@ class EvaluatePane(VarobjTreePane):
         if not self._varobj_names or not self._var_update:
             return
 
-        try:
-            changelist = await self._var_update("*")
-        except Exception as exc:
-            _log.debug(f"evaluate refresh_all var-update failed: {exc!r}")
-            return
+        # Update only this pane's own roots.  ``-var-update *`` would also
+        # update the locals pane's varobjs (GDB reports each change once,
+        # so the locals pane would miss it) and would touch dynamic
+        # varobjs the locals pane deliberately skips as garbage.
+        changelist: list[dict] = []
+        for varobj_name in list(self._varobj_names):
+            try:
+                changelist.extend(await self._var_update(varobj_name))
+            except Exception as exc:
+                _log.debug(f"evaluate refresh_all var-update {varobj_name} failed: {exc!r}")
 
         await self._apply_watch_changelist(changelist)
 
@@ -148,8 +163,11 @@ class EvaluatePane(VarobjTreePane):
         except Exception as exc:
             _log.debug(f"evaluate var-create failed for {expr!r}: {exc!r}")
             if self._find_watch_index(watch_id) >= 0:
-                tree.root.add_leaf(
-                    f"{expr} = <error>",
+                # Plain Text label: a str label is parsed as Rich markup
+                # by Tree, so ``arr[i]`` would lose ``[i]`` (italic tag)
+                # and ``x[/]`` would raise MarkupError.
+                self._unbound_watch_nodes[watch_id] = tree.root.add_leaf(
+                    self._plain_label(f"{expr} = <error>"),
                     data={"varobj": "", "exp": expr, "has_children": False, "displayhint": ""},
                 )
             return
@@ -191,6 +209,8 @@ class EvaluatePane(VarobjTreePane):
         )
         if varobj_name:
             self._varobj_to_node[varobj_name] = node
+        else:
+            self._unbound_watch_nodes[watch_id] = node
 
 
     async def _apply_watch_changelist(self, changelist: list[dict]) -> None:

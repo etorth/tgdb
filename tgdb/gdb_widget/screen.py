@@ -9,6 +9,7 @@ scrollback buffer.
 from collections.abc import Callable
 
 import pyte
+from rich.cells import cell_len
 from rich.text import Text
 from rich.style import Style
 
@@ -93,6 +94,7 @@ def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) 
     defaultdict, which confuses pyte's delete_lines logic on resize.
     """
     result = Text(no_wrap=True, overflow="crop")
+    prev_wide = False
     for col in range(width):
         if row is None:
             st = _cursor_style() if col == cursor_col else Style()
@@ -106,10 +108,18 @@ def _row_to_text(row, width: int, cursor_col: int = -1, use_color: bool = True) 
         # a blank cell, which is the correct fallback.
         char = row.get(col)
         if char is None:
+            prev_wide = False
             st = _cursor_style() if col == cursor_col else Style()
             result.append(" ", style=st)
             continue
+        # pyte stores a 2-cell character at ``col`` and an empty-data stub
+        # at ``col + 1``.  The wide glyph already covers the stub's cell,
+        # so emitting a space for it would shift the rest of the row right.
+        if not char.data and prev_wide:
+            prev_wide = False
+            continue
         data = char.data or " "
+        prev_wide = cell_len(data) == 2
         st = _build_char_style(char, use_color)
         if col == cursor_col:
             st = st + _cursor_style()

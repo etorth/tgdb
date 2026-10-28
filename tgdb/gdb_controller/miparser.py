@@ -337,6 +337,12 @@ def _parse_val(stream: _StringStream) -> str | list | dict:
         elif c == '"':
             val = stream.advance_past_string_with_gdb_escapes()
             break
+        elif c == "":
+            # DIVERGENCE FROM UPSTREAM pygdbmi: stop at end-of-stream.
+            # Upstream loops forever on a key with no value (``^done,a``
+            # or ``*x,1``), which would freeze the asyncio loop.
+            val = ""
+            break
         else:
             val = ""
     return val
@@ -355,7 +361,9 @@ def _parse_array(stream: _StringStream) -> list:
             pass
         elif c == ",":
             pass
-        elif c == "]":
+        elif c in ["]", ""]:
+            # DIVERGENCE FROM UPSTREAM pygdbmi: also stop at end-of-stream
+            # so an unterminated list (``^done,a=[``) cannot loop forever.
             break
     return arr
 

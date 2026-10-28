@@ -74,6 +74,23 @@ def _tokenize_inst(inst: str) -> list[tuple[str, str]]:
     return spans
 
 
+def _same_addr(a: str, b: str) -> bool:
+    """Return True when two hex address strings denote the same address.
+
+    MI pads addresses (``0x0000555555555149``) while the Python helper's
+    ``hex(frame.pc())`` does not (``0x555555555149``), so a plain string
+    compare misses the PC whenever the frame came from the socket path.
+    """
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    try:
+        return int(a, 16) == int(b, 16)
+    except ValueError:
+        return False
+
+
 @dataclass
 class DisasmLine:
     addr: str = ""
@@ -118,10 +135,10 @@ class _DisasmContent(Widget):
         # the same time.
         if current_addr:
             for line in self._lines:
-                line.is_current = (line.addr == current_addr)
+                line.is_current = _same_addr(line.addr, current_addr)
         pc_index = -1
         for i, line in enumerate(self._lines):
-            if (current_addr and line.addr == current_addr) or line.is_current:
+            if _same_addr(line.addr, current_addr) or line.is_current:
                 pc_index = i
                 break
         if pc_index < 0:
@@ -150,7 +167,7 @@ class _DisasmContent(Widget):
             return False
         target_index = -1
         for i, line in enumerate(self._lines):
-            if line.addr == current_addr:
+            if _same_addr(line.addr, current_addr):
                 target_index = i
                 break
         if target_index < 0:
@@ -181,7 +198,7 @@ class _DisasmContent(Widget):
         # so the layout doesn't show the PC at the top after a stop.
         if self._current_addr:
             for i, line in enumerate(self._lines):
-                if line.addr == self._current_addr or line.is_current:
+                if _same_addr(line.addr, self._current_addr) or line.is_current:
                     self._center_on(i)
                     break
             self.refresh()
@@ -258,9 +275,7 @@ class _DisasmContent(Widget):
         for i, line in enumerate(visible):
             if i > 0:
                 result.append("\n")
-            is_pc = (
-                self._current_addr != "" and line.addr == self._current_addr
-            ) or line.is_current
+            is_pc = _same_addr(line.addr, self._current_addr) or line.is_current
             is_selected = (self._scroll_top + i) == self._selected
             result.append(
                 self._render_line(line, is_pc, is_selected, addr_w, func_w, width)
@@ -597,7 +612,7 @@ def _parse_disasm(raw: list[dict], current_addr: str = "") -> list[DisasmLine]:
             inst=insn.get("inst", ""),
             src_file=src_file,
             src_line=src_line,
-            is_current=(addr == current_addr),
+            is_current=_same_addr(addr, current_addr),
         )
         return dl
 

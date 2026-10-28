@@ -33,6 +33,7 @@ _GDB_DELEGATE_SET = frozenset(
         "ignorecase",
         "wrapscan",
         "max_scrollback",
+        "_search_active",
     }
 )
 

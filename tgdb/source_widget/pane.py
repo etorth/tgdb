@@ -35,6 +35,8 @@ _SRC_DELEGATE_SET = frozenset(
         "wrapscan",
         "showmarks",
         "color",
+        "source_file",
+        "_search_active",
     }
 )
 

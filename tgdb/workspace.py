@@ -239,7 +239,14 @@ class PaneContainer(Widget):
     async def insert_item(self, index: int, item: Widget) -> None:
         self._items.insert(index, item)
         if len(self._weights) == len(self._items) - 1:
-            self._weights.insert(index, 1)
+            # Existing weights may be captured pixel sizes (after a drag or
+            # resize_first_child); a bare weight of 1 would then collapse
+            # the new item to a sliver.  Give it an average share instead.
+            if self._weights:
+                new_weight = max(1, sum(self._weights) // len(self._weights))
+            else:
+                new_weight = 1
+            self._weights.insert(index, new_weight)
         else:
             self._weights = [1] * len(self._items)
         self._apply_item_style(item, self._weights[index])

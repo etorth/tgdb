@@ -159,10 +159,15 @@ class KeyMapper:
                 buf.clear()
                 result = self._resolve_buffer(root, head) if head else []
                 for t in tail:
-                    if t in root.children:
-                        buf.append(t)
-                    else:
+                    child = root.children.get(t)
+                    if child is None:
                         result.append(t)
+                    elif child.value is not None and not child.children and not buf:
+                        # Definite single-key leaf: fire it now instead of
+                        # buffering it until the next key or idle flush.
+                        result.extend(child.value)
+                    else:
+                        buf.append(t)
                 return _with_timeout_prefix(result)
             node = node.children[token]
 

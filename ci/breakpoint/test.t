@@ -1,4 +1,4 @@
-python << EOF
+﻿python << EOF
 import asyncio
 await asyncio.sleep(0.5)
 
@@ -11,8 +11,8 @@ await asyncio.sleep(1.5)
 # Verify we stopped
 src = app._get_source_view()
 assert src is not None, "source view is None"
-assert src._current_file is not None, "no source file loaded after breakpoint hit"
-assert "fixture" in src._current_file, f"unexpected file: {src._current_file}"
-assert src._exec_line is not None and src._exec_line > 0, "no executing line set"
+assert src.source_file is not None, "no source file loaded after breakpoint hit"
+assert "fixture" in src.source_file.path, f"unexpected file: {src.source_file.path}"
+assert src.exe_line > 0, "no executing line set"
 EOF
 quit
