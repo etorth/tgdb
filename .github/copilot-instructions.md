@@ -2,11 +2,18 @@
 
 ## Build, test, and validation commands
 
-- There is no committed `pytest` / `ruff` / `mypy` test or lint suite in this repository. The current validation workflow is syntax-checking plus manual compatibility checks against `cgdb`.
-- Install the package and runtime dependencies:
+- Install the package, runtime dependencies, and the test runner:
   ```bash
-  pip install -e .
+  pip install -e '.[test]'
   ```
+- Run the test suite (unit tests run anywhere; `tests/gdb/` needs `gdb`, `gcc`, `g++` on a POSIX host and is skipped otherwise):
+  ```bash
+  python -m pytest              # everything
+  python -m pytest tests/unit   # fast, no GDB
+  python -m pytest -m gdb       # GDB integration tests only
+  ```
+- `tests/gdb/` runs the real `TGDBApp` headless in-process (Textual `run_test`) against real GDB. Write new integration tests with `tests/gdb/harness.py`: `Session.cli()` waits for the stop / frame change a command causes, and `Session.gdb_value()` reads the ground truth back from GDB. Keep tgdb-internal attribute access inside `harness.py`.
+- Add a regression test with every bug fix: a unit test under `tests/unit/` for pure logic, or a GDB test with a fixture program under `tests/gdb/fixtures/` (mark lines with unique `// MARK_...` comments and use `Session.line_of()`).
 - Sanity-check the CLI entry point:
   ```bash
   python -m tgdb --help

@@ -46,6 +46,17 @@ It keeps the debugger panes working, but the GDB pane is a line-oriented
 command/output view rather than a real PTY-backed terminal, so readline-style
 editing, tab completion, and inferior TTY allocation are limited.
 
+### Running the tests
+
+```bash
+pip install -e '.[test]'
+python -m pytest
+```
+
+Unit tests (`tests/unit/`) run on any platform. The GDB integration tests
+(`tests/gdb/`) drive the real TUI headless against real GDB; they need `gdb`,
+`gcc` and `g++` on a POSIX host and are skipped elsewhere.
+
 ---
 
 ## Usage

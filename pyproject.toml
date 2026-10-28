@@ -15,9 +15,19 @@ dependencies = [
     "pyperclip>=1.8",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
 [project.scripts]
 tgdb = "tgdb.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["tgdb*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "gdb: needs a real gdb and C/C++ compiler (POSIX only); skipped otherwise",
+]
