@@ -123,17 +123,8 @@ class ParsingMixin:
                 self._update_breakpoint_from_mi(bkpt)
         elif cls == "breakpoint-deleted":
             parent = str(results.get("id", ""))
-            if not parent:
-                return
             _log.info(f"breakpoint-deleted id={parent}")
-            # Remove the parent itself plus every flattened child
-            # location ("N.M") that belongs to it.
-            prefix = f"{parent}."
-            self.breakpoints = [
-                b for b in self.breakpoints
-                if b.number != parent and not b.number.startswith(prefix)
-            ]
-            self.on_breakpoints(list(self.breakpoints))
+            self._remove_breakpoint(parent)
 
 
 
@@ -373,6 +364,21 @@ class ParsingMixin:
         for e in entries:
             path = e.file or e.fullname
             _log.info(f"breakpoint updated: #{e.number} {path}:{e.line}")
+        self.on_breakpoints(list(self.breakpoints))
+
+
+    def _remove_breakpoint(self, parent: str) -> None:
+        """Drop breakpoint *parent* and its flattened ``"N.M"`` locations."""
+        if not parent:
+            return
+        prefix = f"{parent}."
+        kept: list[Breakpoint] = []
+        for b in self.breakpoints:
+            if b.number != parent and not b.number.startswith(prefix):
+                kept.append(b)
+        if len(kept) == len(self.breakpoints):
+            return
+        self.breakpoints = kept
         self.on_breakpoints(list(self.breakpoints))
 
 

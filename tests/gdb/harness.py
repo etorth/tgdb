@@ -124,6 +124,24 @@ class Session:
         return rows
 
 
+    # White-box: what pressing <Space> on *line* in the source pane does.
+    async def toggle_breakpoint(self, line: int) -> None:
+        from tgdb.source_widget import ToggleBreakpoint
+
+        self.app.on_toggle_breakpoint(ToggleBreakpoint(line))
+        await self.dbg.wait_idle()
+
+
+    # White-box: 1-based source lines the source pane marks as breakpoints.
+    def breakpoint_lines(self) -> list[int]:
+        source_file = self.app._get_source_view().source_file
+        lines: list[int] = []
+        for index, flag in enumerate(source_file.bp_flags):
+            if flag:
+                lines.append(index + 1)
+        return lines
+
+
 async def _run(binary: Path, body, size: tuple[int, int]) -> None:
     app = TGDBApp(gdb_path="gdb", gdb_args=[*GDB_ISOLATION_ARGS, str(binary)], rc_file="NONE")
     async with app.run_test(size=size):

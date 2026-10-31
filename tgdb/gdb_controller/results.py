@@ -111,6 +111,8 @@ class GDBResultMixin:
 
 
     async def _handle_done_result(self, meta: dict, results: dict) -> None:
+        if meta.get("kind") == "break-delete":
+            self._remove_breakpoint(str(meta.get("breakpoint", "")))
         self._handle_breakpoint_result(results)
         self._handle_source_file_result(results)
         self._handle_source_files_result(results)

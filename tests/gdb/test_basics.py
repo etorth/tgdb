@@ -28,6 +28,23 @@ def test_breakpoint_sets_executing_line(build):
     run_session(build("basic.c"), body)
 
 
+def test_toggle_breakpoint_twice_clears_marker(build):
+    async def body(s):
+        line = s.line_of("basic.c", "MARK_MAIN_FIRST")
+        await s.toggle_breakpoint(line)
+        assert s.breakpoint_lines() == [line]
+
+        # GDB sends no =breakpoint-deleted for an MI -break-delete.
+        await s.toggle_breakpoint(line)
+        assert s.breakpoint_lines() == []
+        assert s.app.gdb.breakpoints == []
+
+        await s.toggle_breakpoint(line)
+        assert s.breakpoint_lines() == [line]
+
+    run_session(build("basic.c"), body)
+
+
 def test_step_into_function_and_up_down(build):
     async def body(s):
         await s.layout("source", "gdb", "locals")

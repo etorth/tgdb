@@ -357,7 +357,13 @@ class GDBRequestMixin:
         # child entry like ``"3.1"`` must extract the parent themselves
         # (e.g. ``existing.number.partition('.')[0]``); accepting either
         # str or int here is just to keep callers ergonomic.
-        self.mi_command(f"-break-delete {number}")
+        #
+        # GDB suppresses =breakpoint-deleted on the MI channel that issued
+        # the -break-delete, so the ``^done`` result must drop the entry
+        # (see GDBResultMixin._handle_done_result).
+        token = self.mi_command(f"-break-delete {number}", kind="break-delete")
+        if token is not None:
+            self._request_meta[token]["breakpoint"] = str(number)
 
 
     def send_signal(self, signal_name: str) -> None:
