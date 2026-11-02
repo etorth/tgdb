@@ -40,6 +40,9 @@ pip install textual pygments ptyprocess pyte
 python -m tgdb
 ```
 
+tgdb needs Python 3.11+ and GDB 12+ built with Python support; it exits
+with an error on an older GDB.
+
 Native Windows/MSYS2 UCRT64 Python is supported through an experimental
 MI-over-pipes backend with a localhost TCP side channel for GDB's Python helpers.
 It keeps the debugger panes working, but the GDB pane is a line-oriented

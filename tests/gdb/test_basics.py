@@ -115,3 +115,16 @@ def test_debugger_api_command_and_errors(build):
         assert s.dbg.source_position()[1] == s.line_of("basic.c", "MARK_MAIN_FIRST")
 
     run_session(build("basic.c"), body)
+
+
+def test_disasm_pc_marker_cleared_after_exit(build):
+    async def body(s):
+        await s.run_to("basic.c", "MARK_MAIN_FIRST")
+        await s.append_pane("disasm")
+        assert len(s.disasm_pc_rows()) == 1
+        await s.cli("set confirm off")
+        await s.cli("delete")
+        await s.cli("continue")
+        assert s.disasm_pc_rows() == []
+
+    run_session(build("basic.c"), body)

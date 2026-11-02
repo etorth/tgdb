@@ -67,6 +67,9 @@ class Binding:
     ``pinned`` means the varobj was created from ``*(type*)address``, so it
     is independent of the selected frame and of scope.  ``type`` is the
     varobj's type, needed to re-pin the row when it becomes shadowed.
+    ``decl_type`` is the symbol's declared type from the locals snapshot the
+    row was reconciled against; a different type at the same key means the
+    stack slot was reused by another variable, so the row is re-created.
     """
 
     key: BindingKey
@@ -74,6 +77,7 @@ class Binding:
     varobj: str = ""
     pinned: bool = False
     type: str = ""
+    decl_type: str = ""
 
 
     @property

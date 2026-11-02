@@ -76,3 +76,18 @@ def test_args_passes_program_arguments(build, tmp_path):
     result = tgdb("--batch", script, "-r", "NONE", *GDB_ISOLATION_ARGS,
                   "--args", str(build("args.c")), "one", "two words")
     assert result.returncode == 0, result.stderr
+
+
+def test_gdb_start_failure_exits_with_error(tmp_path):
+    script = write(tmp_path / "quit.t", "quit\n")
+    result = tgdb("--batch", script, "-r", "NONE", "-d", str(tmp_path / "no-such-gdb"), timeout=30)
+    assert result.returncode == 1
+    assert "failed to start GDB" in result.stdout + result.stderr
+
+
+def test_old_gdb_is_rejected(build, tmp_path):
+    script = write(tmp_path / "wait.t", "python << EOF\nimport asyncio\nawait asyncio.sleep(10)\nEOF\n")
+    result = tgdb("--batch", script, "-r", "NONE", *GDB_ISOLATION_ARGS,
+                  "-iex", "set $_gdb_major = 11", str(build("basic.c")), timeout=60)
+    assert result.returncode == 1
+    assert "GDB 12 or newer is required (found GDB 11)" in result.stdout + result.stderr

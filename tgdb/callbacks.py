@@ -44,6 +44,19 @@ from .gdb_controller import Breakpoint, Frame, LocalVariable, ThreadInfo, Regist
 
 _log = logging.getLogger("tgdb.app")
 
+# tgdb_pysetup.py needs gdb.with_parameter (GDB 12) and gdb.Frame.level (GDB 11).
+MIN_GDB_MAJOR = 12
+
+
+def gdb_version_supported(major: str) -> bool:
+    """Decide from the value of ``$_gdb_major``; ``""`` (no answer) passes."""
+    if major == "void":
+        return False
+    try:
+        return int(major) >= MIN_GDB_MAJOR
+    except ValueError:
+        return True
+
 
 class CallbacksMixin:
     """Message handlers and GDB UI callbacks for TGDBApp."""
@@ -710,6 +723,26 @@ class CallbacksMixin:
             self._initial_source_pending = False
             src.run_pending_search()
             self._update_status_file_info()
+
+
+    async def _check_gdb_version(self) -> None:
+        """Exit with an error when GDB is older than ``MIN_GDB_MAJOR``.
+
+        ``$_gdb_major`` exists since GDB 9.1 and is void before that.  A
+        timeout (GDB busy, e.g. a pagination prompt while attaching) yields
+        ``""`` and skips the check rather than blocking startup.
+        """
+        try:
+            major = await self.gdb.eval_expr("$_gdb_major")
+        except Exception as exc:
+            _log.info(f"GDB version check failed: {exc!r}")
+            return
+        if gdb_version_supported(major):
+            return
+        found = "older than 9.1" if major == "void" else major
+        _log.error(f"GDB {found} is too old, tgdb needs GDB {MIN_GDB_MAJOR}+")
+        self._shutting_down = True
+        self.exit(1, return_code=1, message=f"tgdb: GDB {MIN_GDB_MAJOR} or newer is required (found GDB {found})")
 
 
     async def _request_initial_location(self) -> None:

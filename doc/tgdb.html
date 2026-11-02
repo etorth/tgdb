@@ -1,9 +1,9 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <html>
 <!--
-This manual is for GNU CGDB
-(version 0.1.0, 16 January 2022),
-the GNU ncurses based front end to GDB.
+This manual is for TGDB
+(version 0.1.0),
+a Textual-based terminal front end to GDB.
 
 Copyright (C) 2019 CGDB Team
 
@@ -126,9 +126,9 @@ Next: <a href="#Summary" accesskey="n" rel="next">Summary</a>, Up: <a href="dir.
 <a name="TGDB"></a>
 <h1 class="top">TGDB</h1>
 
-<p>This manual is for <acronym>GNU</acronym> TGDB
-(version 0.1.0, 16 January 2022),
-the <acronym>GNU</acronym> ncurses based front end to GDB.
+<p>This manual is for TGDB
+(version 0.1.0),
+a Textual-based terminal front end to GDB.
 </p>
 <p>Copyright &copy; 2019 TGDB Team
 </p>
@@ -192,7 +192,7 @@ Next: <a href="#Invocation" accesskey="n" rel="next">Invocation</a>, Previous: <
 <a name="Summary-of-TGDB"></a>
 <h2 class="unnumbered">Summary of TGDB</h2>
 
-<p>TGDB is a curses-based interface to the GNU Debugger (GDB).  The goal of TGDB 
+<p>TGDB is a terminal interface to the GNU Debugger (GDB), written in Python on the Textual framework.  The goal of TGDB
 is to be lightweight and responsive; not encumbered with unnecessary features. TGDB diverges from CGDB, this document is generated mainly by substitute cgdb to tgdb.
 </p>
 <p>The interface is designed to deliver the familiar GDB text interface, with a 
@@ -200,10 +200,11 @@ split screen showing the source as it executes.  The UI is modeled on the
 classic Unix text editor, vi.  Those familiar with vi should feel right at 
 home using TGDB.
 </p>
-<p>The library responsible for communicating with GDB is called gdbwire.
-Those wanting to develop other interfaces to GDB are welcome to use gdbwire 
-as the basis for their program.  Many of the headaches of parsing GDB&rsquo;s output 
-and annotations can be avoided by using it.
+<p>On POSIX systems TGDB runs the normal GDB console in its GDB window and talks
+to GDB through a second channel using GDB&rsquo;s machine interface (MI), parsed
+in pure Python; on native Windows it drives GDB over MI pipes.
+A small Python helper loaded into GDB reports frame, register and inferior-call
+events, so the panes follow commands typed at the GDB prompt.
 </p>
 <p>Some features offered by TGDB are:
 </p>

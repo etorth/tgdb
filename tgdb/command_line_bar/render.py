@@ -161,8 +161,10 @@ class RenderMixin:
             lines.append(_pad_crop(f":{self._ml_header}", w))
             for ln in self._ml_buf:
                 lines.append(_pad_crop(f"  {ln}", w))
-            # Current input row — append a block cursor marker
-            lines.append(_pad_crop(f"  {self._input_buf}\u258f", w))
+            # Current input row — a bar cursor marker at the cursor position
+            buf = self._input_buf
+            pos = max(0, min(self._cursor_pos, len(buf)))
+            lines.append(_pad_crop(f"  {buf[:pos]}\u258f{buf[pos:]}", w))
         t = Text("\n".join(lines))
         t.stylize(style)
         return t

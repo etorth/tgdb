@@ -100,3 +100,43 @@ def test_expansion_restored_after_up_down(build):
         assert s.local_children("pt") == [("x", "3"), ("y", "4")]
 
     run_session(build("containers.cpp"), body)
+
+
+def test_slot_reused_by_other_type_is_recreated(build):
+    """``int x`` and ``float x`` in the same stack slot: show the float."""
+    async def body(s):
+        await s.layout("source", "gdb", "locals")
+        await s.run_to("locals_changes.cpp", "MARK_INT")
+        addr = s.collected_locals()["x"].addr
+        await s.cli(f"break locals_changes.cpp:{s.line_of('locals_changes.cpp', 'MARK_FLOAT')}")
+        await s.cli("continue")
+        assert s.collected_locals()["x"].addr == addr, "slot not reused; test is moot"
+        assert s.locals_value("x") == await s.gdb_value("x") == "2.5"
+
+    run_session(build("locals_changes.cpp"), body)
+
+
+def test_expanded_vector_follows_shrink(build):
+    async def body(s):
+        await s.layout("source", "gdb", "locals")
+        await s.run_to("locals_changes.cpp", "MARK_POP")
+        assert len(await s.expand_local("v")) == 5
+        await s.cli("next")
+        children = s.local_children("v")
+        assert children is not None, "vector was re-created collapsed"
+        assert [value for _exp, value in children] == ["1", "2", "3", "4"]
+
+    run_session(build("locals_changes.cpp"), body)
+
+
+def test_member_dynamic_type_change_keeps_child(build):
+    async def body(s):
+        await s.layout("source", "gdb", "locals")
+        await s.cli("set print object on")
+        await s.run_to("locals_changes.cpp", "MARK_RETARGET")
+        assert "p" in [exp for exp, _value in await s.expand_local("h")]
+        await s.cli("next")
+        children = s.local_children("h")
+        assert children is not None and "p" in [exp for exp, _value in children], children
+
+    run_session(build("locals_changes.cpp"), body)

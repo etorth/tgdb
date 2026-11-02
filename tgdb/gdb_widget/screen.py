@@ -14,6 +14,10 @@ from rich.text import Text
 from rich.style import Style
 
 
+# Scrollback "raw row" for a blank screen row (pyte keeps no buffer entry for
+# it).  ``None`` is reserved for injected lines, which have no row to restore.
+BLANK_ROW = object()
+
 # ---------------------------------------------------------------------------
 # pyte colour → Rich colour conversion
 # ---------------------------------------------------------------------------
@@ -157,5 +161,5 @@ class _GDBScreen(pyte.Screen):
             # super().index() shifts the buffer and removes row 0, so after
             # this call pyte no longer holds a reference to this object.
             # _scrollback_raw becomes the sole owner; pyte cannot mutate it.
-            self._push_scrollback(text, row)
+            self._push_scrollback(text, BLANK_ROW if row is None else row)
         super().index()

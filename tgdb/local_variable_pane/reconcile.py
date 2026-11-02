@@ -411,6 +411,7 @@ class LocalVariablePaneReconcileMixin:
             # the invalidated bindings within the same reconciliation
             # pass, so the user does not see the variable disappear.
             self._shape_readd_keys = set()
+            self._shape_readd_expansions = set()
 
             # Fast path: variables published by _publish_locals_async() carry addr
             # and is_shadowed directly from GDB Python — no extra MI round-trips.
@@ -438,8 +439,13 @@ class LocalVariablePaneReconcileMixin:
 
             # Name-created varobjs whose key is not frame-unique (e.g.
             # ``register@0``) are still bound to the previous frame after a
-            # frame switch: delete and re-create them in the new frame.
+            # frame switch: delete and re-create them in the new frame.  So
+            # are rows whose stack slot now holds a differently typed variable.
             rebind = self._build_frame_bound_rebindings(current_keys, new_bindings, new_frame_key)
+            rebind_keys = {(name, addr) for name, addr, _var in rebind}
+            rebind.extend(
+                b for b in self._build_retyped_bindings(current_keys, new_bindings) if (b[0], b[1]) not in rebind_keys
+            )
             if rebind:
                 rebind_keys = {(name, addr) for name, addr, _var in rebind}
                 to_remove.extend(rebind_keys)
@@ -478,6 +484,7 @@ class LocalVariablePaneReconcileMixin:
                     self._sort_root_children_by_line(tree, new_bindings)
                 if changelist or self._rebuild_gen == gen:
                     self._sync_shadow_labels(shadowed_keys)
+                self._stamp_decl_types(new_bindings)
                 return
 
             if self._frame_key is not None and self._frame_key != new_frame_key:
@@ -538,6 +545,7 @@ class LocalVariablePaneReconcileMixin:
             self._sort_root_children_by_line(tree, new_bindings)
 
             self._sync_shadow_labels(shadowed_keys)
+            self._stamp_decl_types(new_bindings)
         finally:
             # Counter paired with the increment in set_variables; gates
             # _ui_on_inferior_call_post so pretty-printer-driven inferior
@@ -698,6 +706,7 @@ class LocalVariablePaneReconcileMixin:
         dropped_key: BindingKey | None = None
         binding = self._binding_for_varobj(varobj_name)
         if binding is not None:
+            self._shape_readd_expansions |= self._expansions_under(binding.key[0])
             self._drop_binding(binding.key)
             dropped_key = binding.key
         else:
@@ -710,6 +719,32 @@ class LocalVariablePaneReconcileMixin:
             await self._delete_varobj_safe(varobj_name)
 
         return dropped_key
+
+
+    async def _refresh_retyped_child(self, varobj_name: str, change: dict) -> None:
+        """Show a child varobj's new type: new value, new children, same expansion."""
+        node = self._varobj_to_node.get(varobj_name)
+        if node is None or not isinstance(node.data, dict):
+            return
+        data = node.data
+        has_children = self._safe_int(change.get("new_num_children", "0")) > 0
+        data["has_children"] = has_children
+        data["load_status"] = "idle"
+        self._remove_descendant_varobjs(varobj_name)
+        node.remove_children()
+        node.allow_expand = has_children
+        node.set_label(self._build_value_label(data.get("exp", ""), change.get("value", ""), has_children))
+        if not has_children:
+            return
+        if node.is_expanded:
+            await self._load_children(node, varobj_name)
+        else:
+            node.add_leaf("⏳ loading...")
+
+
+    def _expansions_under(self, name: str) -> set[ExpansionPath]:
+        """Expanded paths of the root rows named *name*."""
+        return {path for path in self._collect_expanded_paths() if path[0][0] == name}
 
 
     async def _readd_shape_transitioned_bindings(
@@ -739,9 +774,11 @@ class LocalVariablePaneReconcileMixin:
         the caller to abort.
         """
         keys = self._shape_readd_keys
-        # Consume the set so a subsequent reconciliation pass does
+        expansions = self._shape_readd_expansions
+        # Consume the sets so a subsequent reconciliation pass does
         # not re-process the same keys.
         self._shape_readd_keys = set()
+        self._shape_readd_expansions = set()
         if not keys:
             return True
 
@@ -751,12 +788,11 @@ class LocalVariablePaneReconcileMixin:
         if not readd_bindings:
             return True
 
-        # No expansions to restore: the variant alternative just
-        # changed, the old child set is gone, and any saved
-        # expansion would have referred to children that no longer
-        # exist (e.g. ``[contained value]``).  Recreate collapsed.
+        # Restore the rows' expansion (e.g. a vector that shrank stays
+        # open); paths to children that no longer exist, such as a
+        # variant's old ``[contained value]``, are skipped.
         return await self._add_new_bindings(
-            gen, tree, readd_bindings, set(), shadowed_keys, new_bindings,
+            gen, tree, readd_bindings, expansions, shadowed_keys, new_bindings,
         )
 
 
@@ -877,6 +913,12 @@ class LocalVariablePaneReconcileMixin:
                 # current type info, and delete the GDB-side varobj
                 # so the orphaned varobj does not leak.  Re-add it in this
                 # pass so it does not vanish until the next stop.
+                if self._binding_for_varobj(varobj_name) is None and varobj_name not in self._dynamic_varobjs:
+                    # A child varobj (e.g. a ``Base *`` member under ``set
+                    # print object on``) stays valid: GDB already re-typed it
+                    # and dropped its children.  Refresh the node in place.
+                    await self._refresh_retyped_child(varobj_name, change)
+                    continue
                 dropped_key = await self._invalidate_typechanged_binding(varobj_name)
                 if dropped_key is not None:
                     self._shape_readd_keys.add(dropped_key)

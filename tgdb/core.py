@@ -152,7 +152,9 @@ class AppCoreMixin:
             self.gdb.start(rows=40, cols=200)
         except Exception as exc:
             _log.error(f"failed to start GDB: {exc!r}")
-            self._show_status(f"Failed to start GDB: {exc}")
+            # Nothing works without GDB; exit like cgdb instead of showing
+            # an empty screen.  Textual prints *message* after teardown.
+            self.exit(1, return_code=1, message=f"tgdb: failed to start GDB: {exc}")
             return
 
         _log.info("GDB controller started, launching run_async")
@@ -163,6 +165,10 @@ class AppCoreMixin:
             self.gdb.run_async(), name="gdb-run",
         )
         self._gdb_task.add_done_callback(_on_task_done)
+        # In the background: the answer waits for GDB to finish startup.
+        # Keep a reference: asyncio holds tasks only weakly.
+        self._version_task = asyncio.create_task(self._check_gdb_version(), name="gdb-version")
+        self._version_task.add_done_callback(_on_task_done)
 
         self._set_mode("GDB_PROMPT")
         gdb_widget.focus()

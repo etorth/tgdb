@@ -17,7 +17,7 @@ from rich.cells import set_cell_size
 from rich.text import Text
 
 from ..highlight_groups import HighlightGroups
-from .screen import _GDBScreen, _row_to_text
+from .screen import BLANK_ROW, _GDBScreen, _row_to_text
 from .scroll import ScrollMixin
 
 
@@ -101,7 +101,7 @@ class _GDBContent(ScrollMixin, Widget):
     def _push_to_scrollback(self, text: Text, raw=None) -> None:
         """Append one line to both scrollback deques (text for display, raw for restoration)."""
         self._scrollback.append(text)
-        self._scrollback_raw.append(raw)  # dict copy of pyte row, or None
+        self._scrollback_raw.append(raw)  # pyte row, BLANK_ROW, or None (injected)
 
 
 
@@ -153,7 +153,7 @@ class _GDBContent(ScrollMixin, Widget):
             row = buf.get(r)
             self._push_to_scrollback(
                 _row_to_text(row, self._pyte_cols, use_color=use_color),
-                row,
+                BLANK_ROW if row is None else row,
             )
 
         # Shift the buffer up by top_scroll rows in-place.
@@ -205,9 +205,10 @@ class _GDBContent(ScrollMixin, Widget):
         buf.clear()
         buf.update(new_entries)
 
-        # Place restored rows at the top.
+        # Place restored rows at the top; a blank row stays absent.
         for i, raw in enumerate(ordered):
-            buf[i] = raw
+            if raw is not BLANK_ROW:
+                buf[i] = raw
 
         cy = self._screen.cursor.y
         self._screen.cursor.y = min(new_rows - 1, cy + n_real)

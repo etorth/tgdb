@@ -185,6 +185,12 @@ class CommandLineKeyMixin:
             self._handle_tab(reverse=True)
             return True
 
+        # Any other key ends a Tab cycle: after cursor motion or a history
+        # recall the old candidates no longer fit the line.
+        if self._completions:
+            self._completions = []
+            self._completion_idx = 0
+
         if key in ("left", "ctrl+b"):
             if self._cursor_pos > 0:
                 self._cursor_pos -= 1
@@ -210,10 +216,6 @@ class CommandLineKeyMixin:
         if key == "down":
             self._history_down()
             return True
-
-        if self._completions:
-            self._completions = []
-            self._completion_idx = 0
 
         if key == "escape":
             self._reset_history_browse()

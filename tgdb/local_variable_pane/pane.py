@@ -22,7 +22,7 @@ from ..gdb_controller import Frame, LocalVariable
 from ..highlight_groups import HighlightGroups
 from ..varobj_tree import VarobjTreePane
 from .reconcile import LocalVariablePaneReconcileMixin
-from .shared import Binding, BindingKey
+from .shared import Binding, BindingKey, ExpansionPath
 from .support import LocalVariablePaneSupportMixin
 from .update import LocalVariablePaneUpdateMixin
 
@@ -142,6 +142,8 @@ class LocalVariablePane(
         # on the pane (not as a method-local) so the sync _apply_changelist
         # mixin method can communicate with the async _update_variables.
         self._shape_readd_keys: set[BindingKey] = set()
+        # Expanded paths of those dropped rows, restored on re-add.
+        self._shape_readd_expansions: set[ExpansionPath] = set()
         # Counter of in-flight _update_variables reconciliations.  The
         # raw collect-locals MI command resolves before var-create /
         # var-update kick off, but those calls invoke pretty-printers

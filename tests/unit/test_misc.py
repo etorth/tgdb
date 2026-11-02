@@ -1,9 +1,10 @@
-"""Small pure helpers: XDG paths, disasm address matching."""
+"""Small pure helpers: XDG paths, disasm address matching, GDB version check."""
 
 from pathlib import Path
 
 import pytest
 
+from tgdb.callbacks import gdb_version_supported
 from tgdb.disasm_pane.pane import _same_addr
 from tgdb.xdg_path import XDGPath
 
@@ -40,3 +41,11 @@ def test_app_does_not_inherit_textual_quit_binding():
 def test_disasm_same_addr(a, b, same):
     """Regression: MI pads addresses, the Python helper does not."""
     assert _same_addr(a, b) is same
+
+
+@pytest.mark.parametrize(
+    ("major", "supported"),
+    [("17", True), ("12", True), ("11", False), ("void", False), ("", True), ("<error: x>", True)],
+)
+def test_gdb_version_supported(major, supported):
+    assert gdb_version_supported(major) is supported

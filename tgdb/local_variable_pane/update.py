@@ -465,6 +465,35 @@ class LocalVariablePaneUpdateMixin:
         return rebind
 
 
+    def _build_retyped_bindings(self, current_keys: set[BindingKey], new_bindings: list[BindingEntry]) -> list[BindingEntry]:
+        """Return kept bindings whose stack slot now holds a differently typed variable.
+
+        The key ``(name, address)`` ignores the type, so a same-named local of
+        another type that reuses the slot (``int x`` in one call, ``float x``
+        in the next) would keep the old varobj and show the new bytes
+        reinterpreted as the old type.
+        """
+        retyped: list[BindingEntry] = []
+        for binding_name, binding_addr, variable in new_bindings:
+            key = (binding_name, binding_addr)
+            if key not in current_keys:
+                continue
+            binding = self._bindings.get(key)
+            if binding is None or not binding.decl_type or not variable.type:
+                continue
+            if binding.decl_type != variable.type:
+                retyped.append((binding_name, binding_addr, variable))
+        return retyped
+
+
+    def _stamp_decl_types(self, new_bindings: list[BindingEntry]) -> None:
+        """Record each row's declared type for ``_build_retyped_bindings``."""
+        for binding_name, binding_addr, variable in new_bindings:
+            binding = self._bindings.get((binding_name, binding_addr))
+            if binding is not None and variable.type:
+                binding.decl_type = variable.type
+
+
     def _build_reanchor_bindings(
         self,
         current_keys: set[BindingKey],

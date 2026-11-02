@@ -156,6 +156,14 @@ class _DisasmContent(Widget):
         self.refresh()
 
 
+    def clear_pc(self) -> None:
+        """Remove the PC marker, keeping the lines."""
+        self._current_addr = ""
+        for line in self._lines:
+            line.is_current = False
+        self.refresh()
+
+
     def update_pc(self, current_addr: str) -> bool:
         """Move just the PC marker without replacing the line list.
 
@@ -573,6 +581,9 @@ class DisasmPane(PaneBase):
                 _log.debug(f"disasm fetch PC={current_addr} failed: {exc!r}")
                 raw = []
         else:
+            # No frame (the program exited): keep the listing, drop the marker.
+            self._content.clear_pc()
+            self.refresh_title()
             return
 
         # A newer refresh started while we were awaiting — drop our
