@@ -370,7 +370,7 @@ class DisasmPane(PaneBase):
         self._disasm_fn: Callable | None = None
         self._disasm_pc_fn: Callable | None = None
         self._disasm_function_fn: Callable | None = None
-        self._thread_id: str = ""
+        self._gdb_thread_id: str = ""
         self._func: str = ""
         # Initial prime args stashed by the pane factory (sync) for the
         # async ``on_mount`` to consume.  Either a ``("frame", frame,
@@ -425,8 +425,8 @@ class DisasmPane(PaneBase):
 
     def title(self) -> str:
         thread_part = "Thread"
-        if self._thread_id:
-            thread_part = f"Thread {self._thread_id}"
+        if self._gdb_thread_id:
+            thread_part = f"Thread {self._gdb_thread_id}"
         if self._func:
             left = f"{thread_part} (asm) In: {self._func}"
         else:
@@ -472,7 +472,7 @@ class DisasmPane(PaneBase):
     ) -> None:
         """Publish a parsed disassembly snapshot."""
         if thread_id:
-            self._thread_id = thread_id
+            self._gdb_thread_id = thread_id
         if func:
             self._func = func
         self._content.set_disasm(lines, current_addr)
@@ -545,7 +545,7 @@ class DisasmPane(PaneBase):
     ) -> None:
         """Fetch and display disassembly near a source location."""
         if thread_id:
-            self._thread_id = thread_id
+            self._gdb_thread_id = thread_id
         if func:
             self._func = func
 

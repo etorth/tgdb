@@ -24,8 +24,9 @@ GDB_ISOLATION_ARGS = ["-nx", "-iex", "set debuginfod enabled off"]
 
 
 class Session:
-    def __init__(self, app: TGDBApp) -> None:
+    def __init__(self, app: TGDBApp, pilot) -> None:
         self.app = app
+        self.pilot = pilot  # Textual Pilot: real key presses
         self.dbg = tgdb.debugger
         self.source_dir = FIXTURES
 
@@ -85,7 +86,7 @@ class Session:
 
     # White-box: placeholder bookkeeping is a locals-pane internal.
     def locals_placeholders(self) -> list[str]:
-        bindings = self.app._locals_pane._bindings.values()
+        bindings = self.app._locals_pane._binding_rows.values()
         return [binding.key[0] for binding in bindings if binding.is_placeholder]
 
 
@@ -145,9 +146,9 @@ class Session:
 
 async def _run(binary: Path, body, size: tuple[int, int]) -> None:
     app = TGDBApp(gdb_path="gdb", gdb_args=[*GDB_ISOLATION_ARGS, str(binary)], rc_file="NONE")
-    async with app.run_test(size=size):
+    async with app.run_test(size=size) as pilot:
         await tgdb.debugger.wait_idle()
-        await body(Session(app))
+        await body(Session(app, pilot))
         app.gdb.terminate()
 
 

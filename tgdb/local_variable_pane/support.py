@@ -37,7 +37,7 @@ class LocalVariablePaneSupportMixin:
     def _tracked_bindings(self) -> list[Binding]:
         """Bindings backed by a root varobj, in insertion order."""
         tracked: list[Binding] = []
-        for binding in self._bindings.values():
+        for binding in self._binding_rows.values():
             if not binding.is_placeholder:
                 tracked.append(binding)
         return tracked
@@ -45,7 +45,7 @@ class LocalVariablePaneSupportMixin:
 
     def _placeholder_bindings(self) -> list[Binding]:
         placeholders: list[Binding] = []
-        for binding in self._bindings.values():
+        for binding in self._binding_rows.values():
             if binding.is_placeholder:
                 placeholders.append(binding)
         return placeholders
@@ -62,7 +62,7 @@ class LocalVariablePaneSupportMixin:
 
     def _varobj_of(self, key: BindingKey) -> str:
         """Root varobj of the row *key*, or ``""`` (no row / placeholder)."""
-        binding = self._bindings.get(key)
+        binding = self._binding_rows.get(key)
         if binding is None:
             return ""
         return binding.varobj
@@ -72,7 +72,7 @@ class LocalVariablePaneSupportMixin:
         """The row whose root varobj is *varobj_name* (``None`` for children)."""
         if not varobj_name:
             return None
-        for binding in self._bindings.values():
+        for binding in self._binding_rows.values():
             if binding.varobj == varobj_name:
                 return binding
         return None
@@ -100,7 +100,7 @@ class LocalVariablePaneSupportMixin:
         removed from the tree.
         """
         varobj_name = info.get("name", "")
-        previous = self._bindings.get(key)
+        previous = self._binding_rows.get(key)
         if previous is not None:
             if previous.varobj and previous.varobj != varobj_name:
                 _log.debug(f"binding {key} replaced while still tracking {previous.varobj}")
@@ -115,7 +115,7 @@ class LocalVariablePaneSupportMixin:
             pinned=pinned and bool(varobj_name),
             type=info.get("type", "") or fallback_type,
         )
-        self._bindings[key] = binding
+        self._binding_rows[key] = binding
 
         if varobj_name:
             self._varobj_to_node[varobj_name] = node
@@ -149,7 +149,7 @@ class LocalVariablePaneSupportMixin:
                 "marker_active": marker_active,
             },
         )
-        self._bindings[key] = Binding(key=key, node=node)
+        self._binding_rows[key] = Binding(key=key, node=node)
         return node
 
 
@@ -170,7 +170,7 @@ class LocalVariablePaneSupportMixin:
         Returns the removed binding (its ``varobj`` still set) so the caller
         can delete the GDB-side varobj, or ``None`` if there was no row.
         """
-        binding = self._bindings.pop(key, None)
+        binding = self._binding_rows.pop(key, None)
         if binding is None:
             return None
 
@@ -181,7 +181,7 @@ class LocalVariablePaneSupportMixin:
 
 
     def _remove_placeholder_node(self, key: BindingKey) -> None:
-        binding = self._bindings.get(key)
+        binding = self._binding_rows.get(key)
         if binding is not None and binding.is_placeholder:
             self._drop_binding(key)
 

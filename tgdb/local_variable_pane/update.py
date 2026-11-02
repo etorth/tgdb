@@ -413,7 +413,7 @@ class LocalVariablePaneUpdateMixin:
             # ``-var-create`` — must be retried, otherwise they stay
             # frozen on their first value for as long as they are in
             # scope.
-            existing = self._bindings.get(key)
+            existing = self._binding_rows.get(key)
             if existing is not None and existing.is_placeholder:
                 if _type_needs_name_fallback(variable.type or "") or key in shadowed_keys:
                     continue
@@ -456,7 +456,7 @@ class LocalVariablePaneUpdateMixin:
             if binding_addr.startswith("0x"):
                 continue
 
-            binding = self._bindings.get(key)
+            binding = self._binding_rows.get(key)
             if binding is None or binding.state is not BindingState.NAME_BOUND:
                 continue
 
@@ -478,7 +478,7 @@ class LocalVariablePaneUpdateMixin:
             key = (binding_name, binding_addr)
             if key not in current_keys:
                 continue
-            binding = self._bindings.get(key)
+            binding = self._binding_rows.get(key)
             if binding is None or not binding.decl_type or not variable.type:
                 continue
             if binding.decl_type != variable.type:
@@ -489,7 +489,7 @@ class LocalVariablePaneUpdateMixin:
     def _stamp_decl_types(self, new_bindings: list[BindingEntry]) -> None:
         """Record each row's declared type for ``_build_retyped_bindings``."""
         for binding_name, binding_addr, variable in new_bindings:
-            binding = self._bindings.get((binding_name, binding_addr))
+            binding = self._binding_rows.get((binding_name, binding_addr))
             if binding is not None and variable.type:
                 binding.decl_type = variable.type
 
@@ -510,7 +510,7 @@ class LocalVariablePaneUpdateMixin:
             if key not in shadowed_keys:
                 continue
 
-            binding = self._bindings.get(key)
+            binding = self._binding_rows.get(key)
             if binding is None or binding.state is not BindingState.NAME_BOUND:
                 continue
 

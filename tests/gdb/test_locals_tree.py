@@ -1,5 +1,7 @@
 """Locals pane tree behaviour: shadowing, placeholders, dynamic children, expansion."""
 
+from textual.widgets import Tree
+
 from .harness import run_session
 
 
@@ -140,3 +142,18 @@ def test_member_dynamic_type_change_keeps_child(build):
         assert children is not None and "p" in [exp for exp, _value in children], children
 
     run_session(build("locals_changes.cpp"), body)
+
+
+def test_keys_in_focused_locals_tree(build):
+    """Regression: the pane's row dict shadowed Textual's ``_bindings``, so
+    any key pressed in the focused Locals tree crashed tgdb."""
+    async def body(s):
+        await s.layout("source", "gdb", "locals")
+        await s.run_to("containers.cpp", "MARK_USE")
+        s.app._locals_pane.query_one(Tree).focus()
+        await s.pilot.press("e", "down", "up")
+        await s.dbg.wait_idle()
+        assert s.app.is_running
+        assert s.locals_value("pt") is not None
+
+    run_session(build("containers.cpp"), body)

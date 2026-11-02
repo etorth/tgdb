@@ -568,7 +568,7 @@ class LocalVariablePaneReconcileMixin:
             key_to_line[key] = var.line
 
         node_to_line: dict[int, int] = {}  # id(node) → line
-        for key, binding in self._bindings.items():
+        for key, binding in self._binding_rows.items():
             node_to_line[id(binding.node)] = key_to_line.get(key, 0)
 
         root = tree.root
@@ -587,7 +587,7 @@ class LocalVariablePaneReconcileMixin:
         and not duplicated by the next reconciliation's add pass).
         """
         key = (name, addr)
-        binding = self._bindings.get(key)
+        binding = self._binding_rows.get(key)
         if binding is None or binding.is_placeholder:
             return
 

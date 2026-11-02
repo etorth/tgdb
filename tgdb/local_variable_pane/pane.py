@@ -131,7 +131,7 @@ class LocalVariablePane(
         self._variables: list[LocalVariable] = []
         # One Binding per top-level row; see shared.Binding and the
         # transition helpers in support.py.
-        self._bindings: dict[BindingKey, Binding] = {}
+        self._binding_rows: dict[BindingKey, Binding] = {}
         self._frame_key: tuple | None = None
         self._saved_expansions: dict[tuple, set[tuple[tuple[str, int], ...]]] = {}
         # Transient set populated by _apply_changelist when a dynamic
