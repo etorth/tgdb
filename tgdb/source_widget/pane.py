@@ -14,7 +14,7 @@ focused on the public pane interface.
 from textual import events
 
 from ..highlight_groups import HighlightGroups
-from ..pane_base import PaneBase
+from ..pane_base import DelegatingPane
 from .content import _SourceContent
 
 
@@ -22,26 +22,7 @@ from .content import _SourceContent
 # Public pane wrapper
 # ---------------------------------------------------------------------------
 
-# Attributes that must be forwarded to _SourceContent on set.
-_SRC_DELEGATE_SET = frozenset(
-    {
-        "exe_line",
-        "sel_line",
-        "executing_line_display",
-        "selected_line_display",
-        "tabstop",
-        "hlsearch",
-        "ignorecase",
-        "wrapscan",
-        "showmarks",
-        "color",
-        "source_file",
-        "_search_active",
-    }
-)
-
-
-class SourceView(PaneBase):
+class SourceView(DelegatingPane):
     """Render source code and cgdb-style source-mode interactions.
 
     Public interface
@@ -68,8 +49,9 @@ class SourceView(PaneBase):
     def __init__(self, hl: HighlightGroups, **kwargs) -> None:
         """Create an empty source pane."""
         super().__init__(hl, **kwargs)
-        self._content = _SourceContent(hl)
-        self._content._pane = self  # so _content.post_message bubbles through us
+        content = _SourceContent(hl)
+        content._pane = self  # so _content.post_message bubbles through us
+        self._delegate_to(content)
 
 
     def title(self) -> str | None:
@@ -109,28 +91,6 @@ class SourceView(PaneBase):
         if self._content.is_mounted:
             self._content.refresh(*args, **kwargs)
         return super().refresh(*args, **kwargs)
-
-
-
-    # ------------------------------------------------------------------
-    # Attribute delegation to _SourceContent
-    # ------------------------------------------------------------------
-
-
-    def __setattr__(self, name: str, value) -> None:
-        if name in _SRC_DELEGATE_SET and "_content" in self.__dict__:
-            setattr(self._content, name, value)
-        else:
-            super().__setattr__(name, value)
-
-
-    def __getattr__(self, name: str):
-        content = self.__dict__.get("_content")
-        if content is not None:
-            return getattr(content, name)
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'"
-        )
 
 
 # ---------------------------------------------------------------------------

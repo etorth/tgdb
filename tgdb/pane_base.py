@@ -227,3 +227,50 @@ class PaneBase(Widget):
         """Refresh the title bar (call when title() output may have changed)."""
         if self._title_bar is not None and self._title_bar.is_mounted:
             self._title_bar.refresh()
+
+
+class DelegatingPane(PaneBase):
+    """PaneBase whose state lives in an inner content widget.
+
+    Subclasses build their content widget in ``__init__`` and finish with
+    ``self._delegate_to(content)``.  From then on the pane behaves like the
+    content widget for that widget's own state:
+
+    - reading an attribute the pane does not have returns the content's;
+    - setting an attribute that the content's ``__init__`` created (and the
+      pane's did not), or a property setter defined by a tgdb content
+      class, sets it on the content.
+
+    The delegated names are computed, not listed by hand: a hand-kept list
+    silently stored any forgotten name on the pane instead (that broke the
+    ``:help`` fallback and swallowed keys after a shared search).  Textual's
+    own instance attributes exist on both widgets and are never delegated.
+    """
+
+    def _delegate_to(self, content: Widget) -> None:
+        names = set(vars(content)) - set(vars(self))
+        for cls in type(content).__mro__:
+            if not cls.__module__.startswith("tgdb."):
+                continue
+            for name, attr in vars(cls).items():
+                if isinstance(attr, property) and attr.fset is not None:
+                    names.add(name)
+        self.__dict__["_content"] = content
+        self.__dict__["_delegated_names"] = frozenset(names)
+
+
+    def __setattr__(self, name: str, value) -> None:
+        delegated = self.__dict__.get("_delegated_names")
+        if delegated is not None and name in delegated:
+            setattr(self.__dict__["_content"], name, value)
+        else:
+            super().__setattr__(name, value)
+
+
+    def __getattr__(self, name: str):
+        content = self.__dict__.get("_content")
+        if content is not None:
+            return getattr(content, name)
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )

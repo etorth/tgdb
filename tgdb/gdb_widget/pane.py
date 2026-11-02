@@ -12,7 +12,7 @@ stay focused on the public pane interface.
 from textual import events
 
 from ..highlight_groups import HighlightGroups
-from ..pane_base import PaneBase
+from ..pane_base import DelegatingPane
 from .content import _GDBContent
 
 
@@ -20,25 +20,8 @@ from .content import _GDBContent
 # Public pane wrapper
 # ---------------------------------------------------------------------------
 
-# Attributes that must be forwarded to _GDBContent on set.
-_GDB_DELEGATE_SET = frozenset(
-    {
-        "send_to_gdb",
-        "resize_gdb",
-        "on_switch_to_tgdb",
-        "imap_feed",
-        "imap_replay",
-        "gdb_focused",
-        "debugwincolor",
-        "ignorecase",
-        "wrapscan",
-        "max_scrollback",
-        "_search_active",
-    }
-)
 
-
-class GDBWidget(PaneBase):
+class GDBWidget(DelegatingPane):
     """Render the raw GDB console inside a titled workspace pane.
 
     Public interface
@@ -63,8 +46,8 @@ class GDBWidget(PaneBase):
     def __init__(self, hl: HighlightGroups, max_scrollback: int = 10000, **kwargs) -> None:
         """Create an empty GDB console pane."""
         super().__init__(hl, **kwargs)
-        self._content = _GDBContent(hl, max_scrollback)
         self.can_focus = True
+        self._delegate_to(_GDBContent(hl, max_scrollback))
 
 
     def title(self) -> str | None:
@@ -90,28 +73,6 @@ class GDBWidget(PaneBase):
         if self._content.is_mounted:
             self._content.refresh(*args, **kwargs)
         return super().refresh(*args, **kwargs)
-
-
-
-    # ------------------------------------------------------------------
-    # Attribute delegation to _GDBContent
-    # ------------------------------------------------------------------
-
-
-    def __setattr__(self, name: str, value) -> None:
-        if name in _GDB_DELEGATE_SET and "_content" in self.__dict__:
-            setattr(self._content, name, value)
-        else:
-            super().__setattr__(name, value)
-
-
-    def __getattr__(self, name: str):
-        content = self.__dict__.get("_content")
-        if content is not None:
-            return getattr(content, name)
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'"
-        )
 
 
 # ---------------------------------------------------------------------------
