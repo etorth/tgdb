@@ -1,5 +1,6 @@
 """Rendering mixin for SourceView — render(), _build_line(), etc."""
 
+import bisect
 import re
 from typing import TYPE_CHECKING
 
@@ -257,13 +258,23 @@ class SourceViewRendering:
                 st = " ".join(attrs)
             styled_spans.append((tok_text, st))
 
-        src_t = self._clip_spans_to_cells(styled_spans, total_skip, source_width)
+        visible: list[tuple[int, int, int, int]] = []
+        src_t = self._clip_spans_to_cells(styled_spans, total_skip, source_width, visible)
 
-        # hlsearch overlay
+        # hlsearch overlay.  Match the whole line, not the clipped slice, so
+        # ``^`` / ``\b`` and matches cut by the window edge behave like ``n``.
         rx = self._compile_search_pattern()
-        if rx is not None:
-            for m in rx.finditer(src_t.plain):
-                src_t.stylize(self.hl.style("Search"), m.start(), m.end())
+        if rx is not None and visible:
+            full = "".join(tok_text for tok_text, _st in styled_spans)
+            ends = [entry[1] for entry in visible]
+            for m in rx.finditer(full):
+                # First and last drawn graphemes overlapping the match.
+                first = bisect.bisect_right(ends, m.start())
+                last = first
+                while last < len(visible) and visible[last][0] < m.end():
+                    last += 1
+                if last > first:
+                    src_t.stylize(self.hl.style("Search"), visible[first][2], visible[last - 1][3])
 
         out.append_text(src_t)
         # Emit width-stable rows so empty/short source lines still repaint as
@@ -277,12 +288,22 @@ class SourceViewRendering:
         return out
 
 
-    def _clip_spans_to_cells(self, spans: list[tuple[str, str]], start_cell: int, max_cells: int) -> Text:
+    def _clip_spans_to_cells(
+        self,
+        spans: list[tuple[str, str]],
+        start_cell: int,
+        max_cells: int,
+        visible: list[tuple[int, int, int, int]] | None = None,
+    ) -> Text:
         """Clip styled text by display cells.
 
         If clipping starts or ends in the middle of a wide character, render the
         visible half as '?' so cell-based alignment is preserved during
         horizontal scrolling and truncation.
+
+        When *visible* is given, one ``(line_start, line_end, out_start,
+        out_end)`` entry is appended per drawn grapheme: its character range in
+        the joined span text and in the returned ``Text``.
         """
         out = Text(no_wrap=True, overflow="crop")
         if max_cells <= 0:
@@ -291,9 +312,12 @@ class SourceViewRendering:
         view_start = max(0, start_cell)
         view_end = view_start + max_cells
         cell_pos = 0
+        base = 0
 
         for tok_text, style in spans:
             graphemes, _ = split_graphemes(tok_text)
+            span_base = base
+            base += len(tok_text)
             for start, end, width in graphemes:
                 grapheme = tok_text[start:end]
                 grapheme_start = cell_pos
@@ -313,9 +337,12 @@ class SourceViewRendering:
                 if overlap <= 0:
                     continue
 
+                out_start = len(out)
                 if overlap == width:
                     out.append(grapheme, style=style)
                 else:
                     out.append("?" * overlap, style=style)
+                if visible is not None:
+                    visible.append((span_base + start, span_base + end, out_start, len(out)))
 
         return out

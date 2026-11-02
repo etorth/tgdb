@@ -12,7 +12,7 @@ from textual.widget import Widget
 from ..gdb_controller import Frame
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
-from ..pane_base import fit_cells, frame_location
+from ..pane_base import fit_cells, frame_location, scroll_to_show
 
 
 class _StackContent(Widget):
@@ -32,6 +32,8 @@ class _StackContent(Widget):
         self.can_focus = False
         self._frames: list[Frame] = []
         self._current_level: int = 0
+        # First frame drawn; scrolls to keep the selected frame visible.
+        self._top: int = 0
 
 
     def set_frames(self, frames: list[Frame], current_level: int = 0) -> None:
@@ -57,8 +59,10 @@ class _StackContent(Widget):
         width = max(1, self.size.width or 1)
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
+        selected = next((i for i, f in enumerate(self._frames) if f.level == self._current_level), -1)
+        self._top = scroll_to_show(self._top, selected, len(self._frames), height)
         rendered = 0
-        for i, frame in enumerate(self._frames[:height]):
+        for i, frame in enumerate(self._frames[self._top:self._top + height]):
             if i > 0:
                 result.append("\n")
             if frame.level == self._current_level:

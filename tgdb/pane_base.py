@@ -76,6 +76,22 @@ def frame_location(frame: Frame | None) -> str:
     return ""
 
 
+def scroll_to_show(top: int, selected: int, count: int, height: int) -> int:
+    """Return the first row to draw so row *selected* is visible.
+
+    Moves *top* as little as possible, so stepping the selection past the
+    bottom scrolls one row at a time.  ``selected < 0`` means no selection.
+    """
+    top = max(0, min(top, count - height))
+    if selected < 0:
+        return top
+    if selected < top:
+        return selected
+    if selected >= top + height:
+        return selected - height + 1
+    return top
+
+
 class _TitleBar(Widget):
     """One-row title bar rendered inside every PaneBase.
 

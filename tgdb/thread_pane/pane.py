@@ -12,7 +12,7 @@ from textual.widget import Widget
 from ..gdb_controller import ThreadInfo
 from ..highlight_groups import HighlightGroups
 from ..pane_base import PaneBase
-from ..pane_base import fit_cells, frame_location
+from ..pane_base import fit_cells, frame_location, scroll_to_show
 
 
 class _ThreadContent(Widget):
@@ -31,6 +31,8 @@ class _ThreadContent(Widget):
         self.hl = hl
         self.can_focus = False
         self._threads: list[ThreadInfo] = []
+        # First thread drawn; scrolls to keep the current thread visible.
+        self._top: int = 0
 
 
     def set_threads(self, threads: list[ThreadInfo]) -> None:
@@ -64,8 +66,10 @@ class _ThreadContent(Widget):
         width = max(1, self.size.width or 1)
         height = max(1, self.size.height or 1)
         result = Text(no_wrap=True, overflow="crop")
+        selected = next((i for i, t in enumerate(self._threads) if t.is_current), -1)
+        self._top = scroll_to_show(self._top, selected, len(self._threads), height)
         rendered = 0
-        for i, thread in enumerate(self._threads[:height]):
+        for i, thread in enumerate(self._threads[self._top:self._top + height]):
             if i > 0:
                 result.append("\n")
             if thread.is_current:
