@@ -56,6 +56,10 @@ class TGDBApp(
     KeyRoutingMixin,
     CallbacksMixin,
     App,
+    # Drop Textual's App bindings: its priority Ctrl+Q "quit" would fire
+    # before the GDB pane sees the key (readline quoted-insert); tgdb quits
+    # with :quit.  Its Ctrl+C binding is replaced by action_help_quit.
+    inherit_bindings=False,
 ):
     """tgdb — Python front-end for GDB, compatible with cgdb."""
 

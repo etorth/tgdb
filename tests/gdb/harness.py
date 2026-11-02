@@ -18,8 +18,9 @@ from tgdb.gdb_controller.types import LocalVariable
 SESSION_TIMEOUT = 120.0
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
-# Ignore ~/.gdbinit, and never stop at the interactive debuginfod prompt.
-GDB_ISOLATION_ARGS = ["-nh", "-iex", "set debuginfod enabled off"]
+# Ignore every gdbinit (user and system), and never stop at the
+# interactive debuginfod prompt.
+GDB_ISOLATION_ARGS = ["-nx", "-iex", "set debuginfod enabled off"]
 
 
 class Session:

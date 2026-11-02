@@ -187,6 +187,10 @@ class AppCoreMixin:
 
 
     def _save_history_to_disk(self) -> None:
+        # A --batch run is scripted, not interactive: leave the user's
+        # command history file untouched.
+        if self._script_batch is not None:
+            return
         try:
             bar = self.query_one("#cmdline", CommandLineBar)
             bar.save_history(max_size=self.cfg.historysize)

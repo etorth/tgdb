@@ -19,6 +19,13 @@ def test_xdg_ignores_empty_or_relative_env(monkeypatch, value):
     assert XDGPath.state_home() == Path.home() / ".local/state"
 
 
+def test_app_does_not_inherit_textual_quit_binding():
+    """Ctrl+Q must reach the GDB pane (readline quoted-insert), as in cgdb."""
+    from tgdb.app import TGDBApp
+
+    assert "ctrl+q" not in TGDBApp._merged_bindings.key_to_bindings
+
+
 @pytest.mark.parametrize(
     ("a", "b", "same"),
     [

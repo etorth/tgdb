@@ -180,6 +180,14 @@ class ConfigExecutionMixin:
         if raw_cmd == "!!" or (raw_cmd.startswith("!") and raw_cmd[1:].isdigit()):
             return await self._cmd_history_run(raw_cmd)
 
+        # An exact user-defined command name (always capitalised, as in vim)
+        # wins over built-ins, which match case-insensitively: otherwise
+        # ``:command Run ...`` would be shadowed by ``:run``.
+        if raw_cmd in self._user_commands:
+            match = re.match(r"\S+\s*(.*)", line, re.DOTALL)
+            raw_args = match.group(1) if match else ""
+            return await self._exec_user_command_async(self._user_commands[raw_cmd], raw_args, print_fn=print_fn)
+
         if cmd in self._handlers:
             result = self._handlers[cmd](args)
             if inspect.isawaitable(result):

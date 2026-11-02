@@ -116,6 +116,16 @@ def test_py_prefix_needs_word_boundary(cp):
     assert result is None or "NameError" not in result
 
 
+def test_user_command_is_not_shadowed_by_builtin(cp):
+    """Regression: ``:Set`` was dispatched to the built-in ``:set``."""
+    assert run(cp, 'command Set python print("mine")') is None
+    out: list[str] = []
+    assert run(cp, "Set", print_fn=out.append) is None
+    assert "".join(out) == "mine\n"
+    assert run(cp, "set tabstop=6") is None
+    assert cp.config.tabstop == 6
+
+
 def test_run_script_reads_utf8_with_bom(cp, tmp_path):
     rc = tmp_path / "tgdbrc"
     rc.write_bytes("﻿# 司 comment\nset tabstop=3\n".encode("utf-8"))

@@ -1,5 +1,6 @@
 """End-to-end ``python -m tgdb --headless`` runs: rc files, --batch, exit codes."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,6 +44,8 @@ def test_batch_script_sees_ui_updates(build, tmp_path):
     result = tgdb("--width", "90", "--height", "33", "--batch", script, "-r", "NONE",
                   *GDB_ISOLATION_ARGS, str(build("basic.c")))
     assert result.returncode == 0, result.stderr
+    # --batch must not rewrite the user's interactive history.
+    assert not list(Path(os.environ["XDG_STATE_HOME"]).rglob("history"))
 
 
 def test_failing_batch_script_exits_1_with_reason(build, tmp_path):
