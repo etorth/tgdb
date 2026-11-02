@@ -2,6 +2,8 @@
 State-computation helpers for the local-variable pane.
 """
 
+import asyncio
+
 from ..gdb_controller import Frame, LocalVariable
 from ..gdb_controller.errors import GDBRequestTimeout
 from ..gdb_controller.types import normalize_addr
@@ -173,10 +175,15 @@ class LocalVariablePaneUpdateMixin:
             # Update only this pane's own roots (children follow their
             # root).  ``-var-update *`` would also consume the change
             # reports of other panes' varobjs (e.g. evaluate watches).
-            for varobj_name in root_varobjs:
-                try:
-                    result = await self._var_update(varobj_name)
-                except Exception as exc:
+            # Send all requests before awaiting any: one round trip of
+            # latency instead of one per variable.
+            results = await asyncio.gather(
+                *(self._var_update(varobj_name) for varobj_name in root_varobjs),
+                return_exceptions=True,
+            )
+            for varobj_name, result in zip(root_varobjs, results):
+                if isinstance(result, Exception):
+                    exc = result
                     err = str(exc).lower()
                     if "not found" in err or "usage" in err:
                         _log.debug(f"Purging stale varobj {varobj_name}: {exc}")

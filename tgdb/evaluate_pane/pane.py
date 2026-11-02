@@ -7,6 +7,7 @@ constructs the pane, injects the varobj callbacks, then mutates the watch list
 through the public methods documented on the class below.
 """
 
+import asyncio
 import logging
 
 from textual.widgets import Tree
@@ -136,12 +137,17 @@ class EvaluatePane(VarobjTreePane):
         # update the locals pane's varobjs (GDB reports each change once,
         # so the locals pane would miss it) and would touch dynamic
         # varobjs the locals pane deliberately skips as garbage.
+        # Send all requests before awaiting any (one round trip of latency).
+        results = await asyncio.gather(
+            *(self._var_update(varobj_name) for varobj_name in root_varobjs),
+            return_exceptions=True,
+        )
         changelist: list[dict] = []
-        for varobj_name in root_varobjs:
-            try:
-                changelist.extend(await self._var_update(varobj_name))
-            except Exception as exc:
-                _log.debug(f"evaluate refresh_all var-update {varobj_name} failed: {exc!r}")
+        for varobj_name, result in zip(root_varobjs, results):
+            if isinstance(result, Exception):
+                _log.debug(f"evaluate refresh_all var-update {varobj_name} failed: {result!r}")
+                continue
+            changelist.extend(result)
 
         await self._apply_watch_changelist(changelist)
 
