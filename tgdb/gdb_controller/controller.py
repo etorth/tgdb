@@ -151,7 +151,9 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
     ``add_console_listener(fn)`` / ``remove_console_listener(fn)`` let extra
     observers (e.g. the ``tgdb.debugger`` scripting API) see console output
     without replacing ``on_console``.  ``is_busy()`` reports whether the
-    inferior is running or any MI request is still in flight.
+    inferior is running or any MI request is still in flight;
+    ``inferior_running`` and ``locals_request_pending()`` report those
+    conditions separately.
 
     Callers should treat everything else as controller internals. Once started,
     the controller owns MI parsing, request bookkeeping, and publication of
@@ -475,6 +477,17 @@ class GDBController(GDBResultMixin, GDBRequestMixin, ParsingMixin, VarobjMixin, 
     def is_busy(self) -> bool:
         """True while the inferior runs or any MI request awaits its reply."""
         return self._inferior_running or bool(self._pending)
+
+
+    @property
+    def inferior_running(self) -> bool:
+        """True between ``*running`` and the next ``*stopped``."""
+        return self._inferior_running
+
+
+    def locals_request_pending(self) -> bool:
+        """True while a frame-locals collection request is in flight."""
+        return self._locals_cancel_token in self._pending
 
 
     def send_input(self, data: str | bytes) -> None:

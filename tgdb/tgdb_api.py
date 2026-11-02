@@ -618,7 +618,7 @@ class TGDBDebugger:
         if app.gdb is None or app.gdb.is_busy():
             return True
         pane = app._locals_pane
-        return pane is not None and pane._reconcile_active > 0
+        return pane is not None and pane.is_reconciling
 
 
 # ---------------------------------------------------------------------------

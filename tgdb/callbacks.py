@@ -446,7 +446,7 @@ class CallbacksMixin:
         register file because it's cheap and the pane already does the
         diffing to highlight changed cells.
         """
-        if self.gdb is None or self.gdb._inferior_running:
+        if self.gdb is None or self.gdb.inferior_running:
             return
         if self._register_pane is None or self._register_pane.parent is None:
             return
@@ -505,14 +505,14 @@ class CallbacksMixin:
         inferior); requesting another collect while either is running
         produces an unbounded feedback loop that eventually trips
         ``call_function_by_hand_dummy``'s ``thread_fsm`` assertion in
-        ``gdb/infcall.c``.  The cancel-token check covers phase (1);
-        ``_locals_pane._reconcile_active`` covers phase (2).
+        ``gdb/infcall.c``.  ``gdb.locals_request_pending()`` covers phase
+        (1); ``_locals_pane.is_reconciling`` covers phase (2).
         """
-        if self.gdb is None or self.gdb._inferior_running:
+        if self.gdb is None or self.gdb.inferior_running:
             return
-        if self.gdb._locals_cancel_token in self.gdb._pending:
+        if self.gdb.locals_request_pending():
             return
-        if self._locals_pane is not None and self._locals_pane._reconcile_active > 0:
+        if self._locals_pane is not None and self._locals_pane.is_reconciling:
             return
 
         coros: list = []

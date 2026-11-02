@@ -163,6 +163,17 @@ class LocalVariablePane(
         return "LOCALS"
 
 
+    @property
+    def is_reconciling(self) -> bool:
+        """True while a ``set_variables`` reconciliation is still running.
+
+        Its ``-var-create`` / ``-var-update`` calls can run pretty-printers
+        that call into the inferior; callers use this to avoid starting
+        another locals collection from the resulting inferior-call events.
+        """
+        return self._reconcile_active > 0
+
+
     def prime_initial(self, variables: list[LocalVariable], frame: Frame | None) -> None:
         """Sync setter for the pane factory.
 
