@@ -67,7 +67,7 @@ class WorkspaceMixin:
                 var_eval_expr=self.gdb.var_evaluate_expression,
             )
         # Sync stash; the pane's async on_mount awaits set_variables.
-        self._locals_pane.prime_initial(self._current_locals, self.gdb.current_frame)
+        self._locals_pane.prime_initial(self._current_locals, self.gdb.current_frame, self.gdb.current_thread_id)
         return self._locals_pane
 
 

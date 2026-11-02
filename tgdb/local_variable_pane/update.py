@@ -5,7 +5,7 @@ State-computation helpers for the local-variable pane.
 from ..gdb_controller import Frame, LocalVariable
 from ..gdb_controller.errors import GDBRequestTimeout
 from ..gdb_controller.types import normalize_addr
-from .shared import BindingEntry, BindingKey, FrameKey, _is_child_of_any, _log, _type_needs_name_fallback
+from .shared import BindingEntry, BindingKey, BindingState, FrameKey, _is_child_of_any, _log, _type_needs_name_fallback
 
 
 class LocalVariablePaneUpdateMixin:
@@ -348,7 +348,7 @@ class LocalVariablePaneUpdateMixin:
         return new_bindings, new_binding_keys, shadowed_keys
 
 
-    def _build_frame_key(self, frame: Frame | None, binding_keys: set[BindingKey]) -> FrameKey:
+    def _build_frame_key(self, frame: Frame | None, thread_id: str, binding_keys: set[BindingKey]) -> FrameKey:
         if frame is None or not frame.func:
             return None
 
@@ -359,7 +359,9 @@ class LocalVariablePaneUpdateMixin:
         # collapses to one FrameKey, so expansion state saved at the deep
         # frame is restored at every outer frame on unwind.  Including the
         # level keeps each recursion depth's expansion slot distinct.
-        return (frame.func, path, frame.level, frozenset(binding_keys))
+        # ``thread_id`` does the same for threads stopped in the same
+        # function at the same level.
+        return (frame.func, path, frame.level, thread_id, frozenset(binding_keys))
 
 
     def _build_removed_bindings(self, current_keys: set[BindingKey], new_binding_keys: set[BindingKey]) -> list[BindingKey]:
@@ -435,7 +437,8 @@ class LocalVariablePaneUpdateMixin:
         if old_frame_key is None or new_frame_key is None:
             return rebind
 
-        if old_frame_key[:3] == new_frame_key[:3]:
+        # Same function, file, level and thread: still the same frame.
+        if old_frame_key[:4] == new_frame_key[:4]:
             return rebind
 
         for binding_name, binding_addr, variable in new_bindings:
@@ -447,7 +450,7 @@ class LocalVariablePaneUpdateMixin:
                 continue
 
             binding = self._bindings.get(key)
-            if binding is None or binding.is_placeholder or binding.pinned:
+            if binding is None or binding.state is not BindingState.NAME_BOUND:
                 continue
 
             rebind.append((binding_name, binding_addr, variable))
@@ -472,7 +475,7 @@ class LocalVariablePaneUpdateMixin:
                 continue
 
             binding = self._bindings.get(key)
-            if binding is None or binding.is_placeholder or binding.pinned:
+            if binding is None or binding.state is not BindingState.NAME_BOUND:
                 continue
 
             # Fixed varobjs for unparseable types (anonymous namespace) are

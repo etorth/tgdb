@@ -653,7 +653,7 @@ class CallbacksMixin:
         self._current_locals = list(variables)
         if self._locals_pane is not None:
             await self._locals_pane.set_variables(
-                self._current_locals, self.gdb.current_frame
+                self._current_locals, self.gdb.current_frame, self.gdb.current_thread_id
             )
 
 

@@ -2,6 +2,7 @@
 Shared helpers and type aliases for the local-variable pane modules.
 """
 
+import enum
 import logging
 from dataclasses import dataclass
 from typing import TypeAlias
@@ -33,7 +34,23 @@ BindingKey: TypeAlias = tuple[str, str]
 BindingEntry: TypeAlias = tuple[str, str, LocalVariable]
 ExpansionSegment: TypeAlias = tuple[str, int]
 ExpansionPath: TypeAlias = tuple[ExpansionSegment, ...]
-FrameKey: TypeAlias = tuple[str, str, int, frozenset[BindingKey]] | None
+# (function, source path, frame level, thread id, binding keys)
+FrameKey: TypeAlias = tuple[str, str, int, str, frozenset[BindingKey]] | None
+
+
+class BindingState(enum.Enum):
+    """How a Locals row is backed by GDB."""
+
+    # Varobj created from ``*(type*)address``: valid in any frame and scope.
+    PINNED = "pinned"
+    # Varobj created by name: bound to the frame selected at creation, so it
+    # must be re-created after a frame / thread switch or re-pinned when
+    # another variable shadows it.
+    NAME_BOUND = "name-bound"
+    # No varobj: uninitialised memory, failed creation, an anonymous-namespace
+    # variable that cannot be created by name yet, or a shadowed row that
+    # could not be re-pinned.
+    PLACEHOLDER = "placeholder"
 
 
 @dataclass(eq=False)
@@ -60,6 +77,16 @@ class Binding:
     varobj: str = ""
     pinned: bool = False
     type: str = ""
+
+
+    @property
+    def state(self) -> BindingState:
+        """Derived from ``varobj`` / ``pinned`` so it can never disagree with them."""
+        if not self.varobj:
+            return BindingState.PLACEHOLDER
+        if self.pinned:
+            return BindingState.PINNED
+        return BindingState.NAME_BOUND
 
 
     @property

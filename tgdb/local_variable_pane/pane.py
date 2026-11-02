@@ -47,7 +47,7 @@ class LocalVariablePane(
         Inject the async callbacks that talk to GDB/MI. This is the dependency
         injection point that makes the pane self-contained and reusable.
 
-    ``set_variables(variables, frame)``
+    ``set_variables(variables, frame, thread_id="")``
         Publish the latest locals snapshot for the current frame. This is the
         main state-mutation API. Call it whenever the inferior stops or when
         the running/stopped state changes.
@@ -156,7 +156,7 @@ class LocalVariablePane(
         # Initial (variables, frame) snapshot stashed by the pane
         # factory (sync) for the pane's async on_mount to consume.
         # Keeps the factory free of fire-and-forget task creation.
-        self._pending_initial: tuple[list[LocalVariable], Frame | None] | None = None
+        self._pending_initial: tuple[list[LocalVariable], Frame | None, str] | None = None
 
 
     def title(self) -> str:
@@ -174,7 +174,7 @@ class LocalVariablePane(
         return self._reconcile_active > 0
 
 
-    def prime_initial(self, variables: list[LocalVariable], frame: Frame | None) -> None:
+    def prime_initial(self, variables: list[LocalVariable], frame: Frame | None, thread_id: str = "") -> None:
         """Sync setter for the pane factory.
 
         The pane factory (``PaneDescriptor.create``) is required by
@@ -182,7 +182,7 @@ class LocalVariablePane(
         Instead it calls this method to stash the latest snapshot;
         ``on_mount`` (async) consumes it once Textual mounts the pane.
         """
-        self._pending_initial = (list(variables), frame)
+        self._pending_initial = (list(variables), frame, thread_id)
 
 
     async def on_mount(self) -> None:
@@ -196,7 +196,12 @@ class LocalVariablePane(
             await self.set_variables(*pending)
 
 
-    async def set_variables(self, variables: list[LocalVariable], frame: Frame | None = None) -> None:
+    async def set_variables(
+        self,
+        variables: list[LocalVariable],
+        frame: Frame | None = None,
+        thread_id: str = "",
+    ) -> None:
         """Publish the latest locals snapshot for the active debugger frame.
 
         This is the main caller-facing mutation API.
@@ -207,6 +212,9 @@ class LocalVariablePane(
             frame: The current frame metadata. Pass ``None`` only when the
                 inferior is running and there is no meaningful current frame to
                 display.
+            thread_id: GDB id of the selected thread.  Frames of different
+                threads are different frames even when function and level
+                match, so name-bound varobjs must be re-created on a switch.
 
         Semantics:
 
@@ -235,4 +243,4 @@ class LocalVariablePane(
 
         self._rebuild_gen += 1
         _log.debug(f"set_variables gen={self._rebuild_gen} count={len(variables)} frame={frame}")
-        await self._update_variables(self._rebuild_gen, frame, self._variables)
+        await self._update_variables(self._rebuild_gen, frame, self._variables, thread_id)

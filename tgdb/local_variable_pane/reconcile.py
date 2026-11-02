@@ -389,7 +389,7 @@ class LocalVariablePaneReconcileMixin:
         return promoted
 
 
-    async def _update_variables(self, gen: int, frame: Frame | None, variables: list[LocalVariable]) -> None:
+    async def _update_variables(self, gen: int, frame: Frame | None, variables: list[LocalVariable], thread_id: str = "") -> None:
         """Incrementally reconcile the locals tree with the current frame."""
         # Increment + decrement live together so a raise between
         # set_variables and the reconcile body cannot leak the counter.
@@ -427,7 +427,7 @@ class LocalVariablePaneReconcileMixin:
 
                 new_bindings, new_binding_keys, shadowed_keys = self._compute_bindings(variables, addrs)
 
-            new_frame_key = self._build_frame_key(frame, new_binding_keys)
+            new_frame_key = self._build_frame_key(frame, thread_id, new_binding_keys)
             current_keys = self._tracked_keys()
 
             self._remove_out_of_scope_placeholders(new_binding_keys)

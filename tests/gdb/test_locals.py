@@ -28,6 +28,33 @@ def test_register_locals_follow_selected_frame(build):
     run_session(build("register_frames.c", "-O2"), body)
 
 
+def test_register_locals_follow_selected_thread(build):
+    """Same function, same frame level, different thread: the frame key must differ."""
+
+    async def body(s):
+        await s.layout("source", "gdb", "locals")
+        await s.run_to("threads.c", "MARK_WORKER")
+        if not str(getattr(s.collected_locals().get("k"), "addr", "")).startswith("register@"):
+            pytest.skip("compiler did not keep k in a register")
+
+        current = int(await s.gdb_value("$_thread"))
+        for thread in (2, 3):
+            if thread == current:
+                continue
+            await s.cli(f"thread {thread}")
+            if await s.gdb_value("$_thread") != str(thread):
+                pytest.skip(f"could not select thread {thread}")
+            pc = await s.gdb_value("$pc")
+            if "worker" not in pc:
+                pytest.skip(f"thread {thread} is not inside worker(): {pc}")
+            assert s.locals_value("k") == await s.gdb_value("k")
+
+        await s.cli(f"thread {current}")
+        assert s.locals_value("k") == await s.gdb_value("k")
+
+    run_session(build("threads.c", "-O2", "-pthread"), body)
+
+
 def test_reference_kept_across_finish_keeps_updating(build):
     """Regression: a root reported out of scope once was never refreshed again."""
 

@@ -81,13 +81,16 @@ class ParsingMixin:
             if not self._inferior_running:
                 await self.request_current_threads(report_error=False)
         elif cls == "thread-selected":
+            previous_thread_id = self.current_thread_id
             thread_id = results.get("id") or results.get("thread-id")
             if isinstance(thread_id, str):
                 self.current_thread_id = thread_id
             frame_data = results.get("frame")
             if isinstance(frame_data, dict) and frame_data:
                 parsed = self._parse_frame(frame_data)
-                if self.current_frame != parsed:
+                # Two threads stopped at the same PC have equal Frame
+                # records; a thread switch still changes every pane.
+                if self.current_frame != parsed or self.current_thread_id != previous_thread_id:
                     _log.info(f"thread-selected frame={parsed.file}:{parsed.line} func={parsed.func}")
                     self.current_frame = parsed
                     path = parsed.fullname or parsed.file
