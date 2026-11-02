@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "A Python reimplementation of cgdb — a curses front-end to GDB"
 requires-python = ">=3.11"
 dependencies = [
-    "textual>=2.0",
+    # Relies on Textual 8 behaviour (message-loop handlers, run_test).
+    "textual>=8,<9",
     "pygments>=2.18",
     "pyte>=0.8",
     "ptyprocess>=0.7",
@@ -16,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+test = ["pytest>=8", "ruff>=0.17"]
 
 [project.scripts]
 tgdb = "tgdb.__main__:main"
@@ -31,3 +32,12 @@ addopts = "-ra"
 markers = [
     "gdb: needs a real gdb and C/C++ compiler (POSIX only); skipped otherwise",
 ]
+
+[tool.ruff]
+# Standalone GDB scripts that import the ``gdb`` module.
+extend-exclude = ["known_gdb_bug_reproduce"]
+
+[tool.ruff.lint]
+# Pyflakes (unused / undefined names) plus syntax errors for the declared
+# requires-python; style is covered by .github/instructions instead.
+select = ["F", "E9"]

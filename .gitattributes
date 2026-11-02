@@ -1,0 +1,5 @@
+# Store text files with LF; shell scripts and Python run from WSL/Linux
+# must not pick up CRLF from a Windows checkout.
+* text=auto eol=lf
+*.png binary
+*.svg text

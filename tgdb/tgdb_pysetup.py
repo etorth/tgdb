@@ -598,7 +598,6 @@ def _collect_locals(cancel_token=0):
             _finish_token(cancel_token)
             return "cancelled"
 
-        block_start = hex(block.start)
         for symbol in block:
             if not (symbol.is_variable or symbol.is_argument):
                 continue

@@ -10,12 +10,9 @@ from typing import TypeAlias
 from textual.widgets.tree import TreeNode
 
 from ..gdb_controller import LocalVariable
-from ..varobj_tree.tree import (
-    _ACCESS_SPECIFIERS,
-    _is_child_of_any,
-    _is_collection_displayhint,
-    _suppress_children,
-)
+# Re-exported for the sibling modules (``import X as X`` marks a re-export).
+from ..varobj_tree.tree import _is_child_of_any as _is_child_of_any
+from ..varobj_tree.tree import _suppress_children as _suppress_children
 
 _log = logging.getLogger("tgdb.locals")
 

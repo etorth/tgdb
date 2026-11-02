@@ -16,9 +16,8 @@ Public implementation of the disassembly-pane package.
   through the listing.
 """
 
-import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from collections.abc import Callable
 
 from pygments.lexers.asm import GasLexer

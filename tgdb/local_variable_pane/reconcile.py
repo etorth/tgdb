@@ -341,7 +341,7 @@ class LocalVariablePaneReconcileMixin:
             # Promote: remove placeholder, create real varobj by name.
             # Multiple fixed varobjs for the same name at different addresses
             # can coexist safely — each is permanently bound to its stack slot.
-            marker_active = self._binding_marker_active(key, shadowed_keys)
+            # (_sync_shadow_labels sets the row's shadow marker afterwards.)
             self._remove_placeholder_node(key)
 
             try:

@@ -386,7 +386,7 @@ class CommandsMixin:
         size: int | None,
     ) -> None:
         """Insert a fresh Memory pane directly below *target* and load *addr*."""
-        from .workspace import PaneContainer, EmptyPane
+        from .workspace import PaneContainer
         parent = target.parent
         if not isinstance(parent, PaneContainer):
             return

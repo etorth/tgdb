@@ -20,12 +20,9 @@ import asyncio
 from textual.app import App
 from textual.widget import Widget
 
-from .command_line_bar import CommandLineBar
 from .config import Config, ConfigParser
-from .context_menu import ContextMenu
 from .disasm_pane import DisasmPane
 from .evaluate_pane import EvaluatePane
-from .file_dialog import FileDialog
 from .gdb_controller import (
     GDBController,
     Frame,

@@ -13,7 +13,6 @@ from textual.widget import Widget
 
 from .history import HistoryMixin
 from .keys import CommandLineKeyMixin
-from .messages import CommandCancel, CommandSubmit, MessageDismissed
 from .render import RenderMixin
 from .state import CommandLineStateMixin
 from .task import CommandLineTaskMixin

@@ -12,6 +12,7 @@
   python -m pytest tests/unit   # fast, no GDB
   python -m pytest -m gdb       # GDB integration tests only
   ```
+- Lint with `python -m ruff check .` (pyflakes and syntax rules for the declared `requires-python`; configured in `pyproject.toml`). `pre-commit install` runs it on every commit.
 - `tests/gdb/` runs the real `TGDBApp` headless in-process (Textual `run_test`) against real GDB. Write new integration tests with `tests/gdb/harness.py`, which wraps the public scripting API (`tgdb.screen`, `tgdb.debugger` in `tgdb/tgdb_api.py`): `debugger.execute()` returns once GDB shows its prompt again and the panes are idle, and `debugger.evaluate()` reads the ground truth back from GDB. Prefer extending `tgdb.debugger` over reaching into tgdb internals; keep any unavoidable white-box access inside `harness.py`, marked as such.
 - Add a regression test with every bug fix: a unit test under `tests/unit/` for pure logic, or a GDB test with a fixture program under `tests/gdb/fixtures/` (mark lines with unique `// MARK_...` comments and use `Session.line_of()`).
 - Sanity-check the CLI entry point:
@@ -41,21 +42,21 @@
 
 ## High-level architecture
 
-- `tgdb/__main__.py` is a thin cgdb-compatible CLI wrapper. It parses `-d`, `-w`, `-r`, `--args`, and `--cd`, then launches `TGDBApp`.
+- `tgdb/__main__.py` is a thin cgdb-compatible CLI wrapper. It parses its own options (`-d`, `-r`, `--args`, `--cd`, `--input`, `--batch`, `--headless`, …), forwards everything else to GDB in order, then launches `TGDBApp`.
 - `tgdb/app.py` is the top-level orchestration module. It defines `TGDBApp` and imports all mixin layers and sibling packages directly. The implementation is split across `core.py`, `commands.py`, `callbacks.py`, `keys.py`, `layout.py`, and `workspace_actions.py`, which keep the app lifecycle, command routing, callbacks, key dispatch, split logic, and workspace-tree actions as separate top-level files. `workspace.py` holds the workspace layout widgets (`PaneContainer`, `EmptyPane`, `Splitter`, `DragResize`, `TitleBarResized`, `PaneDescriptor`).
 - `tgdb/gdb_controller/` is the debugger bridge package. `controller.py` exposes `GDBController`, while `types.py`, `requests.py`, `results.py`, `parsing.py`, `varobj.py`, and `miparser.py` split the controller internals by responsibility. It uses **two PTYs**:
   - the primary PTY is the normal GDB console stream, forwarded as raw bytes to the bottom pane;
   - the secondary PTY is a `new-ui mi ...` channel used for structured MI records such as stopped frames, source files, and breakpoints.
 - `tgdb/gdb_widget/` is the GDB console package. `pane.py` exposes `GDBWidget`, while `content.py`, `screen.py`, and `scroll.py` keep the terminal-emulation and scroll-mode internals behind the historical `tgdb.gdb_widget` import surface.
-- `tgdb/source_widget/` is the source-pane package. `pane.py` exposes `SourceView`, while `data.py`, `messages.py`, and `rendering.py` hold the supporting source data structures, source-pane messages, and rendering logic used by the pane inside the package boundary.
-- `tgdb/local_variable_pane/` is a small package, not a single file. `pane.py` exposes `LocalVariablePane`, while `shared.py`, `support.py`, `tree.py`, `update.py`, and `reconcile.py` split the locals-pane internals by responsibility.
+- `tgdb/source_widget/` is the source-pane package. `pane.py` exposes `SourceView`, while `content.py`, `data.py`, `keys.py`, `messages.py`, `navigation.py`, and `rendering.py` hold the content widget, source data structures, key handling, source-pane messages, and rendering logic used by the pane inside the package boundary.
+- `SourceView` and `GDBWidget` are thin `DelegatingPane` wrappers (`pane_base.py`) around an internal content widget: state the content widget creates in `__init__` is read and written through the wrapper automatically.
+- `tgdb/local_variable_pane/` is a small package, not a single file. `pane.py` exposes `LocalVariablePane`, while `shared.py` (the per-row `Binding` record), `support.py` (the only code that changes bindings), `update.py`, and `reconcile.py` split the locals-pane internals by responsibility. `tgdb/varobj_tree/` is the base it shares with the evaluate pane.
 - The other auxiliary panes now follow the same package-per-pane layout too: `tgdb/stack_pane/`, `tgdb/thread_pane/`, `tgdb/register_pane/`, `tgdb/evaluate_pane/`, `tgdb/memory_pane/`, and `tgdb/disasm_pane/` each expose a single public pane type from `pane.py`.
-- `tgdb/status_bar.py` is not just display chrome; it owns `:` command entry, `/` and `?` prompts, focus markers, and drag-resize interaction for horizontal splits.
-- `tgdb/command_line_bar/` is the bottom command/status package. `bar.py` exposes `CommandLineBar`, while `history.py`, `keys.py`, `messages.py`, `render.py`, `state.py`, and `task.py` keep the prompt, history, rendering, and task internals private behind the package entry point.
+- `tgdb/command_line_bar/` is the bottom command/status package. `bar.py` exposes `CommandLineBar`, which owns `:` command entry and the `/` and `?` prompts, while `history.py`, `keys.py`, `messages.py`, `popup.py`, `render.py`, `state.py`, and `task.py` keep the prompt, history, completion popup, rendering, and task internals private behind the package entry point.
 - `tgdb/context_menu/` is the cascading workspace context-menu package. `menu.py` exposes `ContextMenu`, `model.py` holds the public `ContextMenuItem` tree plus internal layout records, and `panel.py` renders the popup panels as private implementation detail widgets.
-- `tgdb/file_dialog/` is the full-screen source-file picker package. `dialog.py` exposes `FileDialog`, while `messages.py`, `keys.py`, `search.py`, and `view.py` keep its search/navigation internals self-contained.
+- `tgdb/file_dialog/` is the full-screen source-file picker package. `dialog.py` exposes `FileDialog`, while `keys.py` and `view.py` keep its search/navigation internals self-contained.
 - `tgdb/config/`, `tgdb/highlight_groups.py`, and `tgdb/key_mapper.py` together implement cgdb-style config parsing:
-  - `ConfigParser` lives in `config/parser.py`, while `types.py`, `shared.py`, `execution.py`, `keys.py`, `options.py`, `commands.py`, and `python_exec.py` keep the config internals self-contained behind the `tgdb.config` package entry point;
+  - `ConfigParser` lives in `config/parser.py`, while `types.py`, `execution.py`, `keys.py`, `options.py`, `commands.py`, and `python_exec.py` keep the config internals self-contained behind the `tgdb.config` package entry point;
   - `ConfigParser` reads `$XDG_CONFIG_HOME/tgdb/tgdbrc` (default `~/.config/tgdb/tgdbrc`);
   - `HighlightGroups` keeps cgdb-compatible group names and color semantics;
   - `KeyMapper` resolves `:map` / `:imap` expansions using a trie with timeout behavior.

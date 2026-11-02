@@ -311,15 +311,19 @@ map <F10> :step<Enter>
 ```
 tgdb/
 ├── __main__.py          CLI entry point (argparse, launches app)
-├── app/                 Main application package — TGDBApp + workspace tree
-├── gdb_controller/      GDB bridge package — controller, MI parser, callbacks
+├── app.py               TGDBApp, assembled from core.py, commands.py, callbacks.py,
+│                        keys.py, layout.py and workspace_actions.py mixins
+├── workspace.py         Workspace split containers and pane descriptors
+├── tgdb_api.py          Python scripting API (tgdb.screen, tgdb.debugger)
+├── tgdb_pysetup.py      Helper code loaded into GDB's embedded Python
+├── gdb_controller/      GDB bridge package — controller, MI parser, side channel
 ├── source_widget/       Source code viewer package (SourceView + internal helpers)
 ├── gdb_widget/          GDB console package — pane, screen, scroll mode
-├── command_line_bar/    Command/status bar package
+├── command_line_bar/    Command/status bar package (: commands, / ? prompts)
 ├── context_menu/        Cascading workspace context-menu package
-├── status_bar.py        Status bar widget
 ├── file_dialog/         File picker dialog package
-├── config/             Configuration package (tgdbrc parser + helpers)
+├── *_pane/, varobj_tree/  Locals, evaluate, registers, stack, threads, memory, disasm panes
+├── config/              Configuration package (tgdbrc parser + helpers)
 ├── highlight_groups.py  Highlight group table and colour management
 └── key_mapper.py        Key mapping with trie + timeout (KUI)
 ```
