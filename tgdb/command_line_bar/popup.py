@@ -24,6 +24,7 @@ not handle keystrokes — the command-line bar continues to drive Tab /
 Shift-Tab / Enter / Escape.
 """
 
+from rich.cells import cell_len, set_cell_size
 from rich.segment import Segment
 from rich.style import Style as RichStyle
 from textual.strip import Strip
@@ -127,7 +128,7 @@ class CompletionPopup(Widget):
 
 
     def _relayout(self) -> None:
-        max_item_w = max(len(item) for item in self._items)
+        max_item_w = max(cell_len(item) for item in self._items)
         # +2 for one-cell padding on each side.
         screen_w = max(1, self.app.size.width)
         self._popup_w = min(max_item_w + 2, screen_w)
@@ -158,11 +159,9 @@ class CompletionPopup(Widget):
             return Strip([Segment(" " * width, item_rich)], width)
 
         item = self._items[idx]
-        cell = " " + item
-        if len(cell) < width:
-            cell += " " * (width - len(cell))
-        else:
-            cell = cell[:width]
+        # Exactly ``width`` terminal cells, so wide characters (CJK file
+        # names) neither overflow the popup nor leave it ragged.
+        cell = set_cell_size(" " + item, width)
 
         if idx == self._selected:
             row_rich = sel_rich

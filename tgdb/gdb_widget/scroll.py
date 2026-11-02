@@ -148,6 +148,7 @@ class ScrollMixin:
     def enter_scroll_mode(self) -> None:
         self._scroll_mode = True
         self._scroll_offset = 0
+        self._search_line = None
         self.post_message(ScrollModeChange(True))
         self.refresh()
 
@@ -156,6 +157,7 @@ class ScrollMixin:
         self._scroll_mode = False
         self._scroll_offset = 0
         self._h_offset = 0
+        self._search_line = None
         self.post_message(ScrollModeChange(False))
         self.refresh()
 
@@ -163,11 +165,13 @@ class ScrollMixin:
     def _scroll_up(self, n: int = 1) -> None:
         max_off = len(self._scrollback)
         self._scroll_offset = min(max_off, self._scroll_offset + n)
+        self._search_line = None
         self.refresh()
 
 
     def _scroll_down(self, n: int = 1) -> None:
         self._scroll_offset = max(0, self._scroll_offset - n)
+        self._search_line = None
         self.refresh()
 
 
@@ -309,7 +313,12 @@ class ScrollMixin:
         except re.error:
             return False
         h = self._visible_height()
-        cur = max(0, total - h - self._scroll_offset)
+        # Continue from the previous match.  The viewport top is not enough:
+        # a match in the last screenful cannot scroll the view, so ``n``
+        # would find the same line again forever.
+        cur = self._search_line
+        if cur is None or not 0 <= cur < total:
+            cur = max(0, total - h - self._scroll_offset)
         if forward:
             if self.wrapscan:
                 wrap_part = list(range(0, cur + 1))
@@ -325,6 +334,7 @@ class ScrollMixin:
         for idx in order:
             if rx.search(lines[idx].plain):
                 self._scroll_offset = max(0, total - h - idx)
+                self._search_line = idx
                 self.refresh()
                 return True
         return False
@@ -350,6 +360,7 @@ class ScrollMixin:
             if self._await_g:
                 self._await_g = False
                 self._scroll_offset = len(self._scrollback)
+                self._search_line = None
                 self.refresh()
             else:
                 self._await_g = True
@@ -397,9 +408,11 @@ class ScrollMixin:
             self._scroll_down(self._visible_height() // 2)
         elif char == "G" or key in ("f12", "end"):
             self._scroll_offset = 0
+            self._search_line = None
             self.refresh()
         elif key in ("f11", "home"):
             self._scroll_offset = len(self._scrollback)
+            self._search_line = None
             self.refresh()
         elif key == "apostrophe":
             # '' prefix handled at app level; '.' → jump to bottom.

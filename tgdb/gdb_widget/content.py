@@ -13,6 +13,7 @@ from collections.abc import Callable
 import pyte
 from textual.widget import Widget
 from textual import events
+from rich.cells import set_cell_size
 from rich.text import Text
 
 from ..highlight_groups import HighlightGroups
@@ -52,6 +53,9 @@ class _GDBContent(ScrollMixin, Widget):
         self._scroll_offset: int = 0
         self._h_offset: int = 0
         self._search_pattern: str = ""
+        # Line index of the last scroll-mode search match; the next n / N
+        # continues from it.  None after any manual scroll.
+        self._search_line: int | None = None
         self._search_forward: bool = True
         self._search_active: bool = False
         self._search_buf: str = ""
@@ -248,7 +252,9 @@ class _GDBContent(ScrollMixin, Widget):
         row = _row_to_text(
             self._screen.buffer.get(cy), self._pyte_cols, use_color=False
         ).plain
-        before_cursor = row[: self._screen.cursor.x]
+        # ``cursor.x`` is a cell column; a wide character is one string
+        # index but two cells, so cut by cells, not by index.
+        before_cursor = set_cell_size(row, self._screen.cursor.x)
         return before_cursor.endswith("(gdb) ")
 
 

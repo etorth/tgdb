@@ -81,21 +81,19 @@ class RenderMixin:
 
         full = prefix + buf
         cursor_in_full = len(prefix) + cursor
-
-        # Scroll the view so the cursor is always visible
-        if cursor_in_full >= w:
-            start = cursor_in_full - w + 1
+        if cursor_in_full < len(full):
+            ch = full[cursor_in_full]
         else:
-            start = 0
+            ch = " "
 
-        # Visible slice, padded to exactly w chars
-        visible = full[start:]
-        if len(visible) < w:
-            visible += " " * (w - len(visible))
-        else:
-            visible = visible[:w]
-
-        cursor_col = cursor_in_full - start  # column of cursor in visible slice
+        # Scroll (by characters) until the text before the cursor plus the
+        # cursor cell fits in w terminal cells.  Measured in cells, so wide
+        # characters (CJK, emoji) cannot push the cursor off-screen.
+        start = 0
+        while start < cursor_in_full and cell_len(full[start:cursor_in_full]) + cell_len(ch) > w:
+            start += 1
+        before = full[start:cursor_in_full]
+        after = _pad_crop(full[cursor_in_full + 1:], max(0, w - cell_len(before) - cell_len(ch)))
 
         # Build cursor style: toggle 'reverse' so the cursor always contrasts
         # with the surrounding text. If the bar style already uses 'reverse'
@@ -119,16 +117,11 @@ class RenderMixin:
                 cursor_style = "reverse"
 
         t = Text(no_wrap=True, overflow="crop")
-        if cursor_col > 0:
-            t.append(visible[:cursor_col], style)
-        if cursor_col < len(visible):
-            ch = visible[cursor_col]
-        else:
-            ch = " "
+        if before:
+            t.append(before, style)
         t.append(ch, cursor_style)
-        after_col = cursor_col + 1
-        if after_col < len(visible):
-            t.append(visible[after_col:], style)
+        if after:
+            t.append(after, style)
         return t
 
 

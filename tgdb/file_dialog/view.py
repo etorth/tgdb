@@ -2,7 +2,25 @@
 
 import math
 
+from rich.cells import cell_len, set_cell_size
 from rich.text import Text
+
+
+def _drop_left_cells(text: str, cells: int) -> str:
+    """Remove *cells* display cells from the left of *text*.
+
+    A wide character cut in half by the edge shows its visible half as
+    ``?``, the same convention as the source pane.
+    """
+    used = 0
+    for index, char in enumerate(text):
+        if used >= cells:
+            return text[index:]
+        width = cell_len(char)
+        if used + width > cells:
+            return "?" + text[index + 1:]
+        used += width
+    return ""
 
 
 class FileDialogViewMixin:
@@ -50,7 +68,8 @@ class FileDialogViewMixin:
 
 
     def _scroll_h(self, delta: int) -> None:
-        max_width = max((len(path) for path in self._files), default=0)
+        # ``_sel_col`` is measured in display cells, like the source pane.
+        max_width = max((cell_len(path) for path in self._files), default=0)
         self._sel_col = max(0, min(max_width, self._sel_col + delta))
         self.refresh()
 
@@ -78,11 +97,11 @@ class FileDialogViewMixin:
                 if row_index:
                     result.append("\n")
                 if row_index == message_row and message:
-                    pad = max(0, (width - len(message)) // 2)
+                    pad = max(0, (width - cell_len(message)) // 2)
                     result.append(" " * pad, style=self.hl.style("Normal"))
                     result.append(message, style=self.hl.style("CommandLine"))
                     result.append(
-                        " " * max(0, width - pad - len(message)),
+                        " " * max(0, width - pad - cell_len(message)),
                         style=self.hl.style("Normal"),
                     )
                 else:
@@ -90,7 +109,7 @@ class FileDialogViewMixin:
 
             result.append("\n")
             bar = " Esc=quit" if self._query_pending else " q=quit"
-            result.append(bar[:width].ljust(width), style=self.hl.style("CommandLine"))
+            result.append(set_cell_size(bar, width), style=self.hl.style("CommandLine"))
             return result
 
         start = self._scroll_start()
@@ -105,11 +124,7 @@ class FileDialogViewMixin:
                 result.append("│", style="bold")
                 continue
 
-            filename = self._files[file_index]
-            if self._sel_col < len(filename):
-                display_name = filename[self._sel_col :]
-            else:
-                display_name = ""
+            display_name = _drop_left_cells(self._files[file_index], self._sel_col)
 
             if file_index == self._sel:
                 result.append(
@@ -133,5 +148,5 @@ class FileDialogViewMixin:
         else:
             current = self._sel + 1 if self._sel >= 0 else 0
             bar = f" {current}/{file_count}  j/k=move  Enter=open  /=search  q=quit"
-        result.append(bar[:width].ljust(width), style=self.hl.style("CommandLine"))
+        result.append(set_cell_size(bar, width), style=self.hl.style("CommandLine"))
         return result

@@ -12,6 +12,7 @@ import os
 import re
 from typing import TYPE_CHECKING
 
+from rich.cells import cell_len
 from textual.widget import Widget
 
 from ..gdb_controller import Breakpoint
@@ -27,6 +28,28 @@ if TYPE_CHECKING:
 
 
 _log = logging.getLogger("tgdb.source")
+
+
+def expand_tabs_cells(line: str, tabstop: int) -> str:
+    """Expand tabs to the next multiple of *tabstop* display cells.
+
+    ``str.expandtabs`` counts characters, so a tab after wide characters
+    (CJK, emoji) would stop at a different column than in a terminal.
+    """
+    if "\t" not in line:
+        return line
+    tabstop = max(1, tabstop)
+    parts: list[str] = []
+    column = 0
+    for char in line:
+        if char == "\t":
+            spaces = tabstop - column % tabstop
+            parts.append(" " * spaces)
+            column += spaces
+        else:
+            parts.append(char)
+            column += cell_len(char)
+    return "".join(parts)
 
 
 class SourceFileMixin:
@@ -60,7 +83,7 @@ class SourceFileMixin:
             # "\r\n" / "\r").  ``str.splitlines()`` also breaks on form
             # feed, "\x1c"-"\x1e", "\x85", "\u2028" and "\u2029", which
             # would shift every following line number away from GDB's.
-            lines = content.expandtabs(self.tabstop).split("\n")
+            lines = [expand_tabs_cells(line, self.tabstop) for line in content.split("\n")]
             if lines and lines[-1] == "":
                 lines.pop()
             if not lines:
